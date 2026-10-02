@@ -54,8 +54,18 @@ BC_PROMPT = (
     "'that makes sense', 'got it', 'right', 'sure', 'ha, yeah', 'that's great', 'oh, I see'. If they have said "
     "too little so far to react to, or nothing in their words calls for a specific reaction, use a neutral hum "
     "such as 'mm-hm' or 'mhm'. Do NOT answer, do NOT ask a real question, do NOT continue their sentence, do "
-    "NOT take the floor. Plain spoken words only, no markdown or symbols. Just the short reaction.")
+    "NOT take the floor. Always react in the same language the user is speaking. Plain spoken words only, "
+    "no markdown or symbols. Just the short reaction.")
 RECENT_ACKS = 3
+# Few-shot turns for the backchannel prompt. A 4B model copies the English examples in BC_PROMPT over an
+# abstract "use the user's language" rule; showing reactions in several languages fixes that.
+BC_SHOTS = [
+    ("The user is currently saying: \"I finally finished my first marathon last weekend\"", "wow, nice!"),
+    ("The user is currently saying: \"у меня сегодня машина сломалась прямо по дороге на работу\"", "ой, нет"),
+    ("The user has only said a few words so far: \"so I\"", "mm-hm"),
+    ("The user has only said a few words so far: \"ну вот\"", "угу"),
+    ("The user is currently saying: \"ayer por fin aprobé el examen de conducir\"", "¡qué bien!"),
+]
 
 
 def _text(events):
@@ -224,7 +234,10 @@ class Mouth:
             said = f"The user has only said a few words so far: \"{user}\""
         else:
             said = f"The user is currently saying: \"{user}\""
-        messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": said}]
+        messages = [{"role": "system", "content": sys_prompt}]
+        for q, a in BC_SHOTS:
+            messages += [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
+        messages.append({"role": "user", "content": said})
         text = _text(self.llm.stream(messages, max_new=self.bc_max_new, stop_flag=stop_flag)).strip()
         if text:
             self.recent_acks.append(text)
