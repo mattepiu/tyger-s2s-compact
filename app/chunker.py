@@ -15,7 +15,7 @@ TTS_SYS = ("You are a helpful voice assistant talking with the user by voice. Re
 # Sanitizer: keep letters of ANY script (Cyrillic, CJK, Latin, ...) + digits + basic speakable punctuation,
 # strip markdown/symbols/emoji. \w is Unicode-aware in Python 3, so Russian etc. survive for multilingual TTS
 # (the old [A-Za-z] whitelist silently dropped all non-Latin text before it reached the TTS).
-_KEEP = re.compile(r"[^\w\s.,!?;:'\"()\-]", re.UNICODE)
+_KEEP = re.compile(r"[^\w\s.,!?;:'\"()\-$%]", re.UNICODE)   # $ and % carry meaning ("0.50$", "50%")
 # Clause dashes -> comma (a pause cue). "Las-Palmas" (unspaced hyphen) and ranges like "5 - 10" / "5–10"
 # (digit on both sides) are left alone.
 _DASH = re.compile(r"\s*[—–]\s*|\s+-(?:\s+|$)")

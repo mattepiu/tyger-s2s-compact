@@ -127,6 +127,11 @@ def test_dashes():
     assert say_clean("Привет — мир") == "Привет, мир"
 
 
+def test_keeps_dollar_and_percent():
+    assert say_clean("It costs 0.50$ or $2, about 50% off.") == "It costs 0.50$ or $2, about 50% off."
+    assert say_clean("**Bold** #tag 🎉 done") == "Bold tag done"
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in list(globals().items()):
