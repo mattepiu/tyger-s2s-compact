@@ -88,6 +88,10 @@ class Mouth:
         self.acks = {}
         log.info("warming TTS (voice=%s, contextual_acks=%s)", self.voice, self.contextual_acks)
         self.tts.warmup()
+        # first request with the tools prompt is cold (~490 ms to first token vs ~55 ms after) -> pay it here
+        for _ in self.llm.stream([{"role": "system", "content": TTS_TOOLS_SYS}, {"role": "user", "content": "Hi."}],
+                                 tools=TOOLS, max_new=8):
+            pass
         if not self.contextual_acks:      # canned acks are a fallback only; skip the pre-render otherwise
             self._render_acks()
 
@@ -259,13 +263,19 @@ def serve(m, conn):
         stop.clear()
         try:
             if tag == "bc":
-                for kind, val in m.stream_bc(turn.get("partial", ""), stop_flag=stop.is_set):
+                t0 = time.perf_counter(); t_aud = None; partial = turn.get("partial", "")
+                for kind, val in m.stream_bc(partial, stop_flag=stop.is_set):
                     if kind == "text":
                         send_msg(conn, b"X", {"text": val, "bc": True})
                     elif kind == "audio":
+                        t_aud = t_aud or time.perf_counter() - t0
                         send_msg(conn, b"A", val.tobytes())
                     elif kind == "done":
                         send_msg(conn, b"D", {"text": val, "bc": True})
+                        # counts + timing only, never the words
+                        log.info("backchannel: %s partial_chars=%d ack_chars=%d first-audio %.0fms",
+                                 "contextual" if m.contextual_acks else "canned", len(partial), len(val),
+                                 (t_aud or 0) * 1e3)
             else:
                 t0 = time.perf_counter(); t_txt = t_aud = None
                 for kind, val in m.stream_turn(turn["transcript"], stop_flag=stop.is_set):

@@ -43,6 +43,22 @@ def mouth_turn(sock, transcript, label, keep_audio=False):
     return samples, text, wav
 
 
+def mouth_backchannel(sock, partial):
+    """C frame with an ASR partial -> a short contextual ack (text + audio)."""
+    send_msg(sock, b"C", {"partial": partial})
+    text = ""; audio = 0; t0 = time.time(); first = None
+    while True:
+        kind, payload = recv_msg(sock)
+        if kind is None:
+            break
+        if kind == b"A":
+            first = first or time.time() - t0; audio += len(payload)
+        elif kind == b"D":
+            text = json.loads(payload).get("text", ""); break
+    print(f"  [backchannel] first-audio={(first*1e3 if first else -1):.0f}ms ack={text!r}")
+    return text, audio
+
+
 def mouth_session(cfg):
     host, port = cfg["server"]["mouth_host"], int(cfg["server"]["mouth_port"])
     s = socket.create_connection((host, port), timeout=120)
@@ -57,7 +73,9 @@ def test_mouth(cfg):
     n1, _, speech = mouth_turn(s, "Hi there, how are you today?", "plain", keep_audio=True)
     n2, t2, _ = mouth_turn(s, "What's the weather in Paris right now?", "tavily-weather")
     n3, t3, _ = mouth_turn(s, "Please set a reminder to call mom at six pm tomorrow.", "placeholder-reminder")
+    bc_text, bc_audio = mouth_backchannel(s, "so yesterday I finally got the job offer I was hoping for and")
     s.close()
+    assert bc_text and bc_audio > 0, "backchannel produced no ack text/audio"
     ok = n1 > 0 and n2 > 0 and n3 > 0
     # the placeholder reply should NOT claim it was done; ideally admits it isn't connected
     admits = any(w in t3.lower() for w in ("not connected", "isn't connected", "can't", "cannot",
@@ -104,29 +122,39 @@ def test_ears(cfg, speech16):
         url = f"http://127.0.0.1:{port}/ws"
         async with aiohttp.ClientSession() as sess:
             async with sess.ws_connect(url, max_msg_size=0) as ws:
-                endpoint = False; audio = 0
+                endpoint = False; audio = 0; t_first = t_done = None
                 hop = 1600  # 100 ms of 16k f32
-                async def feed():
-                    for i in range(0, len(x), hop):
-                        await ws.send_bytes(x[i:i+hop].tobytes()); await asyncio.sleep(0.01)
+                async def feed():   # real-time mic: speech, then silence for as long as the test runs
+                    i = 0
+                    while True:
+                        chunk = x[i:i+hop] if i < len(x) else np.zeros(hop, np.float32)
+                        await ws.send_bytes(chunk.tobytes()); i += hop
+                        await asyncio.sleep(hop / 16000)
                 ft = asyncio.create_task(feed())
                 t0 = time.time()
-                while time.time() - t0 < 60:
+                while time.time() - t0 < 90:
                     msg = await ws.receive()
                     if msg.type == aiohttp.WSMsgType.BINARY:
-                        audio += len(msg.data)
+                        if endpoint:                      # reply audio only (backchannels play before it)
+                            audio += len(msg.data); t_first = t_first or time.time()
                     elif msg.type == aiohttp.WSMsgType.TEXT:
                         m = json.loads(msg.data)
                         if m.get("type") == "endpoint":
                             endpoint = True
+                        if m.get("type") == "backchannel":
+                            print(f"  backchannel during speech: {m.get('text')!r}")
                         if m.get("type") == "turn_done":
-                            break
+                            t_done = time.time(); break
                     elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                         break
                 ft.cancel()
-                print(f"  endpoint_fired={endpoint} reply_audio={audio//4/24000:.2f}s")
+                secs = audio // 4 / 24000
+                held = (t_done - t_first) if (t_done and t_first) else -1
+                print(f"  endpoint_fired={endpoint} reply_audio={secs:.2f}s first-audio->turn_done={held:.2f}s")
                 assert endpoint, "no endpoint fired from the speech wav"
                 assert audio > 0, "no reply audio returned"
+                # the turn must stay open while the reply PLAYS (barge stays live), not end when generation does
+                assert held >= secs - 0.3, f"turn_done after {held:.2f}s but reply plays {secs:.2f}s"
         print("  EARS smoke: PASS")
     print("== EARS smoke ==")
     asyncio.run(run())

@@ -186,7 +186,7 @@ function onEvent(ev){
     bar('yfill',m.yield||0); $('yval').textContent=(m.yield||0).toFixed(2);
     bar('bcfill',m.bc||0); $('bcval').textContent=(m.bc||0).toFixed(2); }
   else if(m.type==='threshold'){ setThresholdUI(m.attr,m.value); if(m.attr==='ep_deb'&&$('v_ep_deb')) $('v_ep_deb').textContent=m.value; }
-  else if(m.type==='endpoint'){ nextPlay=0; replyDiv=null; }
+  else if(m.type==='endpoint'){ stopPlayback(); replyDiv=null; }  // never let a new reply overlap an old one
   else if(m.type==='reply'){ setState('SPEAK'); showReply(m.text); }
   else if(m.type==='turn_done'){ setState('idle'); replyDiv=null; }
   else if(m.type==='barge'){ stopPlayback(); flashBarge(); setState('LISTENING'); }

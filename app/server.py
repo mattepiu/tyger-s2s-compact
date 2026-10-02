@@ -27,6 +27,7 @@ log = logging.getLogger("ears")
 HERE = Path(__file__).resolve().parent
 STATIC = HERE.parent / "static"
 HOP_N = int(HOP_FRAMES * FRAME_S * ENC_SR)     # samples per hop (320 ms @ 16 kHz = 5120)
+PLAYBACK_MARGIN_S = 0.25                        # slack for network + client scheduling on top of play_until
 EXEC = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
 EARS = None
@@ -80,9 +81,14 @@ async def ws_handler(request):
     await loop.run_in_executor(EXEC, EARS.reset)
     mp = CFG["server"]
     buf = np.zeros(0, np.float32)
+    # "speaking" lasts until the client has finished PLAYING the reply, not until the MOUTH has finished
+    # generating it: the TTS runs several times faster than real time, so most of a long reply is still
+    # queued in the browser when the MOUTH says done (D). play_until estimates the client's playback end;
+    # the D is held (done_task) until then so barge detection + the 2nd ear stay live over the audible reply.
     st = {"speaking": False, "reset": False, "halting": False, "pending": None,
           "bc_active": False, "agent_buf": np.zeros(0, np.float32),
-          "turn_t0": None, "await_onset": False, "barge_t0": None, "bc_t0": None}
+          "turn_t0": None, "await_onset": False, "barge_t0": None, "bc_t0": None,
+          "play_until": 0.0, "mouth_done": False, "done_task": None}
     try:
         m_reader, m_writer = await asyncio.open_connection(mp["mouth_host"], int(mp["mouth_port"]))
         have_mouth = True
@@ -98,7 +104,31 @@ async def ws_handler(request):
 
     async def send_turn(transcript):
         st["speaking"] = True; st["turn_t0"] = time.perf_counter(); st["await_onset"] = True
+        st["mouth_done"] = False; st["play_until"] = 0.0
         await async_send_msg(m_writer, b"T", {"transcript": transcript})
+
+    async def finish_turn(barged):
+        """The reply is over (played out, or barged): back to listening; send a held turn if any."""
+        st["speaking"] = False; st["reset"] = True; st["agent_buf"] = np.zeros(0, np.float32)
+        st["mouth_done"] = False; st["done_task"] = None
+        if st["barge_t0"] is not None and barged:
+            log.info("barge_halted tail %.0f ms", (time.perf_counter() - st["barge_t0"]) * 1e3)
+        st["barge_t0"] = None
+        log.info("turn_done barged=%s", bool(barged))
+        await ws.send_json({"type": "turn_done", "barged": barged})
+        if st["halting"]:
+            st["halting"] = False
+            if st["pending"] is not None:
+                tr = st["pending"]; st["pending"] = None
+                await send_turn(tr)
+
+    async def finish_after_playback():
+        try:
+            while (wait := st["play_until"] + PLAYBACK_MARGIN_S - time.perf_counter()) > 0:
+                await asyncio.sleep(wait)
+            await finish_turn(False)
+        except asyncio.CancelledError:
+            pass
 
     async def send_backchannel(partial):
         st["bc_active"] = True; st["bc_t0"] = time.perf_counter()
@@ -116,8 +146,10 @@ async def ws_handler(request):
                         log.info("response_onset %.0f ms", onset * 1e3)
                     await ws.send_bytes(payload)
                     if st["speaking"]:
-                        a16 = ds24to16(np.frombuffer(payload, np.float32))
-                        st["agent_buf"] = np.concatenate([st["agent_buf"], a16])
+                        a24 = np.frombuffer(payload, np.float32)
+                        now = time.perf_counter()        # client queues chunks back to back (+40 ms lead-in)
+                        st["play_until"] = max(st["play_until"], now + 0.04) + len(a24) / 24000
+                        st["agent_buf"] = np.concatenate([st["agent_buf"], ds24to16(a24)])
                 elif kind == b"X":
                     d = json.loads(payload)
                     await ws.send_json({"type": "backchannel" if d.get("bc") else "reply", "text": d["text"]})
@@ -127,17 +159,11 @@ async def ws_handler(request):
                         st["bc_active"] = False
                         await ws.send_json({"type": "backchannel_done", "text": d.get("text", "")})
                         continue
-                    st["speaking"] = False; st["reset"] = True; st["agent_buf"] = np.zeros(0, np.float32)
-                    if st["barge_t0"] is not None and d.get("barged"):
-                        log.info("barge_halted tail %.0f ms", (time.perf_counter() - st["barge_t0"]) * 1e3)
-                    st["barge_t0"] = None
-                    log.info("turn_done barged=%s", bool(d.get("barged")))
-                    await ws.send_json({"type": "turn_done", "barged": d.get("barged")})
-                    if st["halting"]:
-                        st["halting"] = False
-                        if st["pending"] is not None:
-                            tr = st["pending"]; st["pending"] = None
-                            await send_turn(tr)
+                    if d.get("barged") or not st["speaking"]:       # halted: nothing left to play out
+                        await finish_turn(bool(d.get("barged")))
+                    else:                                         # generated; hold until it has played
+                        st["mouth_done"] = True
+                        st["done_task"] = asyncio.create_task(finish_after_playback())
         except (asyncio.IncompleteReadError, ConnectionError):
             pass
     pump = asyncio.create_task(pump_mouth()) if have_mouth else None
@@ -173,7 +199,8 @@ async def ws_handler(request):
                                     await send_turn(e["transcript"])
                         elif e["kind"] == "BACKCHANNEL" and not st["speaking"] and not st["halting"] \
                                 and not st["bc_active"]:
-                            log.info("backchannel bc_prob=%.2f", e.get("bc_prob", 0.0))
+                            log.info("backchannel bc_prob=%.2f partial_chars=%d", e.get("bc_prob", 0.0),
+                                     len(e.get("partial") or ""))   # length only: never log the words
                             await ws.send_json({"type": "bc_cue", "bc": e.get("bc_prob")})
                             if have_mouth:
                                 await send_backchannel(e.get("partial", ""))
@@ -181,9 +208,16 @@ async def ws_handler(request):
                             st["speaking"] = False; st["halting"] = True; st["reset"] = True
                             st["agent_buf"] = np.zeros(0, np.float32); st["barge_t0"] = time.perf_counter()
                             log.info("barge yield=%.2f", e.get("yield_prob", 0.0))
-                            if have_mouth:
+                            await ws.send_json({"type": "barge", "yield": e["yield_prob"]})  # client stops playback
+                            if st["mouth_done"]:
+                                # MOUTH already finished generating (its D was held for playback) -> no D will
+                                # come back for this turn; close it here instead of waiting.
+                                if st["done_task"] is not None:
+                                    st["done_task"].cancel()
+                                st["halting"] = False
+                                await finish_turn(True)
+                            elif have_mouth:
                                 await async_send_msg(m_writer, b"B")
-                            await ws.send_json({"type": "barge", "yield": e["yield_prob"]})
                     if last is not None:
                         await ws.send_json({"type": "state", "state": last["state"], "yield": yp,
                                             "bc": bcp, "hazard": last.get("hazard", 0.0), "p_end": round(pe, 3)})
@@ -212,6 +246,8 @@ async def ws_handler(request):
     finally:
         if pump:
             pump.cancel()
+        if st["done_task"] is not None:
+            st["done_task"].cancel()
         if have_mouth:
             try:
                 m_writer.close()
