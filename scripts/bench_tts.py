@@ -54,7 +54,7 @@ def bench_voice(tts, ref, name):
         # mirror the live path: app-level clause chunking, time to first audio of the reply
         t0 = time.time(); first = None; nsamp = 0; pend = txt; done = False
         while not done:
-            chunk, rest = next_chunk(pend)
+            chunk, rest = next_chunk(pend, first=(pend == txt))
             if chunk is None:
                 chunk, rest, done = say_clean(pend), "", True
             else:

@@ -6,8 +6,10 @@ Architecture (milestone V1.1, "LLM on vLLM"):
     far faster than the old in-process greedy decode -- that was the latency win.
   * TTS stays **in-process** MOSS-TTS-Nano (app/tts_nano.py): measured 112 ms first-audio here vs ~290 ms when
     MOSS was served through vLLM-Omni, so TTS is NOT on vLLM.
-  * The LLM reply is chunked into **whole sentences** (chunker.next_sentence) and each sentence is sent to
-    MOSS as soon as it closes, so playback starts on sentence 1 while the rest render.
+  * The LLM reply is chunked by chunker.next_chunk: the FIRST chunk may end at a clause boundary (comma,
+    semicolon, dash) so playback doesn't wait for a long opening sentence, then whole sentences. No chunk
+    is cut below MIN_CHARS (40), so short replies/sentences go to the TTS whole.
+    Each chunk is sent to MOSS as soon as it closes, so playback starts on chunk 1 while the rest render.
   * reminder/message tools return a "not connected" demo marker (tools.py) and the model says so.
   * Backchannels are contextual LLM acks off the ASR partial by default (mouth.contextual_acks).
 Same EARS<->MOUTH wire (T/C/B/V -> X/A/D). No audio or transcript is written to disk; only event logs.
@@ -22,7 +24,7 @@ import numpy as np, requests
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # v1/ on path
 from app.wire import send_msg, recv_msg
 from app.tools import TOOLS, execute_tool
-from app.chunker import next_sentence, say_clean, TTS_SYS
+from app.chunker import next_chunk, say_clean, TTS_SYS
 from app.tts_realtime import MossRealtimeTTS
 from app.config import load_config, discover_voices
 from app import weights
@@ -175,11 +177,11 @@ class Mouth:
             self.history.append({"role": "assistant", "content": reply or "..."})
             self.history = self.history[-2 * self.history_turns:]
 
-    # ---- TTS of the untts'd tail, one whole sentence at a time ----
+    # ---- TTS of the untts'd tail: a short first chunk (clause), then whole sentences ----
     def _tts_tail(self, full, stop_flag):
         safe = full[self._tts_done:]
         while True:
-            chunk, rest = next_sentence(safe)
+            chunk, rest = next_chunk(safe, first=self._tts_done == 0)
             if chunk is None:
                 break
             self._tts_done += len(safe) - len(rest)
