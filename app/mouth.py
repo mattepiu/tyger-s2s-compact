@@ -376,6 +376,8 @@ def main():
     ap.add_argument("--config", default=None)
     args = ap.parse_args()
     cfg = load_config(args.config)
+    import torch
+    torch.set_num_threads(int(cfg["mouth"].get("cpu_threads", 4)))   # default 48 threads mostly spin-wait
     if not os.environ.get("TAVILY_API_KEY"):
         log.warning("TAVILY_API_KEY not set -> web_search/get_weather will return an error")
     m = Mouth(cfg)

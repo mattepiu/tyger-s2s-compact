@@ -6,7 +6,8 @@ server:
   host: 0.0.0.0
   port: 7860              # the web app (EARS aiohttp) serves the page + WS on this port
   mouth_host: 127.0.0.1
-  mouth_port: 8770        # internal EARS<->MOUTH TCP
+  mouth_port: 8770        # internal EARS<->MOUTH TCP (one connection per conversation)
+  max_sessions: 4         # concurrent conversations; more visitors get the "busy" page
 
 models:                    # EARS models (the MOUTH's models are under llm: / tts:)
   nemotron: nvidia/nemotron-3.5-asr-streaming-0.6b
@@ -21,6 +22,9 @@ ears:                      # arm C endpoint rule + barge/backchannel (exp-12 liv
   bc_thr: 0.5
   bc_deb: 2
   fallback_sil_frames: 15  # 1.2 s silence fallback (safety net; arm C fired it 0 times live in exp-12)
+  ring_frames: 2048        # head context per conversation (frames of 80 ms = 164 s); resets at every turn
+  gather_ms: 15            # wait up to this long to batch other conversations' hops into one GPU step
+  cpu_threads: 4           # torch CPU threads (the default 48 mostly spin-wait: 14x the CPU, slower)
 
 llm:                       # responder, in-process vLLM AsyncLLM inside the MOUTH (app/llm.py)
   model: Qwen/Qwen3-4B-Instruct-2507
@@ -47,5 +51,6 @@ mouth:
   max_gen: 192
   history_turns: 8                   # ~last 8 turns kept in the responder
   bc_max_new: 12                     # token budget for a backchannel (kept short for low latency)
+  cpu_threads: 4                     # torch CPU threads in the MOUTH process
   bc_min_words: 4                    # ASR partial shorter than this is flagged to the LLM as "only a few
                                      # words so far" -> it answers with a neutral hum instead of a reaction

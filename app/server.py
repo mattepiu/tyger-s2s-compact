@@ -1,22 +1,26 @@
-"""EARS process + web app (EARS venv, tf 5.17): nemotron L15 -> the exp-10 chain + endpoint head (arm C),
-serving the mic page + WebSocket on one port and wiring to the MOUTH over TCP. Adapted from
+"""EARS process + web app: nemotron L15 -> the exp-10 chain + endpoint head (arm C), serving the mic page +
+WebSocket on one port and wiring each conversation to the MOUTH over its own TCP connection. Adapted from
 codebase/exp-12/server/ears_server.py (copy, not import), trimmed to ARM C ONLY: the 4-way endpointer,
 SPEAK-lock watchdog, A/B blinding, and code->ckpt map are dropped.
 
-PRIVACY: no audio or transcript is written to disk or logs. We log only timings + event types (endpoint
-source, onset ms, barge, bc). One conversation at a time: a second visitor gets a "busy" page.
+Multi-session: up to server.max_sessions WebSocket conversations at once. The models are shared; each
+conversation is an EarsSession, and one GPU thread runs a single batched step per 320 ms hop for every
+session with a hop ready (app/ears_core/batched.py). Visitors beyond the cap get a "busy" page.
 
-Run (EARS venv): HF_HOME=/workspace/.hf_home <venv>/bin/python -m app.server
+PRIVACY: no audio or transcript is written to disk or logs. We log only timings + event types (endpoint
+source, onset ms, barge, bc).
+
+Run: HF_HOME=/workspace/.hf_home .venv/bin/python -m app.server
 """
 from __future__ import annotations
-import os, sys, json, time, asyncio, logging, concurrent.futures
+import os, sys, json, time, asyncio, logging
 from pathlib import Path
 import numpy as np
 from aiohttp import web, WSMsgType
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # v1/
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root on path
 from app.wire import async_send_msg, async_recv_msg
-from app.ears_core.endpoint_ears import EndpointEars
+from app.ears_core.batched import EarsEngine, EarsService
 from app.ears_core.live_ears import HOP_FRAMES
 from app.ears_core.encoder_stream import ENC_SR
 from app.ears_core.labeling import FRAME_S
@@ -28,13 +32,11 @@ HERE = Path(__file__).resolve().parent
 STATIC = HERE.parent / "static"
 HOP_N = int(HOP_FRAMES * FRAME_S * ENC_SR)     # samples per hop (320 ms @ 16 kHz = 5120)
 PLAYBACK_MARGIN_S = 0.25                        # slack for network + client scheduling on top of play_until
-EXEC = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
-EARS = None
+SERVICE: EarsService | None = None
 CFG = None
 VOICES = {}
 DEFAULT_VOICE = None
-BUSY = False                                    # one conversation at a time
 
 
 def ds24to16(x):
@@ -47,12 +49,12 @@ def ds24to16(x):
 
 BUSY_HTML = ("<!doctype html><meta charset=utf-8><title>tyger - busy</title>"
              "<body style='font:16px system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem'>"
-             "<h1>tyger is busy</h1><p>Someone else is talking to it right now. "
-             "It handles one conversation at a time &mdash; please try again shortly.</p></body>")
+             "<h1>tyger is busy</h1><p>All conversation slots are in use right now "
+             "&mdash; please try again shortly.</p></body>")
 
 
 async def index(request):
-    if BUSY:
+    if SERVICE.full():
         return web.Response(text=BUSY_HTML, content_type="text/html", status=503)
     return web.FileResponse(STATIC / "index.html")
 
@@ -68,17 +70,28 @@ async def voices_handler(request):
     return web.json_response({"voices": sorted(VOICES.keys()), "voice": DEFAULT_VOICE})
 
 
+def session_thresholds(cfg):
+    e = cfg["ears"]
+    return dict(ep_thr=float(e["ep_thr"]), ep_deb=int(e["ep_deb"]), barge_thr=float(e["barge_thr"]),
+                barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]),
+                fallback_frames=int(e.get("fallback_sil_frames", 15)))
+
+
 async def ws_handler(request):
-    global BUSY
     ws = web.WebSocketResponse(max_msg_size=0)
     await ws.prepare(request)
-    if BUSY:
+    ears = SERVICE.open(**session_thresholds(CFG))       # this conversation's EARS state (+ its own thresholds)
+    if ears is None:
         await ws.send_json({"type": "busy"})
         await ws.close()
         return ws
-    BUSY = True
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(EXEC, EARS.reset)
+    try:
+        return await _conversation(ws, ears)
+    finally:
+        SERVICE.close(ears)
+
+
+async def _conversation(ws, ears):
     mp = CFG["server"]
     buf = np.zeros(0, np.float32)
     # "speaking" lasts until the client has finished PLAYING the reply, not until the MOUTH has finished
@@ -98,9 +111,10 @@ async def ws_handler(request):
     await ws.send_json({"type": "ready", "hop_ms": int(HOP_FRAMES * FRAME_S * 1e3), "sr": ENC_SR,
                         "mouth": have_mouth,
                         "voices": sorted(VOICES.keys()), "voice": DEFAULT_VOICE,
-                        "thresholds": {"barge_thr": EARS.barge_thr, "bc_thr": EARS.bc_thr,
-                                       "ep_thr": EARS.ep_thr, "ep_deb": EARS.ep_deb,
-                                       "endpoint": "ep", "fallback_frames": EARS.FALLBACK_SIL_FRAMES}})
+                        "thresholds": {"barge_thr": ears.barge_thr, "bc_thr": ears.bc_thr,
+                                       "ep_thr": ears.ep_thr, "ep_deb": ears.ep_deb,
+                                       "endpoint": "ep", "fallback_frames": ears.FALLBACK_SIL_FRAMES}})
+    log.info("conversation start (active=%d)", SERVICE.active())
 
     async def send_turn(transcript):
         st["speaking"] = True; st["turn_t0"] = time.perf_counter(); st["await_onset"] = True
@@ -179,13 +193,13 @@ async def ws_handler(request):
                 while len(buf) >= HOP_N:
                     uh = np.ascontiguousarray(buf[:HOP_N]); buf = buf[HOP_N:]
                     if st["reset"]:
-                        await loop.run_in_executor(EXEC, EARS.reset); st["reset"] = False
+                        ears.reset(); st["reset"] = False
                     if st["speaking"]:
                         ab = st["agent_buf"]; ah = np.zeros(HOP_N, np.float32)
                         n = min(HOP_N, len(ab)); ah[:n] = ab[:n]; st["agent_buf"] = ab[n:]; mode = "speaking"
                     else:
                         ah = np.zeros(HOP_N, np.float32); mode = "listen"
-                    evs = await loop.run_in_executor(EXEC, EARS.feed, uh, ah, mode)
+                    evs = await SERVICE.feed(ears, uh, ah, mode)      # batched with the other sessions
                     yp = bcp = pe = 0.0; last = None
                     for e in evs:
                         if e["kind"] == "FRAME":
@@ -228,7 +242,7 @@ async def ws_handler(request):
             elif msg.type == WSMsgType.TEXT:
                 data = msg.data
                 if data == "reset":
-                    await loop.run_in_executor(EXEC, EARS.reset); buf = np.zeros(0, np.float32)
+                    ears.reset(); buf = np.zeros(0, np.float32)
                 elif data.startswith("voice:") and have_mouth:
                     name = data.split(":", 1)[1]
                     if name in VOICES:
@@ -237,13 +251,13 @@ async def ws_handler(request):
                 elif data.startswith("set:"):
                     try:
                         _, attr, val = data.split(":", 2)
-                        if attr in ("barge_thr", "bc_thr", "ep_thr"):
-                            setattr(EARS, attr, float(val))
+                        if attr in ("barge_thr", "bc_thr", "ep_thr"):      # per conversation (the sliders)
+                            setattr(ears, attr, float(val))
                         elif attr in ("ep_deb", "bc_deb", "barge_deb"):
-                            setattr(EARS, attr, int(val))
+                            setattr(ears, attr, int(val))
                         elif attr == "fallback_frames":
-                            EARS.FALLBACK_SIL_FRAMES = int(val)
-                        cur = getattr(EARS, "FALLBACK_SIL_FRAMES") if attr == "fallback_frames" else getattr(EARS, attr)
+                            ears.FALLBACK_SIL_FRAMES = int(val)
+                        cur = getattr(ears, "FALLBACK_SIL_FRAMES") if attr == "fallback_frames" else getattr(ears, attr)
                         await ws.send_json({"type": "threshold", "attr": attr, "value": cur})
                     except (ValueError, AttributeError):
                         pass
@@ -257,20 +271,17 @@ async def ws_handler(request):
                 m_writer.close()
             except Exception:
                 pass
-        BUSY = False
-        log.info("client disconnected")
+        log.info("conversation end (active=%d)", SERVICE.active() - 1)
     return ws
 
 
-def build_ears(cfg):
+def build_service(cfg):
     heads = weights.ensure_heads(cfg["models"]["heads_repo"], cfg["models"]["heads_file"])
     e = cfg["ears"]
-    log.info("loading EARS (arm C) ep_thr=%s ep_deb=%s", e["ep_thr"], e["ep_deb"])
-    ears = EndpointEars(heads, ep_thr=float(e["ep_thr"]), ep_deb=int(e["ep_deb"]), echo=True,
-                        theta=0.2, barge_thr=float(e["barge_thr"]), barge_deb=int(e["barge_deb"]),
-                        bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]))
-    ears.FALLBACK_SIL_FRAMES = int(e.get("fallback_sil_frames", 15))
-    return ears
+    n = int(cfg["server"].get("max_sessions", 4))
+    log.info("loading EARS (arm C) for %d sessions, ep_thr=%s ep_deb=%s", n, e["ep_thr"], e["ep_deb"])
+    engine = EarsEngine(heads, slots=n, ring_len=int(e.get("ring_frames", 2048)))
+    return EarsService(engine, gather_s=float(e.get("gather_ms", 15)) / 1e3)
 
 
 def main():
@@ -279,11 +290,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
     args = ap.parse_args()
-    global EARS, CFG, VOICES, DEFAULT_VOICE
+    global SERVICE, CFG, VOICES, DEFAULT_VOICE
     CFG = load_config(args.config)
+    import torch
+    torch.set_num_threads(int(CFG["ears"].get("cpu_threads", 4)))   # default 48 threads mostly spin-wait
     VOICES, DEFAULT_VOICE = discover_voices(CFG)
-    EARS = build_ears(CFG)
-    log.info("=== EARS ready ===")
+    SERVICE = build_service(CFG)
+    log.info("=== EARS ready (up to %d conversations) ===", SERVICE.engine.slots)
     app = web.Application()
     app.add_routes([web.get("/", index), web.get("/voices", voices_handler), web.get("/ws", ws_handler)])
     host, port = CFG["server"]["host"], int(CFG["server"]["port"])
