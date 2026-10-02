@@ -1,33 +1,33 @@
-"""MOUTH process (tf 4.57 venv): responder on an external vLLM server + MOSS-TTS-Nano voice-clone TTS.
+"""MOUTH process: the responder LLM and the TTS, both in-process on vLLM engines, plus the turn orchestration.
 
-Architecture (milestone V1.1, "LLM on vLLM"):
-  * The responder (Qwen3-4B-Instruct-2507) runs on a separate **vLLM** OpenAI server; this process talks to
-    it over HTTP (/v1/chat/completions, streaming, Hermes tool calls). vLLM gives ~28 ms TTFT and ~150 tok/s,
-    far faster than the old in-process greedy decode -- that was the latency win.
-  * TTS stays **in-process** MOSS-TTS-Nano (app/tts_nano.py): measured 112 ms first-audio here vs ~290 ms when
-    MOSS was served through vLLM-Omni, so TTS is NOT on vLLM.
+Architecture:
+  * One process hosts two in-process engines on a shared asyncio loop (app/engines.py): Qwen3-4B-Instruct-2507
+    on a vLLM AsyncLLM (app/llm.py) and VoxCPM2 on a vLLM-Omni AsyncOmni (app/tts_voxcpm.py). No HTTP between
+    MOUTH and the models. They can't be one vLLM-Omni pipeline: stages chain stage 0 -> stage 1, and MOUTH
+    has to sit between them (chunking, tools + lead-in, backchannels, barge-in).
   * The LLM reply is chunked by chunker.next_chunk: the FIRST chunk may end at a clause boundary (comma,
     semicolon, dash) so playback doesn't wait for a long opening sentence, then whole sentences. No chunk
-    is cut below MIN_CHARS (40), so short replies/sentences go to the TTS whole.
-    Each chunk is sent to MOSS as soon as it closes, so playback starts on chunk 1 while the rest render.
+    is cut below MIN_CHARS (40), so short replies/sentences go to the TTS whole. Each chunk is one VoxCPM2
+    request whose audio streams out per decode step, so playback starts on chunk 1 while the rest render.
+  * Barge-in (B on the wire) sets the stop flag; the live LLM/TTS request is aborted in the engine.
   * reminder/message tools return a "not connected" demo marker (tools.py) and the model says so.
   * Backchannels are contextual LLM acks off the ASR partial by default (mouth.contextual_acks).
-Same EARS<->MOUTH wire (T/C/B/V -> X/A/D). No audio or transcript is written to disk; only event logs.
+Same EARS<->MOUTH wire (T/C/B/V -> X/A/D); audio on the wire is 24 kHz float32. No audio or transcript is
+written to disk or logs; only timings and event types.
 
-Run (MOUTH venv): HF_HOME=/workspace/.hf_home <venv_moss>/bin/python -m app.mouth
-(The vLLM responder server must already be up -- run.sh starts it first.)
+Run: HF_HOME=/workspace/.hf_home .venv/bin/python -m app.mouth
 """
 from __future__ import annotations
 import os, sys, socket, threading, queue, json, time, random, logging
-import numpy as np, requests
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # v1/ on path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root on path
 from app.wire import send_msg, recv_msg
 from app.tools import TOOLS, execute_tool
 from app.chunker import next_chunk, say_clean, TTS_SYS
-from app.tts_realtime import MossRealtimeTTS
-from app.config import load_config, discover_voices
-from app import weights
+from app.config import load_config, discover_voices, repo_path
+from app.engines import EngineLoop
+from app.llm import LocalLLM
+from app.tts_voxcpm import VoxCPM2TTS
 
 log = logging.getLogger("mouth")
 
@@ -53,86 +53,37 @@ BC_PROMPT = (
     "NOT take the floor. Plain spoken words only, no markdown or symbols. Just the short reaction.")
 
 
-class LLMClient:
-    """Streaming chat client to the external vLLM OpenAI server (Hermes tool calls)."""
-    def __init__(self, base_url, model, temperature=0.7, timeout=60):
-        self.url = base_url.rstrip("/") + "/v1/chat/completions"
-        self.base = base_url.rstrip("/")
-        self.model = model
-        self.temperature = float(temperature)
-        self.timeout = timeout
-        self.sess = requests.Session()
-
-    def wait_ready(self, tries=600, delay=1.0):
-        for _ in range(tries):
-            try:
-                if self.sess.get(self.base + "/v1/models", timeout=2).status_code == 200:
-                    return True
-            except Exception:
-                pass
-            time.sleep(delay)
-        return False
-
-    def stream_deltas(self, messages, tools=None, max_new=192, temperature=None, stop_flag=None):
-        """Yield raw OpenAI streaming chunk dicts (one per SSE 'data:' line). Stops early on stop_flag."""
-        body = {"model": self.model, "messages": messages, "stream": True,
-                "max_tokens": int(max_new),
-                "temperature": self.temperature if temperature is None else float(temperature)}
-        if tools:
-            body["tools"] = tools
-            body["tool_choice"] = "auto"
-        with self.sess.post(self.url, json=body, stream=True, timeout=self.timeout) as r:
-            r.raise_for_status()
-            for line in r.iter_lines():
-                if stop_flag and stop_flag():
-                    return
-                if not line:
-                    continue
-                s = line.decode("utf-8", "ignore")
-                if not s.startswith("data: "):
-                    continue
-                s = s[6:]
-                if s == "[DONE]":
-                    return
-                try:
-                    yield json.loads(s)
-                except Exception:
-                    continue
+def _text(events):
+    return "".join(v for k, v in events if k == "text")
 
 
 class Mouth:
     def __init__(self, cfg):
-        m = cfg["mouth"]; mdl = cfg["models"]; t = cfg["tts"]; v = cfg.get("vllm", {})
+        m = cfg["mouth"]; lc = cfg["llm"]; t = cfg["tts"]
         self.max_gen = int(m.get("max_gen", 192))
         self.history_turns = int(m.get("history_turns", 8))
         self.contextual_acks = bool(m.get("contextual_acks", False))
         self.canned_texts = list(m.get("canned_acks", ["mm-hm", "right", "yeah", "okay"]))
-        base_url = v.get("base_url", "http://127.0.0.1:8001")
-        log.info("responder via vLLM at %s (model=%s)", base_url, mdl["responder"])
-        self.llm = LLMClient(base_url, mdl["responder"],
-                             temperature=float(m.get("temperature", 0.7)),
-                             timeout=int(v.get("timeout", 60)))
-        log.info("waiting for vLLM responder to be ready ...")
-        if not self.llm.wait_ready():
-            raise RuntimeError(f"vLLM responder not reachable at {base_url}")
-        log.info("loading MOSS-TTS-Realtime from %s", mdl["moss_dir"])
-        self.tts = MossRealtimeTTS(mdl["moss_dir"], mdl["moss_codec"], out_sr=t.get("out_sr", 24000),
-                                   dtype=t.get("dtype", "bfloat16"), attn=t.get("attn", "sdpa"),
-                                   chunk_dur=t.get("chunk_dur", 0.24), dec_chunk_frames=t.get("dec_chunk_frames", 4),
-                                   prefill_text_len=t.get("prefill_text_len", 6), prompt_max_s=t.get("prompt_max_s", 4.0),
-                                   max_length=t.get("max_length", 800), channels=t.get("channels", 16),
-                                   do_sample=True, audio_temperature=t.get("audio_temperature", 0.8),
-                                   audio_top_p=t.get("audio_top_p", 0.6), audio_top_k=t.get("audio_top_k", 30),
-                                   audio_repetition_penalty=t.get("audio_repetition_penalty", 1.1),
-                                   repetition_window=t.get("repetition_window", 50))
+        self.bc_max_new = int(m.get("bc_max_new", 12))
+        self.eloop = EngineLoop()
+        # TTS first: its deploy config pins a small KV budget; the LLM's start-up check then sees what's left.
+        log.info("loading TTS %s", t["model"])
+        self.tts = VoxCPM2TTS(self.eloop, t["model"], deploy_config=repo_path(t.get("deploy_config")),
+                              out_sr=t.get("out_sr", 24000), ref_max_s=t.get("ref_max_s", 10.0))
+        log.info("loading responder %s", lc["model"])
+        self.llm = LocalLLM(self.eloop, lc["model"], gpu_memory_utilization=lc.get("gpu_memory_utilization", 0.45),
+                            kv_cache_gib=lc.get("kv_cache_gib", 2.0), max_model_len=lc.get("max_model_len", 8192),
+                            max_num_seqs=lc.get("max_num_seqs", 4), temperature=m.get("temperature", 0.7))
         self.cfg = cfg
         self.voices, self.voice = discover_voices(cfg)
-        if not self.voices:
-            raise RuntimeError("no voice reference clips found (voices.dir / voices.default_ref)")
-        log.info("voices available: %s (default=%s)", sorted(self.voices), self.voice)
-        self.tts.set_voice(self.voices[self.voice])
+        if self.voices:
+            log.info("voices available: %s (default=%s)", sorted(self.voices), self.voice)
+            self.tts.set_voice(self.voices[self.voice])
+        elif t.get("allow_zero_shot"):          # testing only: VoxCPM2's unconditioned voice, no clone
+            log.warning("no voice clips in voices.dir -> zero-shot TTS voice (tts.allow_zero_shot)")
+        else:
+            raise RuntimeError("no voice reference clips found (put a *.wav in voices.dir)")
         self.sr = self.tts.out_sr
-        self.bc_max_new = int(m.get("bc_max_new", 12))
         self.history = []
         self.acks = {}
         log.info("warming TTS (voice=%s, contextual_acks=%s)", self.voice, self.contextual_acks)
@@ -199,49 +150,35 @@ class Mouth:
             for w in self.tts.stream(tail, stop_flag=stop_flag):
                 yield ("audio", w)
 
+    def _speak_stream(self, events, stop_flag):
+        """Speak the text of an LLM event stream as it arrives. Yields MOUTH events; returns (text, calls)."""
+        content = ""; calls = None; self._tts_done = 0
+        for kind, val in events:
+            if kind == "text":
+                content += val
+                yield ("text", content)
+                yield from self._tts_tail(content, stop_flag)
+            elif kind == "tool_calls":
+                calls = val
+            if stop_flag and stop_flag():
+                return content, calls
+        if not calls:
+            yield from self._flush_tail(content, stop_flag)
+        return content, calls
+
     # ---- a full turn (may call tools) ----
     def stream_turn(self, transcript, stop_flag=None):
         msgs = [{"role": "system", "content": TTS_TOOLS_SYS}] + list(self.history) + \
                [{"role": "user", "content": transcript}]
-        content = ""; self._tts_done = 0; tool_acc = {}; stopped = False
-        for d in self.llm.stream_deltas(msgs, tools=TOOLS, max_new=self.max_gen, stop_flag=stop_flag):
-            ch = (d.get("choices") or [{}])[0]
-            delta = ch.get("delta") or {}
-            if delta.get("content"):
-                content += delta["content"]
-                yield ("text", content)
-                for ev in self._tts_tail(content, stop_flag):
-                    yield ev
-            for tc in (delta.get("tool_calls") or []):
-                i = tc.get("index", 0)
-                e = tool_acc.setdefault(i, {"name": "", "args": ""})
-                fn = tc.get("function") or {}
-                if fn.get("name"):
-                    e["name"] = fn["name"]
-                if fn.get("arguments"):
-                    e["args"] += fn["arguments"]
-            if stop_flag and stop_flag():
-                stopped = True; break
-        if stopped:
+        content, calls = yield from self._speak_stream(
+            self.llm.stream(msgs, tools=TOOLS, max_new=self.max_gen, stop_flag=stop_flag), stop_flag)
+        if stop_flag and stop_flag():
             yield ("done", content.strip()); return
-
-        if not tool_acc:                                    # plain reply
-            for ev in self._flush_tail(content, stop_flag):
-                yield ev
+        if not calls:                                       # plain reply
             reply = content.strip(); self._remember(transcript, reply)
             yield ("done", reply); return
 
         # ---- tool path: run tool(s) in BG threads, speak a lead-in over them, then phase B ----
-        calls = []
-        for i in sorted(tool_acc):
-            e = tool_acc[i]
-            if not e["name"]:
-                continue
-            try:
-                args = json.loads(e["args"]) if e["args"].strip() else {}
-            except Exception:
-                args = {}
-            calls.append({"name": e["name"], "arguments": args})
         log.info("tool calls: %s", [c["name"] for c in calls])
         results = [None] * len(calls)
 
@@ -251,14 +188,9 @@ class Mouth:
         for w in workers:
             w.start()
 
-        lead_ids = []
-        for d in self.llm.stream_deltas([{"role": "system", "content": LEADIN_SYS},
-                                         {"role": "user", "content": transcript}],
-                                        tools=None, max_new=24, stop_flag=stop_flag):
-            delta = (d.get("choices") or [{}])[0].get("delta") or {}
-            if delta.get("content"):
-                lead_ids.append(delta["content"])
-        lead = "".join(lead_ids).strip()
+        lead = _text(self.llm.stream([{"role": "system", "content": LEADIN_SYS},
+                                      {"role": "user", "content": transcript}],
+                                     max_new=24, stop_flag=stop_flag)).strip()
         if lead and not (stop_flag and stop_flag()):
             yield ("text", lead)
             for w in self.tts.stream(say_clean(lead), stop_flag=stop_flag):
@@ -268,26 +200,15 @@ class Mouth:
         if stop_flag and stop_flag():
             yield ("done", lead); return
 
-        asst = {"role": "assistant", "content": None,
+        asst = {"role": "assistant", "content": content.strip() or None,
                 "tool_calls": [{"id": f"call_{i}", "type": "function",
-                                "function": {"name": c["name"], "arguments": json.dumps(c.get("arguments", {}))}}
+                                "function": {"name": c["name"], "arguments": c.get("arguments", {})}}
                                for i, c in enumerate(calls)]}
         msgs2 = msgs + [asst] + [{"role": "tool", "tool_call_id": f"call_{i}",
                                   "content": json.dumps(r if r is not None else {"error": "no result"})}
                                  for i, r in enumerate(results)]
-        full2 = ""; self._tts_done = 0; stopped2 = False
-        for d in self.llm.stream_deltas(msgs2, tools=None, max_new=self.max_gen, stop_flag=stop_flag):
-            delta = (d.get("choices") or [{}])[0].get("delta") or {}
-            if delta.get("content"):
-                full2 += delta["content"]
-                yield ("text", full2)
-                for ev in self._tts_tail(full2, stop_flag):
-                    yield ev
-            if stop_flag and stop_flag():
-                stopped2 = True; break
-        if not stopped2:
-            for ev in self._flush_tail(full2, stop_flag):
-                yield ev
+        full2, _ = yield from self._speak_stream(
+            self.llm.stream(msgs2, max_new=self.max_gen, stop_flag=stop_flag), stop_flag)
         reply = (lead + " " + full2).strip(); self._remember(transcript, full2.strip() or lead)
         yield ("done", reply)
 
@@ -301,12 +222,7 @@ class Mouth:
         user = (partial or "").strip() or "(the user is speaking)"
         messages = [{"role": "system", "content": BC_PROMPT},
                     {"role": "user", "content": f"The user is currently saying: \"{user}\""}]
-        parts = []
-        for d in self.llm.stream_deltas(messages, tools=None, max_new=self.bc_max_new, stop_flag=stop_flag):
-            delta = (d.get("choices") or [{}])[0].get("delta") or {}
-            if delta.get("content"):
-                parts.append(delta["content"])
-        text = "".join(parts).strip()
+        text = _text(self.llm.stream(messages, max_new=self.bc_max_new, stop_flag=stop_flag)).strip()
         if text:
             yield ("text", text)
             for w in self.tts.stream(say_clean(text), stop_flag=stop_flag):
@@ -360,13 +276,13 @@ def serve(m, conn):
                     elif kind == "audio":
                         if t_aud is None:
                             t_aud = time.perf_counter() - t0
-                            log.info("onset: first-text %.0fms first-audio %.0fms", t_txt * 1e3, t_aud * 1e3)
+                            log.info("onset: first-text %.0fms first-audio %.0fms", (t_txt or 0) * 1e3, t_aud * 1e3)
                         send_msg(conn, b"A", val.tobytes())
                     elif kind == "done":
                         send_msg(conn, b"D", {"text": val, "barged": stop.is_set()})
         except Exception as e:
-            log.exception("turn error: %s", e)
-            send_msg(conn, b"D", {"text": "", "error": str(e)})
+            log.exception("turn error: %s", type(e).__name__)
+            send_msg(conn, b"D", {"text": "", "error": type(e).__name__})
 
 
 def main():
@@ -376,8 +292,6 @@ def main():
     ap.add_argument("--config", default=None)
     args = ap.parse_args()
     cfg = load_config(args.config)
-    # ensure MOSS-Realtime is vendored+patched (static-cache/CUDA-graph patch; idempotent)
-    weights.ensure_moss_realtime(cfg["models"]["moss_repo"], cfg["models"]["moss_dir"])
     if not os.environ.get("TAVILY_API_KEY"):
         log.warning("TAVILY_API_KEY not set -> web_search/get_weather will return an error")
     m = Mouth(cfg)
@@ -385,8 +299,8 @@ def main():
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind((host, port)); srv.listen(1)
-    log.info("=== MOUTH ready (vLLM responder + in-proc MOSS-Nano, sr=%d, voice=%s) listening on %s:%d ===",
-             m.sr, m.voice, host, port)
+    log.info("=== MOUTH ready (in-proc %s + %s, sr=%d, voice=%s) listening on %s:%d ===",
+             cfg["llm"]["model"], cfg["tts"]["model"], m.sr, m.voice, host, port)
     while True:
         conn, addr = srv.accept()
         conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -394,7 +308,7 @@ def main():
         try:
             serve(m, conn)
         except Exception as e:
-            log.exception("conn error: %s", e)
+            log.exception("conn error: %s", type(e).__name__)
         finally:
             conn.close(); log.info("EARS disconnected")
 

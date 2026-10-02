@@ -3,7 +3,8 @@
 .env.*
 !.env.example
 
-# Voice reference clips and any audio (personal data)
+# Voice reference clips, their transcripts, and any audio (personal data)
+voices/
 *.wav
 *.flac
 *.mp3

@@ -43,18 +43,24 @@ def load_config(path: str | None = None) -> dict:
     return _expand(yaml.safe_load(p.read_text()))
 
 
+def repo_path(p: str | None) -> Path | None:
+    """Config paths may be relative to the repo root (e.g. voices.dir: voices)."""
+    if not p:
+        return None
+    q = Path(p)
+    return q if q.is_absolute() else ROOT / q
+
+
 def discover_voices(cfg: dict) -> tuple[dict, str]:
-    """Return ({name: wav_path}, default_name). Scans voices.dir for *.wav; adds default_ref if given."""
+    """Return ({name: wav_path}, default_name). Scans voices.dir for *.wav (a voices/<name>.txt next to a clip
+    is its transcript, read by the TTS). Falls back to the first clip if voices.default isn't present."""
     v = cfg.get("voices", {})
     voices: dict[str, str] = {}
-    vdir = v.get("dir")
-    if vdir and Path(vdir).is_dir():
+    vdir = repo_path(v.get("dir"))
+    if vdir and vdir.is_dir():
         for w in sorted(glob.glob(os.path.join(vdir, "*.wav"))):
             voices[Path(w).stem] = w
-    default_ref = v.get("default_ref")
-    if default_ref and Path(default_ref).exists():
-        voices.setdefault(Path(default_ref).stem, default_ref)
-    default = v.get("default") or (next(iter(voices), None))
-    if default not in voices and default_ref and Path(default_ref).exists():
-        default = Path(default_ref).stem
+    default = v.get("default")
+    if default not in voices:
+        default = next(iter(voices), None)
     return voices, default

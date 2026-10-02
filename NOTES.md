@@ -1,94 +1,97 @@
 # tyger v1 — build notes
 
-## Box
-NVIDIA RTX 5090 (32 607 MiB, Blackwell sm_120), driver 590.48 / CUDA 13.1; AMD 96-core CPU, 188 GB RAM,
-100 GB disk. Fresh container each boot → full rebuild. `HF_HOME=/workspace/.hf_home`, `HF_HUB_DISABLE_XET=1`,
-torch **2.9.1+cu130**.
+## Box (2026-10-02)
+NVIDIA RTX 5090 (32 607 MiB, Blackwell sm_120), driver 595.91 / CUDA 13.2; 96-core CPU. `HF_HOME=/workspace/.hf_home`,
+`HF_HUB_DISABLE_XET=1`, torch **2.13.0+cu130**, Python 3.12, one venv `.venv` (vllm 0.30.0, vllm-omni 0.30.0,
+voxcpm 2.0.3, transformers 5.14.1).
 
-## Architecture decision — three venvs, three processes (V1.2: LLM on vLLM, TTS = MOSS-TTS-Realtime)
-A single venv is impossible: **nemotron-3.5-asr-streaming** needs **transformers ≥ 5.13** (its AutoProcessor
-isn't in 4.57); **MOSS-TTS-Realtime**'s `trust_remote_code` modeling targets **transformers 5.0.0**; and vLLM
-pins its own **torch 2.13**. None can share a venv, so:
-- **RESPONDER** venv (`venv_vllm`, vLLM 0.30 / torch 2.13): Qwen3-4B-Instruct-2507 served by **vLLM** on an
-  OpenAI API (`:8001`, `--enable-auto-tool-choice --tool-call-parser hermes`). The LLM runs here.
-- **MOUTH** venv (`venv_moss`, tf 5.0.0 / torch 2.9.1+cu130): the orchestrator + **in-process** MOSS-TTS-Realtime.
-  Talks to the responder over HTTP, chunks the reply into **sentences**, streams TTS audio to EARS over TCP (`:8770`).
-- **EARS** venv (`venv`, tf 5.17): nemotron L15 + the exp-10 chain + endpoint head (arm C). Serves the web app.
-- Wired by the exp-12 TCP protocol (`app/wire.py`, frames `T/C/B/V → X/A/D`). `run.sh` starts all three.
+**This box's GPU is throttled**: it never leaves P3 — memory clock 7001 of 14001 MHz, SM 2385 of 3412 MHz,
+~200 W under load, no throttle reason reported (host-level lock). Qwen3-4B decodes at **92 tok/s** here vs
+~150 on the previous box with the same vLLM. **Every latency number below from this box is pessimistic**;
+re-measure on a healthy GPU before tuning anything against them.
 
-**Why the LLM is on vLLM.** The old MOUTH ran the responder in-process with a greedy token-by-token loop — the
-latency drag the user flagged. On this box Qwen3-4B on vLLM gives TTFT **28 ms**, **~150 tok/s**, with structured
-Hermes `tool_calls`. (vLLM-Omni was tried for TTS and was *slower* than in-process, so TTS is NOT on vLLM.)
+## Architecture (V1.3) — two processes, one venv, both MOUTH models in-process on vLLM
+- **MOUTH** (`app/mouth.py`): orchestrator + an `EngineLoop` (`app/engines.py`: one asyncio loop in a thread,
+  bridged to MOUTH's synchronous generators; aborts the engine request on barge) hosting
+  - **Qwen3-4B-Instruct-2507** on a vLLM **AsyncLLM** (`app/llm.py`): chat template with tools, Hermes
+    `<tool_call>` text parsed in-process (text from the first `<tool_call>` on is never spoken);
+  - **VoxCPM2** on a vLLM-Omni **AsyncOmni** (`app/tts_voxcpm.py`): one request per text chunk, audio per decode
+    step, 48 kHz → 24 kHz via vLLM-Omni's stateful `StreamingAudioResampler`.
+- **EARS** (`app/server.py`): nemotron L15 + the exp-10 chain + endpoint head (arm C). Serves the web app.
+- Wired by the exp-12 TCP protocol (`app/wire.py`, frames `T/C/B/V → X/A/D`). `run.sh` starts MOUTH, waits
+  for its port, then EARS.
 
-**Why MOSS-TTS-Realtime, and the fast-path patch.** The user found MOSS-TTS-Nano's voice "weird" and asked to
-go back to Realtime (the exp-10/11 TTS). Realtime sounds better but its stock remote code decodes each audio
-frame through the Qwen3 backbone with a **DynamicCache + growing mask + no cache_position** — shapes change every
-step, so it can't be CUDA-graphed and runs at **RTF ~1.6–2.0** on this 5090 (unusable for streaming). Fix
-(`weights.ensure_moss_realtime` patches the vendored `streaming_mossttsrealtime.py`, idempotent): a **bs=1 fast
-path** that prefills/steps through a preallocated **StaticCache** with explicit `cache_position` and a pure-causal
-mask, and runs the single-token backbone step through **`torch.compile(mode="reduce-overhead")`** (CUDA graphs).
-With a long boot warmup (to capture the graph depth once, up front) this holds a stable **RTF ~0.55–0.7**
-(DEC=4 ≈ 0.67, DEC=8 ≈ 0.56); audio stays finite/clean. End-to-end plain first-audio **~480 ms** (vs Nano's
-261 ms — the quality trade the user chose; lower `prefill_text_len`/`dec_chunk_frames` at V2 to cut it).
-(Alternatives weighed earlier: Nano is faster-onset but "weird"; vLLM-Omni slower; OmniVoice non-commercial.)
+**Why two engines, not one vLLM-Omni pipeline.** vLLM-Omni stages are a chain (stage 0's output feeds stage 1,
+like Qwen-Omni thinker→talker). Chaining Qwen → VoxCPM2 inside the engine would remove MOUTH from between them:
+no text chunking policy, tool calls + lead-in, contextual backchannels, or barge-in control.
+
+**Why one venv now.** The old split existed for MOSS-TTS-Realtime (transformers 5.0.0) and vLLM's torch pin.
+MOSS is gone; vllm 0.30 brings transformers 5.14.1, which satisfies nemotron's ≥ 5.13. EARS was A/B-tested in
+`.venv` vs its old pinned venv (torch 2.9.1 / tf 5.17): identical per-hop latency (p50 275 / p90 404 ms).
+`voxcpm` must be listed explicitly: the vLLM-Omni stage worker imports it but vllm-omni doesn't depend on it.
+
+**Why VoxCPM2 (replacing MOSS-TTS-Realtime).** User's call. Measured in a one-process spike on this (throttled)
+box, zero-shot voice: TTS **first-audio p50 113 ms**, **RTF 0.12–0.20** (MOSS: ~480 ms onset, RTF 0.56–0.7);
+abort takes 2 ms and the next request runs at full speed. Apache-2.0, 30+ languages. Earlier note "vLLM-Omni
+was slower than in-process" was MOSS-Nano behind vLLM-Omni's **HTTP** server; in-process VoxCPM2 doesn't pay that.
+
+**VoxCPM2 streaming is audio-out only.** Text must be complete per request: the prompt builder puts all text
+tokens in the prefill and the talker asserts the prompt length. vLLM-Omni's generic streaming-input path isn't
+used by VoxCPM2. So onset is cut on the text side (chunking, below), not by feeding partial text.
+
+## Text chunking (`app/chunker.py`, tests in `tests/test_chunker.py`)
+- A punctuation mark is a boundary only once the next char is whitespace (after closing quotes/brackets): keeps
+  `0.50$`, `3,000`, `1:30`, `example.com`, `Las-Palmas` intact and never cuts a streamed `0.` before `50` arrives.
+  Abbreviations/initials (`Dr.`, `e.g.`, `U.S.`, `J. K.`) aren't sentence ends; `5 - 10` / `5–10` aren't clauses.
+  Full-width CJK punctuation is always a boundary.
+- **First chunk** of each spoken LLM stream may end at a clause (`, ; :` dash) or is cut at 12 words; later
+  chunks are whole sentences. **No chunk below `MIN_CHARS` = 40** (user's call): short replies like
+  "Привет, как у тебя сегодня дела? Всё хорошо." go out whole, and short sentences merge with the next.
+- `say_clean` keeps `$` and `%`; clause dashes become commas (a pause cue).
+- Spike (zero-shot, this box): whole-sentence chunking gave onset 292 / 304 / 574 ms (the 574 was a long first
+  sentence); clause-first + 40-char window gave 363 / 391 / 422 ms — tighter spread, higher median, because the
+  window now waits ~12 tokens. Faster LLM decode (healthy GPU) shrinks that wait directly.
+
+## Memory + memory pinning
+Both engines pin their KV caches instead of filling a GPU fraction: VoxCPM2 1 GiB (`deploy/voxcpm2.yaml`, also
+`max_num_seqs 2`, `max_model_len 2048`; stock deploy was 6 GiB / 8 seqs for multi-tenant serving), Qwen 2 GiB
+(`llm.kv_cache_gib`, `max_num_seqs 4`, `max_model_len 8192`). `gpu_memory_utilization` is then only vLLM's
+start-up free-memory check. Measured: VoxCPM2 7.4 GB loaded (+0.6 GB after warmup), Qwen ~11 GB, EARS ~4.8 GB;
+**~24 GB / 32 GB** total warm (was ~30.5 GB with MOSS + vLLM server).
+
+## V1.3 — smoke test on the box (cloned voice `en`, 9.3 s clip, no transcript)
+- `scripts/smoke_test.py` **PASS**: plain first-audio **503 ms** (first LLM text at 92 ms), Tavily weather tool
+  turn **743 ms**, placeholder reminder turn **770 ms** (admits not connected), EARS speech → endpoint → reply.
+- Plain-turn breakdown: ~200 ms waiting for the 40-char first chunk at 92 tok/s + VoxCPM2 encoding the 9.3 s
+  reference clip on every request (zero-shot first-audio was 113 ms). Lever: VoxCPM2's precomputed
+  `voice_profile` mode (vLLM-Omni loads custom voice profiles from a dir) to skip the per-request clip encode.
+- Logs grep-checked: no transcript or reply text in either process's output.
+- Startup (warm cache): MOUTH ~108 s (VoxCPM2 55 s, Qwen 32 s, TTS warmup 21 s), EARS ~15 s. First-ever start
+  adds downloads, VoxCPM2's one-time compile (~2 min warmup) and Qwen's CUDA-graph capture.
+- EARS per-hop compute is p50 275 / p90 404 ms per 320 ms hop on this box (same in the old pinned venv) — p90
+  exceeds real time here; re-check on a healthy GPU.
 
 ## What was copied from exp-12, and what was dropped
 EARS (`app/ears_core/`) is exp-12 **arm C** copied and flattened (no `codebase/` imports): nemotron encoder,
 StateChannelModel/YieldModel/EndpointModel, LiveEars, EndpointEars, plus a minimal `policy._decide` (the full
 `fdb_eval`/VAD harness isn't needed live). **Dropped vs exp-12**: the 4-way endpointer, the SPEAK-lock
 watchdog, affect/gender, A/B blinding + the sealed code→ckpt map, and all per-session transcript/frame logging
-(privacy). MOUTH keeps exp-12's Hermes lead-in + phase-B flow but the responder is now an **HTTP client to the
-vLLM server** (`app/mouth.py` `LLMClient`, OpenAI `/v1/chat/completions` streaming; tool calls arrive as
-structured `tool_calls`, not inline `<tool_call>` text), the **TTS is in-process MOSS-TTS-Realtime** (see below),
-and the reply is chunked into **whole sentences** (`chunker.next_sentence`). **Backchannels are contextual LLM
-acks** (`mouth.contextual_acks: true`, the user's choice): a short ack the LLM generates from the ASR partial
-transcript (EARS forwards the partial on the backchannel event), so it reacts to what the user is saying;
-canned acks remain as a `false` fallback. reminder/message tools return a "not connected" demo marker so the
-model says so.
+(privacy). MOUTH keeps exp-12's Hermes lead-in + phase-B flow. **Backchannels are contextual LLM acks**
+(`mouth.contextual_acks: true`, the user's choice): a short ack the LLM generates from the ASR partial
+transcript, so it reacts to what the user is saying; canned acks remain as a `false` fallback.
+reminder/message tools return a "not connected" demo marker so the model says so (and never log their content).
 
-## MOSS-TTS-Realtime integration (app/tts_realtime.py + app/weights.py; vendor the HF snapshot and patch it,
-## since trust_remote_code re-downloads and would revert HF-cache edits)
-- Model `OpenMOSS-Team/MOSS-TTS-Realtime` + codec `OpenMOSS-Team/MOSS-Audio-Tokenizer` (Apache-2.0), **24 kHz
-  native** (no resample to the 24 kHz wire). Backbone is Qwen3-1.7B + a local (depth) transformer over 16 RVQ
-  codebooks. Streaming session: `begin → push_text(sentence) → end → drain → flush`; `tts_realtime.stream(text)`
-  runs one session per sentence and yields float32 chunks as they decode.
-- The ref clip is codec-encoded **once per `set_voice`** (trimmed to `prompt_max_s`=4 s) and reused every turn;
-  read with **soundfile** (not torchaudio.load → avoids torchcodec). No audio/transcript to disk.
-- **Static-cache / CUDA-graph fast path** (`weights._patch_realtime_streaming`, idempotent; marker
-  `tyger: static-cache`): rewrites the Inference `prefill`/`step` to use a preallocated `StaticCache` +
-  `cache_position` + pure-causal mask (bs=1) and compiles the single-token backbone step with
-  `torch.compile(mode="reduce-overhead")`. Eager was RTF ~1.6–2.0; this is **~0.55–0.7**. **Boot warmup must run
-  2–3 long sentences** (`MossRealtimeTTS.warmup`) so the CUDA-graph depth is captured once up front — otherwise a
-  reply longer than anything seen so far triggers a one-off recapture spike (RTF ~3) mid-conversation.
-- Levers: `dec_chunk_frames` (4 → RTF ~0.67 + lower onset; 8 → ~0.56), `prefill_text_len` (6; lower = sooner
-  first audio), `max_length` (StaticCache length, 800). bf16/sdpa.
-- `app/tts_nano.py` (the Nano backend) is kept but **dormant** (not imported); it needs the old tf-4.57 venv.
+## History (superseded)
+- **V1.2** — three processes / three venvs: Qwen3-4B on a vLLM OpenAI server (`:8001`, TTFT 28 ms, ~150 tok/s),
+  MOUTH with in-process **MOSS-TTS-Realtime** (transformers 5.0.0; vendored + patched to a static-cache /
+  CUDA-graph fast path, RTF ~0.55–0.7, onset ~480 ms plain / ~577 ms tool turn), EARS in its own venv. GPU ~30.5
+  / 32 GB. Removed in V1.3 (code is in git history).
+- **V0** — MOSS-TTS-Nano bench: first-audio p50 112 ms, CER 1.17%, RTF 0.70–0.94; the user found its voice
+  "weird" and moved to MOSS-TTS-Realtime.
 
-## V0 — MOSS-TTS-Nano bench (bundled `en_2` ref, bf16/sdpa, co-loaded w/ 2507 + nemotron resident)
-| metric | MOSS-Nano | bar | MOSS-Realtime (exp-12) | Chatterbox (exp-12) |
-|---|---|---|---|---|
-| first-audio p50 / p90 | **112 / 117 ms** ✅ | ≤250 | ~1036 ms | ~781 ms |
-| CER (nemotron round-trip) | **1.17% / 0.0% med** ✅ | ≤~6.4% | ~5.4% | — |
-| RTF | 0.70 non-stream / 0.94 stream ❌ | ≤0.5 | ~0.78 | ~0.40 |
-
-Onset is the win (1036 → 112 ms) and CER improves; **RTF misses 0.5**, bottlenecked in the AR audio-token
-generation (codec fp16 vs fp32 = no change), so not cheaply fixable (torch.compile untried). RTF < 1.0, so
-streaming stays ahead of playback. **User decision: accept Nano, proceed.**
-
-## V1.2 — build + run on the box (vLLM LLM + MOSS-TTS-Realtime)
-- Three processes boot from fresh venvs built off `requirements-{vllm,moss,ears}.txt`. `run.sh` starts the
-  vLLM responder (`:8001`), waits for `/v1/models`, starts MOUTH (`:8770`), then EARS + web app (`:7860`).
-- **smoke_test.py PASS**: MOUTH plain reply **first-audio ~480 ms**; **Tavily** weather turn (first-audio
-  ~577 ms); a **placeholder** reminder turn that admits it isn't connected; contextual acks
-  ("walking downtown…"→"oh cool", "I got the job"→"Wow, really?"); EARS WS wav → endpoint fired → reply audio.
-  Steady TTS RTF ~0.56–0.7 (Realtime static-cache fast path).
-- **GPU memory** (warm, all three loaded): **~30.5 GB / 32 GB** — MOUTH/Realtime ~12.7 GB (CUDA-graph pools),
-  vLLM-Qwen ~11.8 GB @ `--gpu-memory-utilization 0.37` + `--max-model-len 4096`, EARS 5.4 GB. **Tight** (~2 GB
-  headroom); stable across turns (all pre-allocated). `VLLM_GPU_FRAC` must stay ≤ ~0.37 (0.28 → negative KV).
-- **Startup** (warm cache): vLLM ~1–5 min, MOUTH ~2.5 min (Realtime load + codec + 3-sentence CUDA-graph warmup;
-  the first warmup sentence triggers a ~30–60 s graph capture), EARS ~15 s. Cold cache adds the model download.
-
-## Still open (later milestones)
-- V2: retune `ep_thr`/`ep_deb` + barge/bc live with `?debug=1` (exp-12's 0.9146 was never retuned live; exp-11
-  found offline thresholds ~2× high on the browser mic). Freeze into `config.yaml`.
+## Still open
+- Judge the VoxCPM2 cloned voice live (user), and add `voices/<name>.txt` transcripts if quality needs it.
+- Precomputed VoxCPM2 voice profile to drop the per-request reference encode.
+- V2: retune `ep_thr`/`ep_deb` + barge/bc live with `?debug=1` (0.9146 was never retuned live). Freeze into `config.yaml`.
 - V3: Docker build/run + container smoke.
+- Re-benchmark everything on a healthy GPU.

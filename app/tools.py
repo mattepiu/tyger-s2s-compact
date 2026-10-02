@@ -88,12 +88,11 @@ def get_current_time(timezone):
 
 # ---- placeholder stubs: NOT connected. Return a demo marker so the model TELLS the user it isn't done
 # yet (it must not pretend a reminder was set or a message was sent). ----------------------------------
+# Privacy: never log the reminder text / message body / recipient -- they're user content.
 def set_reminder(text, time):
-    print(f"[tool stub] set_reminder (demo): {text!r} @ {time!r}", flush=True)
     return {"demo": True, "note": "Reminders aren't connected yet.", "text": text, "time": time}
 
 def send_message(recipient, body):
-    print(f"[tool stub] send_message (demo) -> {recipient!r}: {body!r}", flush=True)
     return {"demo": True, "note": "Messaging isn't connected yet.", "recipient": recipient, "body": body}
 
 _DISPATCH = {"get_weather": get_weather, "web_search": web_search, "get_current_time": get_current_time,

@@ -3,11 +3,12 @@
   --mouth   : connect to the MOUTH over TCP and run three turns -- a plain reply, a Tavily tool turn
               (weather), and a placeholder tool turn (reminder) -- asserting audio comes back and the
               placeholder reply admits it isn't connected. Deterministic (text in).
-  --ears    : connect to the running EARS web app over WebSocket, stream a speech wav as the mic, and
-              assert an endpoint fires and reply audio returns (synthetic wav -> endpoint -> audio out).
+  --ears    : connect to the running EARS web app over WebSocket, stream speech as the mic, and assert an
+              endpoint fires and reply audio returns (speech -> endpoint -> audio out). The speech is the
+              MOUTH's own TTS reply held in memory (or --wav).
   (default) : run both. Requires `run.sh` (EARS + MOUTH) to be up for --ears; only MOUTH for --mouth.
 
-Run (EARS venv): HF_HOME=/workspace/.hf_home <venv>/bin/python v1/scripts/smoke_test.py [--mouth|--ears]
+Run: HF_HOME=/workspace/.hf_home .venv/bin/python scripts/smoke_test.py [--mouth|--ears] [--wav x.wav]
 """
 import os, sys, json, time, socket, struct, argparse, wave
 from pathlib import Path
@@ -18,9 +19,9 @@ from app.wire import send_msg, recv_msg
 from app.config import load_config
 
 
-def mouth_turn(sock, transcript, label):
+def mouth_turn(sock, transcript, label, keep_audio=False):
     send_msg(sock, b"T", {"transcript": transcript})
-    audio = 0; text = ""; t0 = time.time(); first = None
+    audio = 0; text = ""; t0 = time.time(); first = None; chunks = []
     while True:
         kind, payload = recv_msg(sock)
         if kind is None:
@@ -29,6 +30,8 @@ def mouth_turn(sock, transcript, label):
             if first is None:
                 first = time.time() - t0
             audio += len(payload)
+            if keep_audio:
+                chunks.append(np.frombuffer(payload, np.float32))
         elif kind == b"X":
             d = json.loads(payload); text = d.get("text", "")
         elif kind == b"D":
@@ -36,17 +39,24 @@ def mouth_turn(sock, transcript, label):
     samples = audio // 4
     print(f"  [{label}] first-audio={(first*1e3 if first else -1):.0f}ms audio={samples/24000:.2f}s "
           f"reply={text[:70]!r}")
-    return samples, text
+    wav = np.concatenate(chunks) if chunks else np.zeros(0, np.float32)
+    return samples, text, wav
 
 
-def test_mouth(cfg):
+def mouth_session(cfg):
     host, port = cfg["server"]["mouth_host"], int(cfg["server"]["mouth_port"])
     s = socket.create_connection((host, port), timeout=120)
     s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    return s
+
+
+def test_mouth(cfg):
+    """Returns the plain turn's reply audio (24 kHz, in memory) so the EARS test can reuse it as speech."""
+    s = mouth_session(cfg)
     print("== MOUTH smoke ==")
-    n1, _ = mouth_turn(s, "Hi there, how are you today?", "plain")
-    n2, t2 = mouth_turn(s, "What's the weather in Paris right now?", "tavily-weather")
-    n3, t3 = mouth_turn(s, "Please set a reminder to call mom at six pm tomorrow.", "placeholder-reminder")
+    n1, _, speech = mouth_turn(s, "Hi there, how are you today?", "plain", keep_audio=True)
+    n2, t2, _ = mouth_turn(s, "What's the weather in Paris right now?", "tavily-weather")
+    n3, t3, _ = mouth_turn(s, "Please set a reminder to call mom at six pm tomorrow.", "placeholder-reminder")
     s.close()
     ok = n1 > 0 and n2 > 0 and n3 > 0
     # the placeholder reply should NOT claim it was done; ideally admits it isn't connected
@@ -55,7 +65,23 @@ def test_mouth(cfg):
     print(f"  placeholder admits-not-connected: {admits}")
     assert ok, "MOUTH produced no audio on one or more turns"
     print("  MOUTH smoke: PASS")
-    return True
+    return speech
+
+
+def speech_from_mouth(cfg):
+    """Synthesize a test utterance with the MOUTH's own TTS (kept in memory, never written to disk)."""
+    s = mouth_session(cfg)
+    _, _, wav = mouth_turn(s, "Say: I would like to know what the weather is like in Berlin today.",
+                           "speech-for-ears", keep_audio=True)
+    s.close()
+    return wav
+
+
+def to16k(x, sr):
+    if sr == 16000:
+        return x.astype(np.float32)
+    m = int(len(x) * 16000 / sr)
+    return np.interp(np.linspace(0, len(x) - 1, m), np.arange(len(x)), x).astype(np.float32)
 
 
 def load_wav16(path):
@@ -65,19 +91,16 @@ def load_wav16(path):
     x = np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0
     if ch > 1:
         x = x.reshape(-1, ch).mean(1)
-    if sr != 16000:
-        m = int(len(x) * 16000 / sr)
-        x = np.interp(np.linspace(0, len(x) - 1, m), np.arange(len(x)), x).astype(np.float32)
-    return x
+    return to16k(x, sr)
 
 
-def test_ears(cfg, wav_path):
+def test_ears(cfg, speech16):
     import asyncio, aiohttp
     port = int(cfg["server"]["port"])
 
     async def run():
-        x = load_wav16(wav_path)
-        x = np.concatenate([x, np.zeros(16000 * 2, np.float32)])  # 2 s trailing silence -> endpoint
+        x = np.concatenate([np.zeros(8000, np.float32), speech16,
+                            np.zeros(16000 * 2, np.float32)])  # 2 s trailing silence -> endpoint
         url = f"http://127.0.0.1:{port}/ws"
         async with aiohttp.ClientSession() as sess:
             async with sess.ws_connect(url, max_msg_size=0) as ws:
@@ -113,16 +136,22 @@ def test_ears(cfg, wav_path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mouth", action="store_true"); ap.add_argument("--ears", action="store_true")
-    ap.add_argument("--wav", default="/workspace/MOSS-TTS-Nano/assets/audio/en_2.wav")
+    ap.add_argument("--wav", default=None,
+                    help="speech wav for the EARS test (default: the MOUTH's own TTS reply, in memory)")
     ap.add_argument("--config", default=None)
     args = ap.parse_args()
     cfg = load_config(args.config)
     do_mouth = args.mouth or not args.ears
     do_ears = args.ears or not args.mouth
+    speech = None
     if do_mouth:
-        test_mouth(cfg)
+        speech = test_mouth(cfg)
     if do_ears:
-        test_ears(cfg, args.wav)
+        if args.wav:
+            speech16 = load_wav16(args.wav)
+        else:
+            speech16 = to16k(speech if speech is not None and speech.size else speech_from_mouth(cfg), 24000)
+        test_ears(cfg, speech16)
     print("SMOKE OK")
 
 
