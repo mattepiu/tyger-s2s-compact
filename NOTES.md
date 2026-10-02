@@ -52,6 +52,44 @@ used by VoxCPM2. So onset is cut on the text side (chunking, below), not by feed
   sentence); clause-first + 40-char window gave 363 / 391 / 422 ms — tighter spread, higher median, because the
   window now waits ~12 tokens. Faster LLM decode (healthy GPU) shrinks that wait directly.
 
+## Engine requests: one per LLM call and one per TTS chunk (no turn-level request ID)
+There is no single request that flows Qwen → VoxCPM2 inside vLLM. The two engines are independent; MOUTH reads
+the LLM's text, chunks it, and submits each chunk to the TTS itself. Every engine call gets its own request ID
+(`llm-<uuid>` in `app/llm.py`, `tts-<uuid>` in `app/tts_voxcpm.py`), and barge-in aborts whichever request is
+live by that ID.
+
+| MOUTH job | LLM requests (AsyncLLM) | TTS requests (AsyncOmni) |
+|---|---|---|
+| plain turn | 1 (reply, tools offered) | 1 per text chunk (clause-first, then sentences) |
+| tool turn | 3: reply → tool call; lead-in; phase B answer | 1 for the lead-in + 1 per phase-B chunk |
+| backchannel | 1 (`BC_PROMPT` + few-shot, ≤ `bc_max_new` 12 tokens) | 1 (the ack) |
+
+MOUTH handles one job at a time: turns (`T`), backchannels (`C`) and voice switches (`V`) go through one queue
+in `serve()`, so a backchannel never runs concurrently with a turn, even though the engines could batch
+(`max_num_seqs` 4 / 2).
+
+## How a backchannel works
+1. **EARS decides when.** In listen mode, every 80 ms frame, the bc head gives `bc_prob`. A `BACKCHANNEL` event
+   fires when `bc_prob ≥ ears.bc_thr` (0.5) for `bc_deb` (2) frames, once the user has ≥ 350 ms of voiced
+   speech in this turn and EARS is past its ~0.5 s warm-up; then a refractory of 15 frames (1.2 s).
+   `app/server.py` forwards it only if the agent isn't speaking, isn't halting after a barge, and no other
+   backchannel is in flight.
+2. **EARS attaches what the user is saying.** A rolling ASR partial is re-decoded from the last 8 s of user
+   audio at most every 0.8 s, off the critical path; the event just reads the latest one. It can be empty early
+   in a turn. EARS sends `C {"partial": ...}` to MOUTH.
+3. **MOUTH asks the LLM for the ack** (`Mouth.stream_bc`): `BC_PROMPT` + few-shot examples (EN/RU/ES reactions,
+   `mm-hm` / `угу` hums) + the last 3 acks ("don't repeat those") + the partial. A partial under
+   `mouth.bc_min_words` (4) or empty is framed as "only a few words so far", so the model answers with a
+   neutral hum; otherwise it reacts to the content, in the user's language. There are no canned acks.
+4. **MOUTH speaks it**: one VoxCPM2 request for the ack text, streamed back as `A` frames, then `D {"bc": true}`.
+   Typical first audio ~260–340 ms after the `C` (this box).
+5. **EARS plays it through to the browser** while `bc_active` is set. Backchannel audio is not fed to the
+   second ear and does not count toward the reply's `play_until`, and it never enters conversation history.
+
+**Interaction with the user's turn.** If the user's endpoint fires while a backchannel is still being made,
+EARS sends the turn at once, but MOUTH starts it only after the backchannel job finishes (one queue): the reply
+can start up to ~0.3–0.5 s later. The client stops any still-playing ack when the endpoint arrives.
+
 ## Memory + memory pinning
 Both engines pin their KV caches instead of filling a GPU fraction: VoxCPM2 1 GiB (`deploy/voxcpm2.yaml`, also
 `max_num_seqs 2`, `max_model_len 2048`; stock deploy was 6 GiB / 8 seqs for multi-tenant serving), Qwen 2 GiB
@@ -77,11 +115,9 @@ StateChannelModel/YieldModel/EndpointModel, LiveEars, EndpointEars, plus a minim
 `fdb_eval`/VAD harness isn't needed live). **Dropped vs exp-12**: the 4-way endpointer, the SPEAK-lock
 watchdog, affect/gender, A/B blinding + the sealed code→ckpt map, and all per-session transcript/frame logging
 (privacy). MOUTH keeps exp-12's Hermes lead-in + phase-B flow. **Backchannels are always contextual LLM acks**
-(user's call; canned acks removed): a short ack the LLM generates from the ASR partial transcript, so it reacts
-to what the user is saying. A partial under `mouth.bc_min_words` (4) or empty is flagged to the LLM as "only a
-few words so far", and it answers with a neutral hum ("mm-hm") — hums are fine *when the context calls for
-them*. The last 3 acks go into the prompt so it doesn't repeat itself. (Before: the prompt led with 'mm-hm' as
-its example and the model said it nearly every time.)
+(user's call; canned acks removed), see "How a backchannel works" above. Hums are fine *when the context calls
+for them* (short/empty partial). History: the first prompt led with 'mm-hm' as its example and the model said it
+nearly every time; then acks came back in English for Russian speech until few-shot examples were added.
 reminder/message tools return a "not connected" demo marker so the model says so (and never log their content).
 
 ## History (superseded)
