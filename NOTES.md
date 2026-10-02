@@ -76,9 +76,12 @@ EARS (`app/ears_core/`) is exp-12 **arm C** copied and flattened (no `codebase/`
 StateChannelModel/YieldModel/EndpointModel, LiveEars, EndpointEars, plus a minimal `policy._decide` (the full
 `fdb_eval`/VAD harness isn't needed live). **Dropped vs exp-12**: the 4-way endpointer, the SPEAK-lock
 watchdog, affect/gender, A/B blinding + the sealed code→ckpt map, and all per-session transcript/frame logging
-(privacy). MOUTH keeps exp-12's Hermes lead-in + phase-B flow. **Backchannels are contextual LLM acks**
-(`mouth.contextual_acks: true`, the user's choice): a short ack the LLM generates from the ASR partial
-transcript, so it reacts to what the user is saying; canned acks remain as a `false` fallback.
+(privacy). MOUTH keeps exp-12's Hermes lead-in + phase-B flow. **Backchannels are always contextual LLM acks**
+(user's call; canned acks removed): a short ack the LLM generates from the ASR partial transcript, so it reacts
+to what the user is saying. A partial under `mouth.bc_min_words` (4) or empty is flagged to the LLM as "only a
+few words so far", and it answers with a neutral hum ("mm-hm") — hums are fine *when the context calls for
+them*. The last 3 acks go into the prompt so it doesn't repeat itself. (Before: the prompt led with 'mm-hm' as
+its example and the model said it nearly every time.)
 reminder/message tools return a "not connected" demo marker so the model says so (and never log their content).
 
 ## History (superseded)

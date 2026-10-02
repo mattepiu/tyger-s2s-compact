@@ -11,14 +11,15 @@ Architecture:
     request whose audio streams out per decode step, so playback starts on chunk 1 while the rest render.
   * Barge-in (B on the wire) sets the stop flag; the live LLM/TTS request is aborted in the engine.
   * reminder/message tools return a "not connected" demo marker (tools.py) and the model says so.
-  * Backchannels are contextual LLM acks off the ASR partial by default (mouth.contextual_acks).
+  * Backchannels are always contextual LLM acks off the ASR partial: a reaction to the content, or a neutral
+    hum when the partial is too short (< mouth.bc_min_words) to react to. No canned/pre-rendered acks.
 Same EARS<->MOUTH wire (T/C/B/V -> X/A/D); audio on the wire is 24 kHz float32. No audio or transcript is
 written to disk or logs; only timings and event types.
 
 Run: HF_HOME=/workspace/.hf_home .venv/bin/python -m app.mouth
 """
 from __future__ import annotations
-import os, re, sys, socket, threading, queue, json, time, random, logging
+import os, sys, socket, threading, queue, json, time, logging
 from collections import deque
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root on path
@@ -50,10 +51,10 @@ BC_PROMPT = (
     "You are a voice assistant listening to the user, who is STILL speaking. You have NOT been given the "
     "floor. Read their partial words so far and emit ONLY a brief, natural spoken reaction (one to four words) "
     "to WHAT they are saying -- match its content and emotion, for example 'oh nice', 'oh no', 'wow, really?', "
-    "'that makes sense', 'got it', 'right', 'sure', 'ha, yeah', 'that's great', 'oh, I see'. Never use filler "
-    "hums like 'mm-hm', 'mmm' or 'hmm'. Do NOT answer, do NOT ask a real question, do NOT continue their "
-    "sentence, do NOT take the floor. Plain spoken words only, no markdown or symbols. Just the short reaction.")
-_HUM = re.compile(r"^\W*(?:[mh]+[-\s]*)+\W*$", re.I)   # "mm-hm", "Mmm.", "hmm", "mhm" -> not worth saying
+    "'that makes sense', 'got it', 'right', 'sure', 'ha, yeah', 'that's great', 'oh, I see'. If they have said "
+    "too little so far to react to, or nothing in their words calls for a specific reaction, use a neutral hum "
+    "such as 'mm-hm' or 'mhm'. Do NOT answer, do NOT ask a real question, do NOT continue their sentence, do "
+    "NOT take the floor. Plain spoken words only, no markdown or symbols. Just the short reaction.")
 RECENT_ACKS = 3
 
 
@@ -66,8 +67,7 @@ class Mouth:
         m = cfg["mouth"]; lc = cfg["llm"]; t = cfg["tts"]
         self.max_gen = int(m.get("max_gen", 192))
         self.history_turns = int(m.get("history_turns", 8))
-        self.contextual_acks = bool(m.get("contextual_acks", False))
-        self.canned_texts = list(m.get("canned_acks", ["mm-hm", "right", "yeah", "okay"]))
+        self.bc_min_words = int(m.get("bc_min_words", 4))
         self.bc_max_new = int(m.get("bc_max_new", 12))
         self.eloop = EngineLoop()
         # TTS first: its deploy config pins a small KV budget; the LLM's start-up check then sees what's left.
@@ -89,26 +89,15 @@ class Mouth:
             raise RuntimeError("no voice reference clips found (put a *.wav in voices.dir)")
         self.sr = self.tts.out_sr
         self.history = []
-        self.acks = {}
-        self.recent_acks = deque(maxlen=RECENT_ACKS)   # in memory only; so contextual acks don't repeat
-        log.info("warming TTS (voice=%s, contextual_acks=%s)", self.voice, self.contextual_acks)
+        self.recent_acks = deque(maxlen=RECENT_ACKS)   # in memory only; so backchannels don't repeat
+        log.info("warming TTS (voice=%s)", self.voice)
         self.tts.warmup()
         # first request with the tools prompt is cold (~490 ms to first token vs ~55 ms after) -> pay it here
         for _ in self.llm.stream([{"role": "system", "content": TTS_TOOLS_SYS}, {"role": "user", "content": "Hi."}],
                                  tools=TOOLS, max_new=8):
             pass
-        if not self.contextual_acks:      # canned acks are a fallback only; skip the pre-render otherwise
-            self._render_acks()
 
-    # ---- voice + acks ----
-    def _render_acks(self):
-        self.acks = {}
-        for txt in self.canned_texts:
-            w = self.tts.render(txt)
-            if w.size:
-                self.acks[txt] = w
-        log.info("pre-rendered %d canned acks", len(self.acks))
-
+    # ---- voice ----
     def set_voice(self, name):
         if name not in self.voices:                 # re-scan the dir in case a clip was added after startup
             try:
@@ -122,8 +111,6 @@ class Mouth:
             return False
         self.voice = name
         self.tts.set_voice(self.voices[name])
-        if not self.contextual_acks:
-            self._render_acks()
         log.info("voice -> %s", name)
         return True
 
@@ -222,25 +209,23 @@ class Mouth:
         reply = (lead + " " + full2).strip(); self._remember(transcript, full2.strip() or lead)
         yield ("done", reply)
 
-    # ---- backchannel: contextual LLM ack (default) or canned (fallback) ----
+    # ---- backchannel: always a contextual LLM ack off the ASR partial ----
     def stream_bc(self, partial, stop_flag=None):
-        if not self.contextual_acks and self.acks:
-            txt = random.choice(list(self.acks.keys()))
-            yield ("text", txt)
-            yield ("audio", self.acks[txt])
-            yield ("done", txt); return
+        """The LLM picks the ack: a reaction to the content, or a neutral hum when the partial is too short
+        (< bc_min_words, flagged to it explicitly) or gives nothing to react to."""
         user = (partial or "").strip()
-        if not user:                       # no ASR partial yet -> nothing to react to; stay quiet
-            yield ("done", ""); return
         sys_prompt = BC_PROMPT
         if self.recent_acks:
             sys_prompt += " You just said " + ", ".join(f"'{a}'" for a in self.recent_acks) + \
                           " -- don't repeat those."
-        messages = [{"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": f"The user is currently saying: \"{user}\""}]
+        if not user:
+            said = "The user is speaking, but no words have been recognized yet."
+        elif len(user.split()) < self.bc_min_words:
+            said = f"The user has only said a few words so far: \"{user}\""
+        else:
+            said = f"The user is currently saying: \"{user}\""
+        messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": said}]
         text = _text(self.llm.stream(messages, max_new=self.bc_max_new, stop_flag=stop_flag)).strip()
-        if _HUM.match(text):               # the model still hummed -> say nothing rather than "mm-hm" again
-            text = ""
         if text:
             self.recent_acks.append(text)
             yield ("text", text)
@@ -288,9 +273,8 @@ def serve(m, conn):
                     elif kind == "done":
                         send_msg(conn, b"D", {"text": val, "bc": True})
                         # counts + timing only, never the words
-                        log.info("backchannel: %s partial_chars=%d ack_chars=%d first-audio %.0fms",
-                                 "contextual" if m.contextual_acks else "canned", len(partial), len(val),
-                                 (t_aud or 0) * 1e3)
+                        log.info("backchannel: partial_words=%d ack_chars=%d first-audio %.0fms",
+                                 len(partial.split()), len(val), (t_aud or 0) * 1e3)
             else:
                 t0 = time.perf_counter(); t_txt = t_aud = None
                 for kind, val in m.stream_turn(turn["transcript"], stop_flag=stop.is_set):

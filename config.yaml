@@ -46,6 +46,6 @@ mouth:
   temperature: 0.7                   # sampling temperature for the responder
   max_gen: 192
   history_turns: 8                   # ~last 8 turns kept in the responder
-  contextual_acks: true              # true = LLM acks reacting to the ASR partial (exp-12); false = canned
-  canned_acks: ["mm-hm", "right", "yeah", "okay"]   # fallback only, used when contextual_acks is false
-  bc_max_new: 12                     # token budget for a contextual ack (kept short for low latency)
+  bc_max_new: 12                     # token budget for a backchannel (kept short for low latency)
+  bc_min_words: 4                    # ASR partial shorter than this is flagged to the LLM as "only a few
+                                     # words so far" -> it answers with a neutral hum instead of a reaction

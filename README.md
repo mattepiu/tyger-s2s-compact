@@ -82,9 +82,9 @@ flags. No secrets live here. Worth knowing:
 - **Endpoint thresholds** (`ears.ep_thr` etc.) ship at the training-time defaults and have **not** been
   retuned on a live browser mic — offline thresholds have been seen to run ~2× too high on real mic signal.
   Expect to tune these live with `?debug=1`, then freeze the values back into `config.yaml`.
-- **Backchannels** default to **contextual LLM acks** (`mouth.contextual_acks: true`): a short reply the LLM
-  generates from the running ASR partial, so the ack reacts to what you're saying. Set it `false` for fast
-  pre-rendered canned acks instead (lower latency, generic wording).
+- **Backchannels** are always **contextual LLM acks**: a short reaction the LLM generates from the running
+  ASR partial ("oh nice", "wow, really?"). When you've said too little to react to (`mouth.bc_min_words`),
+  it uses a neutral "mm-hm". How *often* they fire is EARS's `ears.bc_thr` (slider under `?debug=1`).
 
 ## Run & reach it
 
