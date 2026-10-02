@@ -41,9 +41,9 @@ the big open item (see `HANDOFF.md`).
 
 Built on one **NVIDIA RTX 5090** (32 GB, Blackwell sm_120), CUDA-13 driver (≥ 590) for the cu130 torch wheels.
 
-GPU memory in use ≈ **27 GB of 32 GB** with everything loaded, warm, and under a 4-session MOUTH load: VoxCPM2
-~9 GB (2 GiB pinned KV, `deploy/voxcpm2.yaml`), Qwen3-4B ~12 GB (3 GiB pinned KV, `llm.kv_cache_gib`), EARS
-~5 GB. Both engines pin their KV budgets, so the total is predictable.
+GPU memory in use ≈ **28.5 GB of 32 GB** with everything loaded, warm, and under a 4-conversation load: VoxCPM2
+~9.8 GB (2 GiB pinned KV, `deploy/voxcpm2.yaml`), Qwen3-4B ~11.8 GB (3 GiB pinned KV, `llm.kv_cache_gib`),
+EARS ~7 GB. Both engines pin their KV budgets, so the total is predictable.
 
 ## Setup
 
@@ -113,6 +113,8 @@ the voice picker. Browser DSP (echo cancellation, noise suppression, auto gain) 
 .venv/bin/python tests/test_chunker.py          # text chunking (no GPU)
 .venv/bin/python tests/test_llm_parse.py        # tool-call text splitting (no GPU)
 .venv/bin/python scripts/smoke_test.py          # needs run.sh up: MOUTH tool turns + EARS speech → endpoint → audio
+.venv/bin/python scripts/load_test.py --sessions 4       # needs run.sh up: concurrent MOUTH turns + backchannels
+.venv/bin/python scripts/load_test_ears.py --sessions 4  # needs run.sh up: N real-time WebSocket conversations
 ```
 
 The EARS half of the smoke test uses the MOUTH's own TTS reply (held in memory) as the "user" speech, so no
@@ -134,8 +136,9 @@ onset ms, barge, backchannel, tool name). Voice reference clips and their transc
 
 ## Known limits (v1)
 
-- **One conversation at a time in EARS.** MOUTH already serves several sessions concurrently (and runs
-  backchannels alongside turns); EARS's batched multi-session step is in progress (see `NOTES.md`).
+- **Up to 4 conversations** per GPU (`server.max_sessions`); more visitors get a busy page. On this throttled
+  box 4 conversations keep EARS near real time (hop lag p50 122 / p90 353 ms) with reply onset ~810 ms; see
+  `NOTES.md` → Concurrency.
 - `set_reminder` / `send_message` are **placeholders** — the model says they aren't connected yet.
 - Plain-turn onset ~500 ms, tool turn ~750 ms (smoke test, cloned voice) on a box whose GPU is stuck at half
   memory clock — expect better on a healthy GPU (see `NOTES.md`). VoxCPM2 re-encodes the reference clip on

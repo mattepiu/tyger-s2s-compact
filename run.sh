@@ -48,6 +48,7 @@ PIDS+=($!)
 wait_tcp "$MOUTH_PORT" "MOUTH" "${PIDS[-1]}"
 
 echo "=== starting EARS + web app ==="
-"$PY" -m app.server "${CFG_ARGS[@]}" &
+# expandable segments: EARS encodes windows of many lengths; without it the allocator cache fragments and grows
+PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}" "$PY" -m app.server "${CFG_ARGS[@]}" &
 PIDS+=($!)
 wait "${PIDS[-1]}"

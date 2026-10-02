@@ -117,13 +117,54 @@ the reply turn has started, and the client stops any still-playing ack when the 
   | 2 | 691 / 794 ms | 635 / 728 ms | 27.0 GB |
   | 4 | 833 / 1126 ms | 829 / 1620 ms | 27.0 GB |
 
-- **EARS is still single-session** (`BUSY`); its batched multi-session step is the next stage.
+
+## Concurrency (V1.4) — EARS: up to 4 conversations, batched on one GPU thread
+- **Structure** (`app/ears_core/batched.py`): `EarsService` owns one GPU thread; each WebSocket conversation is
+  an `EarsSession` on a slot (`server.max_sessions`, more visitors get the busy page). A conversation submits a
+  320 ms hop and awaits its events; the GPU thread gathers the hops of all live conversations into one tick
+  (`EarsEngine.process`): encoder windows batched by length, then 4 batched head steps. Validated against the
+  single-session `EndpointEars` (kept as the reference): same events for 4 staggered sessions, head outputs within
+  ~0.007 (bf16 noise).
+- **Head**: Qwen3-0.6B + LoRA merged at load, over a static KV ring (`RingKV`, `ears.ring_frames` per slot, its
+  own write pointer, validity mask and RoPE positions; reset each turn). One CUDA graph per attention width (129,
+  257, … 2049 columns); a step uses the narrowest width covering every active row. Attending the full
+  2049 mostly-masked columns was ~2/3 of a step (13.3 → 6.2 ms per step).
+- **Encoder stops at layer 15** (the layer the heads read; a thread-local hook on that layer raises): 35 → 24 ms
+  for 4 × 8 s windows, features bit-identical. All-zero windows (the agent channel while listening) are cached.
+- **ASR** runs on its own thread + CUDA stream. Greedy RNN-T decoding is our own loop
+  (`app/ears_core/rnnt.py`), captured as one CUDA graph of 16 steps over a padded batch: **same text as
+  nemotron's `generate()`** (80/80 windows, 1–20 s, single and padded batches) and 3–5× faster (8 s window ×4:
+  244 → 74 ms; 20 s final: 417 → 88 ms). HF's `generate()` spent ~1 ms of Python per step, holding the GIL the
+  tick thread needed; that was the main reason 4 sessions fell behind. Partials of all due sessions decode as
+  one batch; endpoint finals go first.
+- **Gathering**: the server reads the mic and processes hops in separate tasks, so a conversation that is behind
+  says so (`more`: its next hop is already buffered); the next gather waits up to `ears.expect_ms` (60) for those
+  catch-up hops instead of `gather_ms` (15), so they share a tick.
+- **Torch CPU threads capped** (`ears.cpu_threads` / `mouth.cpu_threads` = 4): the default 48 mostly spin-waited
+  (~2400% CPU) and was slower.
+- **Memory**: EARS ~6 GiB reserved under 4-session load (run.sh sets `expandable_segments` for EARS; without it the
+  allocator cache fragmented on the varying window lengths and grew past 9 GiB).
+- **Load test** (`scripts/load_test_ears.py`: N real-time WebSocket conversations, 2 turns each, speech = the
+  MOUTH's own TTS; full system on this throttled box). Hop lag = a hop's `state` event back after the hop was sent:
+
+  | conversations | hop lag p50 / p90 / max | endpoint → first reply audio p50 |
+  |---|---|---|
+  | 1 | 59 / 114 / 202 ms | 529 ms |
+  | 2 | 87 / 193 / 397 ms | 636 ms |
+  | 4 | 122 / 353 / 716 ms | 810 ms |
+
+  Before this round (per-session gather, HF ASR, full-width head, full encoder), 4 conversations lagged
+  1101 / 2960 / 3886 ms and fell further behind. At 4 the GPU thread is still ~70–80% busy (encoder ~40%,
+  head ~30%) next to the MOUTH's decoding, so p90 sits just above one hop; a healthy GPU should clear it.
+  `ears.stats_s` logs tick timing, busy %, and memory.
+- **Shutdown**: MOUTH handles SIGTERM/SIGINT by shutting both engines down; a bare SIGTERM used to orphan the
+  VoxCPM2 stage process (holding ~9 GB).
 
 ## Memory + memory pinning
 Both engines pin their KV caches instead of filling a GPU fraction: VoxCPM2 2 GiB (`deploy/voxcpm2.yaml`, also
 `max_num_seqs 4`, `max_model_len 2048`; stock deploy was 6 GiB / 8 seqs), Qwen 3 GiB (`llm.kv_cache_gib`,
 `max_num_seqs 8`, `max_model_len 8192`). `gpu_memory_utilization` is then only vLLM's start-up free-memory
-check. Total **~27 GB / 32 GB** warm and under 4-session load (V1.3 single-session sizing was ~24 GB; MOSS +
+check. Total **~28.5 GB / 32 GB** warm and under 4-conversation load (EARS ~7 GB) (V1.3 single-session sizing was ~24 GB; MOSS +
 vLLM server was ~30.5 GB).
 
 ## V1.3 — smoke test on the box (cloned voice `en`, 9.3 s clip, no transcript)
@@ -135,8 +176,8 @@ vLLM server was ~30.5 GB).
 - Logs grep-checked: no transcript or reply text in either process's output.
 - Startup (warm cache): MOUTH ~108 s (VoxCPM2 55 s, Qwen 32 s, TTS warmup 21 s), EARS ~15 s. First-ever start
   adds downloads, VoxCPM2's one-time compile (~2 min warmup) and Qwen's CUDA-graph capture.
-- EARS per-hop compute is p50 275 / p90 404 ms per 320 ms hop on this box (same in the old pinned venv) — p90
-  exceeds real time here; re-check on a healthy GPU.
+- EARS per-hop compute was p50 275 / p90 404 ms per 320 ms hop on this box (same in the old pinned venv);
+  superseded by the batched engine (single conversation now ~60 ms per tick, see Concurrency — EARS).
 
 ## What was copied from exp-12, and what was dropped
 EARS (`app/ears_core/`) is exp-12 **arm C** copied and flattened (no `codebase/` imports): nemotron encoder,

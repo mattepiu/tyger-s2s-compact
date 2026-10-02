@@ -186,59 +186,81 @@ async def _conversation(ws, ears):
             pass
     pump = asyncio.create_task(pump_mouth()) if have_mouth else None
 
+    async def handle_events(evs):
+        yp = bcp = pe = 0.0; last = None
+        for e in evs:
+            if e["kind"] == "FRAME":
+                yp = max(yp, e.get("yield_prob", 0.0) or 0.0)
+                bcp = max(bcp, e.get("bc_prob", 0.0) or 0.0)
+                pe = max(pe, e.get("p_end", 0.0) or 0.0); last = e
+            elif e["kind"] == "ENDPOINT" and not st["speaking"]:
+                log.info("endpoint by=%s turn_s=%.2f", e.get("by"), e.get("turn_s", 0.0))
+                await ws.send_json({"type": "endpoint", "turn_s": round(e["turn_s"], 1),
+                                    "by": e.get("by")})
+                if have_mouth and e["transcript"].strip():
+                    if st["halting"]:
+                        st["pending"] = e["transcript"]
+                    else:
+                        await send_turn(e["transcript"])
+            elif e["kind"] == "BACKCHANNEL" and not st["speaking"] and not st["halting"] \
+                    and not st["bc_active"]:
+                log.info("backchannel bc_prob=%.2f partial_chars=%d", e.get("bc_prob", 0.0),
+                         len(e.get("partial") or ""))   # length only: never log the words
+                await ws.send_json({"type": "bc_cue", "bc": e.get("bc_prob")})
+                if have_mouth:
+                    await send_backchannel(e.get("partial", ""))
+            elif e["kind"] == "BARGE" and st["speaking"]:
+                st["speaking"] = False; st["halting"] = True; st["reset"] = True
+                st["agent_buf"] = np.zeros(0, np.float32); st["barge_t0"] = time.perf_counter()
+                log.info("barge yield=%.2f", e.get("yield_prob", 0.0))
+                await ws.send_json({"type": "barge", "yield": e["yield_prob"]})  # client stops playback
+                if st["mouth_done"]:
+                    # MOUTH already finished generating (its D was held for playback) -> no D will
+                    # come back for this turn; close it here instead of waiting.
+                    if st["done_task"] is not None:
+                        st["done_task"].cancel()
+                    st["halting"] = False
+                    await finish_turn(True)
+                elif have_mouth:
+                    await async_send_msg(m_writer, b"B")
+        if last is not None:
+            await ws.send_json({"type": "state", "state": last["state"], "yield": yp,
+                                "bc": bcp, "hazard": last.get("hazard", 0.0), "p_end": round(pe, 3)})
+
+    # The mic reader (below) only appends to buf; this task turns buf into hops. Decoupled so that while a
+    # hop is on the GPU the reader keeps draining the socket, and `more` (another hop already buffered, i.e.
+    # this conversation is behind) is visible to the batcher, which then waits for its catch-up hop.
+    hop_ready = asyncio.Event()
+
+    async def run_hops():
+        nonlocal buf
+        try:
+            while True:
+                while len(buf) < HOP_N:
+                    hop_ready.clear(); await hop_ready.wait()
+                uh = np.ascontiguousarray(buf[:HOP_N]); buf = buf[HOP_N:]
+                if st["reset"]:
+                    ears.reset(); st["reset"] = False
+                if st["speaking"]:
+                    ab = st["agent_buf"]; ah = np.zeros(HOP_N, np.float32)
+                    n = min(HOP_N, len(ab)); ah[:n] = ab[:n]; st["agent_buf"] = ab[n:]; mode = "speaking"
+                else:
+                    ah = np.zeros(HOP_N, np.float32); mode = "listen"
+                evs = await SERVICE.feed(ears, uh, ah, mode, more=len(buf) >= HOP_N)  # batched across sessions
+                await handle_events(evs)
+        except (ConnectionError, asyncio.CancelledError):
+            pass
+        except Exception as e:
+            log.exception("hop loop error: %s", type(e).__name__)
+            await ws.close()
+    hops = asyncio.create_task(run_hops())
+
     try:
         async for msg in ws:
             if msg.type == WSMsgType.BINARY:
                 buf = np.concatenate([buf, np.frombuffer(msg.data, dtype=np.float32)])
-                while len(buf) >= HOP_N:
-                    uh = np.ascontiguousarray(buf[:HOP_N]); buf = buf[HOP_N:]
-                    if st["reset"]:
-                        ears.reset(); st["reset"] = False
-                    if st["speaking"]:
-                        ab = st["agent_buf"]; ah = np.zeros(HOP_N, np.float32)
-                        n = min(HOP_N, len(ab)); ah[:n] = ab[:n]; st["agent_buf"] = ab[n:]; mode = "speaking"
-                    else:
-                        ah = np.zeros(HOP_N, np.float32); mode = "listen"
-                    evs = await SERVICE.feed(ears, uh, ah, mode)      # batched with the other sessions
-                    yp = bcp = pe = 0.0; last = None
-                    for e in evs:
-                        if e["kind"] == "FRAME":
-                            yp = max(yp, e.get("yield_prob", 0.0) or 0.0)
-                            bcp = max(bcp, e.get("bc_prob", 0.0) or 0.0)
-                            pe = max(pe, e.get("p_end", 0.0) or 0.0); last = e
-                        elif e["kind"] == "ENDPOINT" and not st["speaking"]:
-                            log.info("endpoint by=%s turn_s=%.2f", e.get("by"), e.get("turn_s", 0.0))
-                            await ws.send_json({"type": "endpoint", "turn_s": round(e["turn_s"], 1),
-                                                "by": e.get("by")})
-                            if have_mouth and e["transcript"].strip():
-                                if st["halting"]:
-                                    st["pending"] = e["transcript"]
-                                else:
-                                    await send_turn(e["transcript"])
-                        elif e["kind"] == "BACKCHANNEL" and not st["speaking"] and not st["halting"] \
-                                and not st["bc_active"]:
-                            log.info("backchannel bc_prob=%.2f partial_chars=%d", e.get("bc_prob", 0.0),
-                                     len(e.get("partial") or ""))   # length only: never log the words
-                            await ws.send_json({"type": "bc_cue", "bc": e.get("bc_prob")})
-                            if have_mouth:
-                                await send_backchannel(e.get("partial", ""))
-                        elif e["kind"] == "BARGE" and st["speaking"]:
-                            st["speaking"] = False; st["halting"] = True; st["reset"] = True
-                            st["agent_buf"] = np.zeros(0, np.float32); st["barge_t0"] = time.perf_counter()
-                            log.info("barge yield=%.2f", e.get("yield_prob", 0.0))
-                            await ws.send_json({"type": "barge", "yield": e["yield_prob"]})  # client stops playback
-                            if st["mouth_done"]:
-                                # MOUTH already finished generating (its D was held for playback) -> no D will
-                                # come back for this turn; close it here instead of waiting.
-                                if st["done_task"] is not None:
-                                    st["done_task"].cancel()
-                                st["halting"] = False
-                                await finish_turn(True)
-                            elif have_mouth:
-                                await async_send_msg(m_writer, b"B")
-                    if last is not None:
-                        await ws.send_json({"type": "state", "state": last["state"], "yield": yp,
-                                            "bc": bcp, "hazard": last.get("hazard", 0.0), "p_end": round(pe, 3)})
+                if len(buf) >= HOP_N:
+                    hop_ready.set()
             elif msg.type == WSMsgType.TEXT:
                 data = msg.data
                 if data == "reset":
@@ -262,6 +284,7 @@ async def _conversation(ws, ears):
                     except (ValueError, AttributeError):
                         pass
     finally:
+        hops.cancel()
         if pump:
             pump.cancel()
         if st["done_task"] is not None:
@@ -281,7 +304,9 @@ def build_service(cfg):
     n = int(cfg["server"].get("max_sessions", 4))
     log.info("loading EARS (arm C) for %d sessions, ep_thr=%s ep_deb=%s", n, e["ep_thr"], e["ep_deb"])
     engine = EarsEngine(heads, slots=n, ring_len=int(e.get("ring_frames", 2048)))
-    return EarsService(engine, gather_s=float(e.get("gather_ms", 15)) / 1e3)
+    return EarsService(engine, gather_s=float(e.get("gather_ms", 15)) / 1e3,
+                       expect_s=float(e.get("expect_ms", 60)) / 1e3,
+                       stats_every_s=float(e.get("stats_s", 60)))
 
 
 def main():

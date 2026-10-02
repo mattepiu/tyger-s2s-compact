@@ -4,14 +4,14 @@ that have a hop ready.
 Same decisions as EndpointEars (arm C, endpoint_ears.py -- kept as the single-session reference; the per-frame
 logic in EarsEngine._frame is a line-by-line port of EndpointEars.feed). What changes is how the GPU work runs:
   * encoder: the (user, agent) windows of every session in a tick go through nemotron together, grouped by
-    window length (after the first 8 s every window is 8 s, so it is one batch);
+    window length (after the first 8 s every window is 8 s, so it is one batch), stopping at layer 15;
   * heads: the head backbone (Qwen3-0.6B + LoRA, merged at load) steps all sessions at once through RingKV, a
     static KV cache with one slot per session. Each slot has its own write pointer, RoPE positions and
     validity mask, so it attends to exactly its own context (its last `ring_len` frames; the old per-session
-    DynamicCache grew without bound). Static shapes -> the step is one CUDA graph replay instead of ~46 ms of
-    eager kernels per frame;
+    DynamicCache grew without bound). Static shapes -> the step is one CUDA graph replay (one graph per
+    attention width; the narrowest that covers every active row) instead of ~46 ms of eager kernels per frame;
   * ASR (the endpoint transcript, and the rolling partial used for backchannels) runs on a side thread with
-    its own CUDA stream, so it never stalls the hop clock. A hop that ends with an ENDPOINT resolves when its
+    its own CUDA stream, so it never stalls the hop clock; greedy RNN-T decoding is a CUDA graph (rnnt.py). A hop that ends with an ENDPOINT resolves when its
     transcript is ready; partials land asynchronously (at most one refresh behind).
 Dropped vs EndpointEars: the L15 "affect" vectors on ENDPOINT/BACKCHANNEL events (nothing consumed them).
 Privacy: audio and transcripts stay in memory; logs carry counts and timings only.
@@ -24,6 +24,7 @@ from .labeling import FRAME_S
 from .model import LISTEN, SPEAK
 from .live_ears import HOP_FRAMES, WINDOW_S, STATE_NAMES
 from .endpoint_head import EndpointModel
+from .rnnt import GraphedRNNT
 from . import policy as fp
 
 log = logging.getLogger("ears")
@@ -43,22 +44,24 @@ def frame_energy(wav):
 
 
 class RingKV:
-    """Static KV cache for the head backbone: `slots` rows x (`ring_len` + 1 scratch) columns per layer. Each
-    row is written at its own column (`widx`); idle rows write the scratch column. Passed to the HF backbone
-    as `past_key_values` (it only needs `update`)."""
+    """Static KV cache for the head backbone: `slots` rows x (1 scratch + `ring_len`) columns per layer. Each
+    row is written at its own column (`widx`); idle rows write the scratch column 0. Passed to the HF backbone
+    as `past_key_values` (it only needs `update`); attention reads only the first `cols` columns (the CUDA graph
+    for the current width), since a turn's context sits at the front of the ring until it wraps."""
     def __init__(self, n_layers, slots, ring_len, n_kv, head_dim, dtype, device):
         cols = ring_len + 1
         self.k = [torch.zeros(slots, n_kv, cols, head_dim, dtype=dtype, device=device) for _ in range(n_layers)]
         self.v = [torch.zeros_like(x) for x in self.k]
         self.i0 = torch.arange(slots, device=device)[:, None]
         self.i1 = torch.arange(n_kv, device=device)[None, :]
-        self.widx = torch.full((slots,), ring_len, dtype=torch.long, device=device)
+        self.widx = torch.zeros(slots, dtype=torch.long, device=device)
+        self.cols = cols
 
     def update(self, key, value, layer_idx, *args, **kwargs):          # key/value: (slots, n_kv, 1, head_dim)
         w = self.widx[:, None]
         self.k[layer_idx].index_put_((self.i0, self.i1, w), key[:, :, 0])
         self.v[layer_idx].index_put_((self.i0, self.i1, w), value[:, :, 0])
-        return self.k[layer_idx], self.v[layer_idx]
+        return self.k[layer_idx][:, :, :self.cols], self.v[layer_idx][:, :, :self.cols]
 
     def get_seq_length(self, layer_idx=0):
         return 0
@@ -82,9 +85,16 @@ class HeadBatch:
         self.valid = torch.zeros(S, cols, dtype=torch.bool, device=device)
         self.mask = torch.zeros(S, 1, 1, cols, dtype=torch.bool, device=device)
         self.ar = torch.arange(S, device=device)
-        self.count = [0] * S          # frames ever written per slot -> ring pointer
+        self.count = [0] * S          # frames written since the slot's last reset -> ring pointer, width
         self.npos = [0] * S           # RoPE position since the slot's last reset (= DynamicCache length before)
-        self.graph = None; self.out = None
+        # attention widths (scratch + ring columns): one CUDA graph each; a step uses the narrowest one covering
+        # every active row's context (attending 2049 mostly-masked columns cost ~2/3 of a step)
+        self.widths = []
+        w = 128
+        while w < ring_len:
+            self.widths.append(w + 1); w *= 2
+        self.widths.append(ring_len + 1)
+        self.graphs = {}; self.outs = {}; self.graph = None
         if cuda_graph:
             try:
                 self._capture()
@@ -92,13 +102,15 @@ class HeadBatch:
                 log.warning("head CUDA graph capture failed (%s); running eager", type(e).__name__)
                 self.graph = None
 
-    def _compute(self):
+    def _compute(self, cols):
         ym, b = self.ym, self.ym.base
+        self.kv.cols = cols
         self.valid.index_put_((self.ar, self.kv.widx), self.part)       # new column valid for active rows
         self.mask[:, 0, 0, :].copy_(self.valid)
-        self.mask[:, 0, 0, self.L] = ~self.part                         # idle rows attend the scratch column
+        self.mask[:, 0, 0, 0] = ~self.part                              # idle rows attend the scratch column
         x = ym.fuse2(self.hu, self.ha, self.act, self.prev)
-        o = b.backbone(inputs_embeds=x, attention_mask={"full_attention": self.mask}, position_ids=self.pos,
+        o = b.backbone(inputs_embeds=x, attention_mask={"full_attention": self.mask[..., :cols]},
+                       position_ids=self.pos,
                        past_key_values=self.kv, use_cache=True)
         z = o.last_hidden_state.float()
         return torch.cat([b.state_head(z), torch.sigmoid(b.hazard_head(z)), torch.sigmoid(ym.yield_head(z)),
@@ -107,37 +119,42 @@ class HeadBatch:
     @torch.no_grad()
     def _capture(self):
         # all slots idle -> warmup/capture only touch the scratch column
-        side = torch.cuda.Stream(); side.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(side):
-            for _ in range(3):
-                self._compute()
-        torch.cuda.current_stream().wait_stream(side)
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
-            self.out = self._compute()
-        self.graph = g
+        pool = None
+        for cols in reversed(self.widths):                              # widest first; all share one pool
+            side = torch.cuda.Stream(); side.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(side):
+                for _ in range(3):
+                    self._compute(cols)
+            torch.cuda.current_stream().wait_stream(side)
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g, pool=pool):
+                self.outs[cols] = self._compute(cols)
+            pool = g.pool(); self.graphs[cols] = g
+        self.graph = self.graphs[self.widths[-1]]
 
     def reset_slot(self, s):
-        self.valid[s] = False; self.npos[s] = 0
+        self.valid[s] = False; self.npos[s] = 0; self.count[s] = 0
 
     @torch.no_grad()
     def step(self, entries):
         """entries: [(slot, hu (1024,) cuda f32, ha (1024,) cuda f32, act_dB float, prev_state int)]."""
         S, L = self.S, self.L
-        part = torch.zeros(S, dtype=torch.bool); widx = torch.full((S,), L, dtype=torch.long)
+        part = torch.zeros(S, dtype=torch.bool); widx = torch.zeros(S, dtype=torch.long)
         pos = torch.zeros(S, 1, dtype=torch.long); prev = torch.zeros(S, 1, dtype=torch.long)
         act = torch.zeros(S, 1)
         for s, hu, ha, a, p in entries:
-            part[s] = True; widx[s] = self.count[s] % L; pos[s, 0] = self.npos[s]; prev[s, 0] = p
+            part[s] = True; widx[s] = 1 + self.count[s] % L; pos[s, 0] = self.npos[s]; prev[s, 0] = p
             act[s, 0] = float(np.clip((a + 50) / 25, -3, 3))
             self.hu[s, 0].copy_(hu); self.ha[s, 0].copy_(ha)
             self.count[s] += 1; self.npos[s] += 1
         self.part.copy_(part); self.kv.widx.copy_(widx); self.pos.copy_(pos); self.prev.copy_(prev)
         self.act.copy_(act)
-        if self.graph is not None:
-            self.graph.replay(); out = self.out
+        need = 1 + max(min(self.count[e[0]], L) for e in entries)       # columns in use, scratch included
+        cols = next(w for w in self.widths if w >= need)
+        if self.graphs:
+            self.graphs[cols].replay(); out = self.outs[cols]
         else:
-            out = self._compute()
+            out = self._compute(cols)
         return out.cpu().numpy()
 
 
@@ -167,6 +184,10 @@ class EarsSession:
         self.pending_reset = True
 
 
+class _StopAtL15(Exception):
+    pass
+
+
 class _Job:
     __slots__ = ("kind", "sess", "gen", "wav", "done")
 
@@ -189,10 +210,23 @@ class EarsEngine:
         log.info("EARS engine: %d slots, ring %d frames, LoRA merged=%s, head CUDA graph=%s",
                  slots, ring_len, merge_lora, self.head.graph is not None)
         self._zero_enc = {}                    # window length -> L15 of an all-zero window
+        # The heads read layer 15 of 24: EARS encodes stop there (a hook on that layer raises), ~1/3 less encoder
+        # work per tick. Thread-local, so the ASR thread's full-depth encodes of the same module are untouched.
+        self._tls = threading.local()
+        self.enc.layers[L15 - 1].register_forward_hook(self._l15_hook)
         self.asr_stream = torch.cuda.Stream()
-        self._gen_lock = threading.Lock()
+        self._gen_lock = threading.Lock()      # the decoder's static graph buffers: one transcription at a time
+        self.rnnt = GraphedRNNT(self.asr, max_batch=slots, max_frames=int(TURN_MAX_S / FRAME_S) + 8)
+        if cuda_graph:
+            self.rnnt.capture()
         self.asr_q: queue.Queue = queue.Queue()
+        self.t_enc = self.t_head = self.t_asr = 0.0          # busy seconds, reset by the stats log
         threading.Thread(target=self._asr_loop, name="ears-asr", daemon=True).start()
+
+    def _l15_hook(self, mod, args, out):
+        if getattr(self._tls, "stop", False):
+            self._tls.h = out[0] if isinstance(out, tuple) else out
+            raise _StopAtL15
 
     # ---- GPU helpers ----
     @torch.no_grad()
@@ -209,9 +243,15 @@ class EarsEngine:
         for n, idx in groups.items():
             inp = self.proc([wavs[i] for i in idx], sampling_rate=ENC_SR, return_tensors="pt")
             feats = inp["input_features"].to(self.device); am = inp.get("attention_mask")
-            eo = self.enc(input_features=feats, attention_mask=(am.to(self.device) if am is not None else None),
-                          num_lookahead_tokens=0, output_hidden_states=True)
-            hs = eo.hidden_states[L15].float()
+            self._tls.stop = True
+            try:
+                self.enc(input_features=feats, attention_mask=(am.to(self.device) if am is not None else None),
+                         num_lookahead_tokens=0)
+            except _StopAtL15:
+                pass
+            finally:
+                self._tls.stop = False
+            hs = self._tls.h.float()
             for j, i in enumerate(idx):
                 out[i] = hs[j]
                 if n not in self._zero_enc and not wavs[i].any():
@@ -220,18 +260,14 @@ class EarsEngine:
 
     @torch.no_grad()
     def transcribe(self, wavs):
-        """list of 16 kHz clips -> list of text, on the ASR stream; equal lengths are batched."""
-        out = [""] * len(wavs); groups = {}
-        for i, w in enumerate(wavs):
-            groups.setdefault(len(w), []).append(i)
-        # nemotron's generate() patches attributes onto the model object for the call -> not re-entrant
+        """list of 16 kHz clips -> list of text, on the ASR stream, as one padded batch. Greedy RNN-T as a CUDA
+        graph (rnnt.py): same text as nemotron's generate(), ~4x faster and without its per-step Python."""
+        if not wavs:
+            return []
         with self._gen_lock, torch.cuda.stream(self.asr_stream):
-            for _, idx in groups.items():
-                inp = self.proc([wavs[i] for i in idx], sampling_rate=ENC_SR, return_tensors="pt").to(self.device)
-                seqs = self.asr.generate(**inp).sequences
-                for j, t in zip(idx, self.proc.batch_decode(seqs, skip_special_tokens=True)):
-                    out[j] = t.strip()
-        return out
+            inp = self.proc(wavs, sampling_rate=ENC_SR, return_tensors="pt").to(self.device)
+            seqs = self.rnnt(inp["input_features"], inp.get("attention_mask"))
+            return [self.proc.decode(q, skip_special_tokens=True).strip() for q in seqs]
 
     def _asr_loop(self):
         while True:
@@ -243,6 +279,7 @@ class EarsEngine:
                     break
             finals = [j for j in jobs if j.kind == "final"]
             partials = [j for j in jobs if j.kind == "partial"]
+            t0 = time.perf_counter()
             try:
                 if finals:                                     # an endpoint reply is waiting on these
                     for j, t in zip(finals, self.transcribe([j.wav for j in finals])):
@@ -258,6 +295,7 @@ class EarsEngine:
                     j.done("")
                 for j in partials:
                     j.sess.partial_inflight = False
+            self.t_asr += time.perf_counter() - t0
 
     # ---- one tick ----
     def process(self, items):
@@ -272,7 +310,9 @@ class EarsEngine:
             if mode == "listen":
                 sess.turn_u = np.concatenate([sess.turn_u, uh])[-int(TURN_MAX_S * ENC_SR):]
             res[sess] = ([], [])
+        t0 = time.perf_counter()
         hs = self.encode([w for sess, *_ in items for w in (sess.win_u, sess.win_a)])
+        torch.cuda.current_stream().synchronize(); t1 = time.perf_counter()
         plan = []                                              # (sess, mode, hu, ha, act, n)
         for k, (sess, uh, ah, mode) in enumerate(items):
             hu, ha = hs[2 * k], hs[2 * k + 1]
@@ -294,6 +334,7 @@ class EarsEngine:
             out = self.head.step([(p[0].slot, p[2][i], p[3][i], float(p[4][i]), p[0].prev_state) for p in live])
             for sess, mode, hu, ha, act, n in live:
                 self._frame(sess, mode, out[sess.slot], float(act[i]), res[sess])
+        self.t_enc += t1 - t0; self.t_head += time.perf_counter() - t1
         return res
 
     def _maybe_partial(self, sess):
@@ -364,9 +405,12 @@ class EarsEngine:
 
 class EarsService:
     """Owns the GPU thread. Sessions call `await feed(...)` once per hop; the thread gathers the hops of all
-    active sessions (up to `gather_s`) and runs them as one batched tick."""
-    def __init__(self, engine: EarsEngine, gather_s=0.015, stats_every_s=60.0):
-        self.engine = engine; self.gather_s = gather_s; self.stats_every_s = stats_every_s
+    active sessions (up to `gather_s`) and runs them as one batched tick. A session that is behind (said
+    `more`: its next hop is already buffered) resubmits right after its tick resolves, so the next gather
+    waits up to `expect_s` for it: catch-up hops share one tick instead of each costing a tick of their own."""
+    def __init__(self, engine: EarsEngine, gather_s=0.015, expect_s=0.06, stats_every_s=60.0):
+        self.engine = engine; self.gather_s = gather_s; self.expect_s = expect_s
+        self.stats_every_s = stats_every_s; self.expect = set()
         self.free = list(range(engine.slots)); self.sessions = set(); self.lock = threading.Lock()
         self.q: queue.Queue = queue.Queue()
         self._ticks = []; self._t_stats = time.time()
@@ -391,10 +435,10 @@ class EarsService:
         sess.closed = True
         self.q.put(("close", sess))                           # slot freed on the GPU thread, after its last hop
 
-    async def feed(self, sess, user_hop, agent_hop, mode):
+    async def feed(self, sess, user_hop, agent_hop, mode, more=False):
         import asyncio
         loop = asyncio.get_running_loop(); fut = loop.create_future()
-        self.q.put(("feed", sess, user_hop, agent_hop, mode, fut, loop))
+        self.q.put(("feed", sess, user_hop, agent_hop, mode, fut, loop, more))
         return await fut
 
     @staticmethod
@@ -409,19 +453,22 @@ class EarsService:
     def _loop(self):
         while True:
             items = [self.q.get()]
-            deadline = time.perf_counter() + self.gather_s
+            t0 = time.perf_counter()
             while True:
                 with self.lock:
                     n_live = len(self.sessions)
-                if sum(1 for it in items if it[0] == "feed") >= n_live:
+                have = {it[1] for it in items if it[0] == "feed"}
+                if len(have) >= n_live:
                     break
-                rem = deadline - time.perf_counter()
+                waiting = any(s not in have and not s.closed for s in self.expect)
+                rem = t0 + (self.expect_s if waiting else self.gather_s) - time.perf_counter()
                 if rem <= 0:
                     break
                 try:
                     items.append(self.q.get(timeout=rem))
                 except queue.Empty:
                     break
+            self.expect = {it[1] for it in items if it[0] == "feed" and it[7] and not it[1].closed}
             feeds = [it for it in items if it[0] == "feed" and not it[1].closed]
             for it in items:
                 if it[0] == "feed" and it[1].closed:
@@ -460,6 +507,10 @@ class EarsService:
                                            done=lambda t, ev=ev, done=done: done(t, ev)))
         if time.time() - self._t_stats >= self.stats_every_s and self._ticks:
             ms = np.array([t for t, _ in self._ticks]) * 1e3; bs = np.array([b for _, b in self._ticks])
-            log.info("EARS ticks: n=%d sessions/tick avg %.2f | tick p50 %.0f p90 %.0f max %.0f ms (hop 320 ms)",
-                     len(ms), bs.mean(), np.percentile(ms, 50), np.percentile(ms, 90), ms.max())
-            self._ticks = []; self._t_stats = time.time()
+            e = self.engine; span = time.time() - self._t_stats
+            log.info("EARS ticks: n=%d sessions/tick avg %.2f | tick p50 %.0f p90 %.0f max %.0f ms (hop 320 ms) | "
+                     "busy: encoder %.0f%% head %.0f%% asr %.0f%% | GPU mem %.1f GiB (reserved %.1f)", len(ms),
+                     bs.mean(), np.percentile(ms, 50), np.percentile(ms, 90), ms.max(), 100 * e.t_enc / span,
+                     100 * e.t_head / span, 100 * e.t_asr / span, torch.cuda.memory_allocated() / 2**30,
+                     torch.cuda.memory_reserved() / 2**30)
+            self._ticks = []; self._t_stats = time.time(); e.t_enc = e.t_head = e.t_asr = 0.0

@@ -23,7 +23,7 @@ or logs; only timings and event types.
 Run: HF_HOME=/workspace/.hf_home .venv/bin/python -m app.mouth
 """
 from __future__ import annotations
-import os, sys, socket, threading, queue, json, time, logging
+import os, sys, socket, signal, threading, queue, json, time, logging
 from collections import deque
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root on path
@@ -381,6 +381,16 @@ def main():
     if not os.environ.get("TAVILY_API_KEY"):
         log.warning("TAVILY_API_KEY not set -> web_search/get_weather will return an error")
     m = Mouth(cfg)
+
+    def stop(signum, frame):                      # shut the engines down so their worker processes exit too
+        log.info("MOUTH stopping (signal %d)", signum)    # (a bare SIGTERM orphans the VoxCPM2 stage process)
+        for eng in (m.tts.engine, m.llm.engine):
+            try:
+                eng.shutdown()
+            except Exception as e:
+                log.warning("engine shutdown: %s", type(e).__name__)
+        os._exit(0)
+    signal.signal(signal.SIGTERM, stop); signal.signal(signal.SIGINT, stop)
     host, port = cfg["server"]["mouth_host"], int(cfg["server"]["mouth_port"])
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
