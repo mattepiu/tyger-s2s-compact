@@ -115,6 +115,8 @@ the voice picker. Browser DSP (echo cancellation, noise suppression, auto gain) 
 .venv/bin/python scripts/smoke_test.py          # needs run.sh up: MOUTH tool turns + EARS speech → endpoint → audio
 .venv/bin/python scripts/load_test.py --sessions 4       # needs run.sh up: concurrent MOUTH turns + backchannels
 .venv/bin/python scripts/load_test_ears.py --sessions 4  # needs run.sh up: N real-time WebSocket conversations
+.venv/bin/python scripts/validate_ears_batched.py        # GPU free: batched EARS == single-session reference
+.venv/bin/python scripts/validate_rnnt.py                # GPU free: graphed RNN-T == nemotron generate()
 ```
 
 The EARS half of the smoke test uses the MOUTH's own TTS reply (held in memory) as the "user" speech, so no
