@@ -55,7 +55,7 @@
 <body>
 <div class="wrap">
   <h1>tyger</h1>
-  <div class="sub">browser mic &rarr; real-time turn-taking (arm C endpoint head) &rarr; Qwen3-4B-2507 + tools &rarr; MOSS-TTS-Realtime voice</div>
+  <div class="sub">browser mic &rarr; real-time turn-taking (arm C endpoint head) &rarr; Qwen3-4B-2507 + tools &rarr; VoxCPM2 voice</div>
   <div class="row">
     <button id="start">Start listening</button>
     <button id="stop" class="stop" disabled>Stop</button>
@@ -176,8 +176,10 @@ function onEvent(ev){
   const m=JSON.parse(ev.data);
   if(m.type==='busy'){ setStatus('busy — someone else is talking; try again shortly',false); return; }
   if(m.type==='ready'){ $('rt').textContent=`hop ${m.hop_ms}ms · ${m.sr/1000}kHz${m.mouth?' · mouth ✓':' · ears-only'}`;
+    // always send the picked voice at session start: the MOUTH keeps its voice across sessions, so comparing
+    // against EARS's config default (m.voice) could leave it on a stale voice while the picker shows another
     if(m.voices && m.voices.length && DEBUG){ populateVoices(m.voices, m.voice);
-      if($('voice').value && $('voice').value!==m.voice) applyVoice(); }  // apply a pre-Start / remembered pick
+      if($('voice').value) applyVoice(); }
     if(m.thresholds){ for(const a in THR){ if(a in m.thresholds && m.thresholds[a]!=null) setThresholdUI(a,m.thresholds[a]); }
       if(DEBUG){ if(m.thresholds.ep_deb!=null){ $('s_ep_deb').value=m.thresholds.ep_deb; $('v_ep_deb').textContent=m.thresholds.ep_deb; }
                  if('fallback_frames' in m.thresholds) setFallbackUI(m.thresholds.fallback_frames); } } }

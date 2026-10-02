@@ -124,6 +124,16 @@ class Mouth:
         log.info("voice -> %s", name)
         return True
 
+    def reset_voice(self):
+        """New session -> back to the configured default voice (the client then applies its own pick), so a
+        voice chosen in a previous session never leaks into this one."""
+        try:
+            self.voices, default = discover_voices(self.cfg)
+        except Exception as e:
+            log.warning("voice re-discovery failed: %s", e); return
+        if default and default != self.voice:
+            self.set_voice(default)
+
     # ---- history ----
     def reset_history(self):
         self.history = []
@@ -249,7 +259,7 @@ class Mouth:
 
 def serve(m, conn):
     turns = queue.Queue(); stop = threading.Event()
-    m.reset_history(); log.info("history reset")
+    m.reset_history(); m.reset_voice(); log.info("session start: history reset, voice=%s", m.voice)
 
     def reader():
         while True:
