@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>tyger</title>
+<style>
+  :root{--bg:#0e1116;--panel:#161b22;--line:#2a313c;--fg:#e6edf3;--mut:#8b949e;
+        --listen:#3fb950;--speak:#58a6ff;--hold:#8b949e;--bc:#bc8cff;--barge:#f85149;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+       min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:24px 16px}
+  h1{font-size:18px;font-weight:650;margin:0 0 2px;letter-spacing:.2px}
+  .sub{color:var(--mut);font-size:12.5px;margin-bottom:20px}
+  .wrap{width:100%;max-width:640px}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  button{background:#238636;color:#fff;border:0;border-radius:8px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer}
+  button.stop{background:#30363d}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  select{background:#0d1117;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px}
+  .dot{width:9px;height:9px;border-radius:50%;background:#484f58;display:inline-block;margin-right:7px}
+  .dot.on{background:var(--listen)}
+  .status{color:var(--mut);font-size:12.5px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin-top:18px}
+  .state-pill{display:inline-flex;align-items:center;gap:10px;font-size:22px;font-weight:700;padding:12px 20px;
+              border-radius:10px;background:#0d1117;border:1px solid var(--line);transition:.12s}
+  .state-LISTEN,.state-LISTENING{color:var(--listen);border-color:var(--listen)}
+  .state-SPEAK{color:var(--speak);border-color:var(--speak)}
+  .state-idle{color:var(--mut)}
+  .state-HOLD{color:var(--hold)} .state-BACKCHANNEL{color:var(--bc);border-color:var(--bc)}
+  .meters{margin-top:16px;display:grid;gap:10px}
+  .meter{display:grid;grid-template-columns:64px 1fr 44px;gap:10px;align-items:center;font-size:12px;color:var(--mut)}
+  .bar{position:relative;height:8px;background:#0d1117;border:1px solid var(--line);border-radius:5px;overflow:hidden}
+  .fill{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--speak);transition:width .1s}
+  .fill.yield{background:var(--barge)} .fill.bc{background:var(--bc)}
+  .thr{position:absolute;top:-2px;bottom:-2px;width:2px;background:#f0883e;z-index:2}
+  .tune{margin-top:16px;display:grid;gap:12px}
+  .tune h2{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--mut);margin:0}
+  .trow{display:grid;grid-template-columns:120px 1fr 52px;gap:10px;align-items:center;font-size:12px}
+  .trow input[type=range]{width:100%}
+  .trow .tval{font-variant-numeric:tabular-nums;text-align:right;color:var(--barge);font-weight:600}
+  .barge-banner{margin-top:14px;padding:10px 14px;border-radius:8px;background:rgba(248,81,73,.12);
+                border:1px solid var(--barge);color:var(--barge);font-weight:600;opacity:0;transition:.2s}
+  .barge-banner.show{opacity:1}
+  .log{margin-top:18px}
+  .log h2{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--mut);margin:0 0 10px}
+  .turn{padding:9px 12px;border-radius:8px;background:#0d1117;border:1px solid var(--line);margin-bottom:8px}
+  .turn.asst{border-color:var(--speak);background:rgba(88,166,255,.07)}
+  .turn .meta{color:var(--speak);font-size:11px;margin-bottom:2px}
+  .turn .txt{font-size:14.5px}
+  .empty{color:var(--mut);font-style:italic}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>tyger</h1>
+  <div class="sub">browser mic &rarr; real-time turn-taking (arm C endpoint head) &rarr; Qwen3-4B-2507 + tools &rarr; MOSS-TTS-Realtime voice</div>
+  <div class="row">
+    <button id="start">Start listening</button>
+    <button id="stop" class="stop" disabled>Stop</button>
+    <span class="status"><span class="dot" id="dot"></span><span id="status">idle</span></span>
+    <select id="voice" hidden></select>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div class="state-pill state-idle" id="pill"><span id="stateTxt">idle</span></div>
+      <div class="status" id="rt"></div>
+    </div>
+    <div class="meters">
+      <div class="meter"><span>p_end</span><div class="bar"><div class="fill" id="pefill" style="background:var(--speak)"></div><div class="thr" id="epthr"></div></div><span id="peval">0.00</span></div>
+      <div class="meter"><span>yield</span><div class="bar"><div class="fill yield" id="yfill"></div><div class="thr" id="ythr"></div></div><span id="yval">0.00</span></div>
+      <div class="meter"><span>backchan</span><div class="bar"><div class="fill bc" id="bcfill"></div><div class="thr" id="bcthr"></div></div><span id="bcval">0.00</span></div>
+      <div class="meter"><span>mic</span><div class="bar"><div class="fill" id="vfill" style="background:var(--listen)"></div></div><span id="vval">&mdash;</span></div>
+    </div>
+    <div class="tune" id="tune" hidden>
+      <h2>thresholds &mdash; live tuning (?nodebug to hide) &middot; orange line = current</h2>
+      <div class="trow"><span>endpoint p_end &tau;</span><input type="range" id="s_ep_thr" min="0.30" max="0.99" step="0.005"><span class="tval" id="v_ep_thr">&mdash;</span></div>
+      <div class="trow"><span>endpoint deb</span><input type="range" id="s_ep_deb" min="1" max="5" step="1"><span class="tval" id="v_ep_deb">&mdash;</span></div>
+      <div class="trow"><span>barge (yield)</span><input type="range" id="s_barge_thr" min="0.20" max="1.00" step="0.01"><span class="tval" id="v_barge_thr">&mdash;</span></div>
+      <div class="trow"><span>backchannel</span><input type="range" id="s_bc_thr" min="0.20" max="1.00" step="0.01"><span class="tval" id="v_bc_thr">&mdash;</span></div>
+      <div class="trow"><span><label><input type="checkbox" id="c_fallback"> silence fallback</label></span><input type="range" id="s_fallback" min="0.4" max="2.5" step="0.1"><span class="tval" id="v_fallback">&mdash;</span></div>
+    </div>
+    <div class="barge-banner" id="barge">&perp; BARGE &mdash; user took the floor</div>
+  </div>
+
+  <div class="log"><h2>Assistant</h2><div id="turns"><div class="empty">Click Start, then talk. Pause to let tyger reply.</div></div></div>
+</div>
+
+<script>
+const TARGET_SR = 16000;
+// Tuning sliders + voice picker are shown by DEFAULT (V2 live tuning). Append ?nodebug for a clean end-user demo.
+const DEBUG = !new URLSearchParams(location.search).has('nodebug');
+let ws, ctx, source, processor, gain, stream, running=false;
+const $ = id => document.getElementById(id);
+function setStatus(t,on){ $('status').textContent=t; $('dot').classList.toggle('on',!!on); }
+function setState(s){ const p=$('pill'); p.className='state-pill state-'+s; $('stateTxt').textContent=s; }
+function bar(id,v){ $(id).style.width=(Math.max(0,Math.min(1,v))*100).toFixed(1)+'%'; }
+
+// live tuning (debug only)
+const THR = {ep_thr:['epthr','s_ep_thr','v_ep_thr',0.30,0.99],
+             barge_thr:['ythr','s_barge_thr','v_barge_thr',0.2,1.0],
+             bc_thr:['bcthr','s_bc_thr','v_bc_thr',0.2,1.0]};
+const DEC3 = a => (a==='ep_thr');
+function placeMarker(mk,val,lo,hi){ $(mk).style.left=(Math.max(0,Math.min(1,(val-lo)/(hi-lo)))*100).toFixed(1)+'%'; }
+function setThresholdUI(attr,val){ if(!THR[attr])return; const [mk,sl,vl,lo,hi]=THR[attr];
+  if($(sl)) $(sl).value=val; if($(vl)) $(vl).textContent=(+val).toFixed(DEC3(attr)?3:2); placeMarker(mk,val,lo,hi); }
+function wireSliders(){
+  for(const attr in THR){ const [mk,sl,vl,lo,hi]=THR[attr];
+    if(!$(sl))continue;
+    $(sl).oninput=()=>{ const v=+$(sl).value; $(vl).textContent=v.toFixed(DEC3(attr)?3:2); placeMarker(mk,v,lo,hi);
+      if(ws&&ws.readyState===1) ws.send('set:'+attr+':'+v); }; }
+}
+const FPS=12.5, OFF_FRAMES=100000;
+function fbDisplay(){ $('v_fallback').textContent = $('c_fallback').checked ? (+$('s_fallback').value).toFixed(1)+'s':'off'; }
+function sendFallback(){ const on=$('c_fallback').checked, s=+$('s_fallback').value; fbDisplay();
+  if(ws&&ws.readyState===1) ws.send('set:fallback_frames:'+(on?Math.round(s*FPS):OFF_FRAMES)); }
+function setFallbackUI(fr){ const on=fr<1000; $('c_fallback').checked=on; $('s_fallback').value=on?(fr/FPS).toFixed(1):1.2; fbDisplay(); }
+if(DEBUG){ $('tune').hidden=false; wireSliders();
+  $('c_fallback').onchange=sendFallback; $('s_fallback').oninput=()=>{ fbDisplay(); if($('c_fallback').checked) sendFallback(); };
+  $('s_ep_deb').oninput=()=>{ const v=+$('s_ep_deb').value; $('v_ep_deb').textContent=v; if(ws&&ws.readyState===1) ws.send('set:ep_deb:'+v); };
+}
+function applyVoice(){ const v=$('voice').value; try{localStorage.setItem('tyger_voice',v);}catch(e){}
+  if(ws&&ws.readyState===1) ws.send('voice:'+v); }
+$('voice').onchange=applyVoice;
+function populateVoices(list, cur){ const sel=$('voice'); if(!list||!list.length) return;
+  let saved=null; try{saved=localStorage.getItem('tyger_voice');}catch(e){}
+  const want=(saved && list.includes(saved)) ? saved : (cur||list[0]);
+  sel.innerHTML=''; list.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent='voice: '+v;
+    if(v===want)o.selected=true; sel.appendChild(o); });
+  if(DEBUG) sel.hidden=false; }
+// populate the picker on page load (before Start) so a pick is shown + remembered even without the WS
+if(DEBUG){ fetch('/voices').then(r=>r.json()).then(d=>populateVoices(d.voices,d.voice)).catch(()=>{}); }
+
+function downsample(buf,inSR,outSR){ if(outSR===inSR)return buf;
+  const r=inSR/outSR,n=Math.floor(buf.length/r),out=new Float32Array(n);
+  for(let i=0;i<n;i++){ const idx=i*r,i0=Math.floor(idx),f=idx-i0; out[i]=buf[i0]*(1-f)+(buf[i0+1]||buf[i0])*f; } return out; }
+
+async function start(){
+  try{ // full browser DSP ON (echo/noise/gain) so the assistant's own voice doesn't leak into the mic
+    stream = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+  }catch(e){ setStatus('mic denied: '+e.message,false); return; }
+  ws = new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);
+  ws.binaryType='arraybuffer';
+  ws.onopen=()=>setStatus('connected · listening',true);
+  ws.onclose=()=>{ setStatus('disconnected',false); stopAudio(); };
+  ws.onerror=()=>setStatus('ws error',false);
+  ws.onmessage=(ev)=>{ if(ev.data instanceof ArrayBuffer) playChunk(ev.data); else onEvent(ev); };
+  ctx = new AudioContext();
+  source = ctx.createMediaStreamSource(stream);
+  processor = ctx.createScriptProcessor(4096,1,1);
+  gain = ctx.createGain(); gain.gain.value=0;
+  processor.onaudioprocess = e=>{
+    if(!ws||ws.readyState!==1) return;
+    const inp=e.inputBuffer.getChannelData(0);
+    let peak=0; for(let i=0;i<inp.length;i++){ const a=Math.abs(inp[i]); if(a>peak)peak=a; }
+    bar('vfill',peak*3); $('vval').textContent=peak>0.001?(20*Math.log10(peak)).toFixed(0)+'dB':'—';
+    ws.send(downsample(inp,ctx.sampleRate,TARGET_SR).buffer);
+  };
+  source.connect(processor); processor.connect(gain); gain.connect(ctx.destination);
+  running=true; $('start').disabled=true; $('stop').disabled=false;
+}
+
+let nextPlay=0, replyDiv=null, active=[];
+function playChunk(ab){ if(!ctx)return; const f32=new Float32Array(ab);
+  const b=ctx.createBuffer(1,f32.length,24000); b.getChannelData(0).set(f32);
+  const s=ctx.createBufferSource(); s.buffer=b; s.connect(ctx.destination);
+  const t=ctx.currentTime; if(nextPlay<t) nextPlay=t+0.04; s.start(nextPlay); nextPlay+=b.duration;
+  active.push(s); s.onended=()=>{ const i=active.indexOf(s); if(i>=0) active.splice(i,1); }; }
+function stopPlayback(){ active.forEach(s=>{try{s.stop();}catch(e){}}); active=[]; nextPlay=0; }
+function showReply(txt){ const box=$('turns'); const e=box.querySelector('.empty'); if(e)e.remove();
+  if(!replyDiv){ replyDiv=document.createElement('div'); replyDiv.className='turn asst'; box.prepend(replyDiv); }
+  replyDiv.innerHTML=`<div class="meta">tyger</div><div class="txt">${escapeHtml(txt)}</div>`; }
+function onEvent(ev){
+  const m=JSON.parse(ev.data);
+  if(m.type==='busy'){ setStatus('busy — someone else is talking; try again shortly',false); return; }
+  if(m.type==='ready'){ $('rt').textContent=`hop ${m.hop_ms}ms · ${m.sr/1000}kHz${m.mouth?' · mouth ✓':' · ears-only'}`;
+    if(m.voices && m.voices.length && DEBUG){ populateVoices(m.voices, m.voice);
+      if($('voice').value && $('voice').value!==m.voice) applyVoice(); }  // apply a pre-Start / remembered pick
+    if(m.thresholds){ for(const a in THR){ if(a in m.thresholds && m.thresholds[a]!=null) setThresholdUI(a,m.thresholds[a]); }
+      if(DEBUG){ if(m.thresholds.ep_deb!=null){ $('s_ep_deb').value=m.thresholds.ep_deb; $('v_ep_deb').textContent=m.thresholds.ep_deb; }
+                 if('fallback_frames' in m.thresholds) setFallbackUI(m.thresholds.fallback_frames); } } }
+  else if(m.type==='state'){ setState(m.state);
+    bar('pefill',m.p_end||0); $('peval').textContent=(m.p_end||0).toFixed(2);
+    bar('yfill',m.yield||0); $('yval').textContent=(m.yield||0).toFixed(2);
+    bar('bcfill',m.bc||0); $('bcval').textContent=(m.bc||0).toFixed(2); }
+  else if(m.type==='threshold'){ setThresholdUI(m.attr,m.value); if(m.attr==='ep_deb'&&$('v_ep_deb')) $('v_ep_deb').textContent=m.value; }
+  else if(m.type==='endpoint'){ nextPlay=0; replyDiv=null; }
+  else if(m.type==='reply'){ setState('SPEAK'); showReply(m.text); }
+  else if(m.type==='turn_done'){ setState('idle'); replyDiv=null; }
+  else if(m.type==='barge'){ stopPlayback(); flashBarge(); setState('LISTENING'); }
+  else if(m.type==='voice'){ /* confirmed */ }
+}
+function flashBarge(){ const b=$('barge'); b.classList.add('show'); setTimeout(()=>b.classList.remove('show'),900); }
+function escapeHtml(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function stopAudio(){ running=false; $('start').disabled=false; $('stop').disabled=true;
+  try{ processor&&processor.disconnect(); source&&source.disconnect(); gain&&gain.disconnect(); }catch(e){}
+  try{ stream&&stream.getTracks().forEach(t=>t.stop()); }catch(e){}
+  try{ ctx&&ctx.close(); }catch(e){} }
+function stop(){ try{ ws&&ws.close(); }catch(e){} stopAudio(); setStatus('idle',false); }
+$('start').onclick=start; $('stop').onclick=stop;
+</script>
+</body>
+</html>
