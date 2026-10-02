@@ -18,7 +18,8 @@ written to disk or logs; only timings and event types.
 Run: HF_HOME=/workspace/.hf_home .venv/bin/python -m app.mouth
 """
 from __future__ import annotations
-import os, sys, socket, threading, queue, json, time, random, logging
+import os, re, sys, socket, threading, queue, json, time, random, logging
+from collections import deque
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root on path
 from app.wire import send_msg, recv_msg
@@ -47,10 +48,13 @@ LEADIN_SYS = (
 
 BC_PROMPT = (
     "You are a voice assistant listening to the user, who is STILL speaking. You have NOT been given the "
-    "floor. Read their partial words so far and emit ONLY a brief, natural spoken backchannel that fits what "
-    "they are saying -- a few words at most, for example 'mm-hm', 'right', 'oh nice', 'oh no', 'wow, really?', "
-    "'that makes sense', 'got it'. Do NOT answer, do NOT ask a question, do NOT continue their sentence, do "
-    "NOT take the floor. Plain spoken words only, no markdown or symbols. Just the short reaction.")
+    "floor. Read their partial words so far and emit ONLY a brief, natural spoken reaction (one to four words) "
+    "to WHAT they are saying -- match its content and emotion, for example 'oh nice', 'oh no', 'wow, really?', "
+    "'that makes sense', 'got it', 'right', 'sure', 'ha, yeah', 'that's great', 'oh, I see'. Never use filler "
+    "hums like 'mm-hm', 'mmm' or 'hmm'. Do NOT answer, do NOT ask a real question, do NOT continue their "
+    "sentence, do NOT take the floor. Plain spoken words only, no markdown or symbols. Just the short reaction.")
+_HUM = re.compile(r"^\W*(?:[mh]+[-\s]*)+\W*$", re.I)   # "mm-hm", "Mmm.", "hmm", "mhm" -> not worth saying
+RECENT_ACKS = 3
 
 
 def _text(events):
@@ -86,6 +90,7 @@ class Mouth:
         self.sr = self.tts.out_sr
         self.history = []
         self.acks = {}
+        self.recent_acks = deque(maxlen=RECENT_ACKS)   # in memory only; so contextual acks don't repeat
         log.info("warming TTS (voice=%s, contextual_acks=%s)", self.voice, self.contextual_acks)
         self.tts.warmup()
         # first request with the tools prompt is cold (~490 ms to first token vs ~55 ms after) -> pay it here
@@ -125,6 +130,7 @@ class Mouth:
     # ---- history ----
     def reset_history(self):
         self.history = []
+        self.recent_acks.clear()
 
     def _remember(self, user, reply):
         if user.strip():
@@ -223,11 +229,20 @@ class Mouth:
             yield ("text", txt)
             yield ("audio", self.acks[txt])
             yield ("done", txt); return
-        user = (partial or "").strip() or "(the user is speaking)"
-        messages = [{"role": "system", "content": BC_PROMPT},
+        user = (partial or "").strip()
+        if not user:                       # no ASR partial yet -> nothing to react to; stay quiet
+            yield ("done", ""); return
+        sys_prompt = BC_PROMPT
+        if self.recent_acks:
+            sys_prompt += " You just said " + ", ".join(f"'{a}'" for a in self.recent_acks) + \
+                          " -- don't repeat those."
+        messages = [{"role": "system", "content": sys_prompt},
                     {"role": "user", "content": f"The user is currently saying: \"{user}\""}]
         text = _text(self.llm.stream(messages, max_new=self.bc_max_new, stop_flag=stop_flag)).strip()
+        if _HUM.match(text):               # the model still hummed -> say nothing rather than "mm-hm" again
+            text = ""
         if text:
+            self.recent_acks.append(text)
             yield ("text", text)
             for w in self.tts.stream(say_clean(text), stop_flag=stop_flag):
                 yield ("audio", w)
