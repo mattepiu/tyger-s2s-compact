@@ -51,7 +51,7 @@ def mouth_backchannel(sock, partial):
         kind, payload = recv_msg(sock)
         if kind is None:
             break
-        if kind == b"A":
+        if kind == b"K":                     # backchannel audio has its own frame kind
             first = first or time.time() - t0; audio += len(payload)
         elif kind == b"D":
             text = json.loads(payload).get("text", ""); break
@@ -123,6 +123,7 @@ def test_ears(cfg, speech16):
         async with aiohttp.ClientSession() as sess:
             async with sess.ws_connect(url, max_msg_size=0) as ws:
                 endpoint = False; audio = 0; t_first = t_done = None
+                barged = False
                 hop = 1600  # 100 ms of 16k f32
                 async def feed():   # real-time mic: speech, then silence for as long as the test runs
                     i = 0
@@ -143,6 +144,8 @@ def test_ears(cfg, speech16):
                             endpoint = True
                         if m.get("type") == "backchannel":
                             print(f"  backchannel during speech: {m.get('text')!r}")
+                        if m.get("type") == "barge":
+                            barged = True
                         if m.get("type") == "turn_done":
                             t_done = time.time(); break
                     elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
@@ -150,11 +153,15 @@ def test_ears(cfg, speech16):
                 ft.cancel()
                 secs = audio // 4 / 24000
                 held = (t_done - t_first) if (t_done and t_first) else -1
-                print(f"  endpoint_fired={endpoint} reply_audio={secs:.2f}s first-audio->turn_done={held:.2f}s")
+                print(f"  endpoint_fired={endpoint} reply_audio={secs:.2f}s first-audio->turn_done={held:.2f}s "
+                      f"barged={barged}")
                 assert endpoint, "no endpoint fired from the speech wav"
                 assert audio > 0, "no reply audio returned"
-                # the turn must stay open while the reply PLAYS (barge stays live), not end when generation does
-                assert held >= secs - 0.3, f"turn_done after {held:.2f}s but reply plays {secs:.2f}s"
+                # the turn must stay open while the reply PLAYS (barge stays live), not end when generation does.
+                # If the endpoint fired at a pause mid-utterance, the rest of the speech barges the reply -- correct
+                # behaviour, and the turn then ends early by design.
+                if not barged:
+                    assert held >= secs - 0.3, f"turn_done after {held:.2f}s but reply plays {secs:.2f}s"
         print("  EARS smoke: PASS")
     print("== EARS smoke ==")
     asyncio.run(run())

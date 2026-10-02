@@ -41,9 +41,9 @@ the big open item (see `HANDOFF.md`).
 
 Built on one **NVIDIA RTX 5090** (32 GB, Blackwell sm_120), CUDA-13 driver (≥ 590) for the cu130 torch wheels.
 
-GPU memory in use ≈ **24 GB of 32 GB** with everything loaded and warm: VoxCPM2 ~8 GB (1 GiB pinned KV,
-`deploy/voxcpm2.yaml`), Qwen3-4B ~11 GB (2 GiB pinned KV, `llm.kv_cache_gib`), EARS ~5 GB. Both engines pin
-their KV budgets, so the total is predictable; ~8 GB of headroom remains.
+GPU memory in use ≈ **27 GB of 32 GB** with everything loaded, warm, and under a 4-session MOUTH load: VoxCPM2
+~9 GB (2 GiB pinned KV, `deploy/voxcpm2.yaml`), Qwen3-4B ~12 GB (3 GiB pinned KV, `llm.kv_cache_gib`), EARS
+~5 GB. Both engines pin their KV budgets, so the total is predictable.
 
 ## Setup
 
@@ -93,7 +93,8 @@ flags. No secrets live here. Worth knowing:
 CONFIG=/path/to/other.yaml ./run.sh   # alternate config for both processes
 ```
 
-Startup from a warm cache is ~2 min (VoxCPM2 ~55 s, Qwen3-4B ~30 s, TTS warmup ~20 s, EARS ~15 s). The very
+Startup from a warm cache is ~2.5 min (VoxCPM2 ~55 s, Qwen3-4B ~30 s, TTS warmup incl. batch sizes 2–4
+~40 s, EARS ~15 s). The very
 first start also downloads the models and pays one-time compiles (VoxCPM2's first warmup ~2 min, Qwen's
 CUDA-graph capture), which are cached for later starts.
 
@@ -133,7 +134,8 @@ onset ms, barge, backchannel, tool name). Voice reference clips and their transc
 
 ## Known limits (v1)
 
-- **One speaker, one conversation at a time.** No concurrency.
+- **One conversation at a time in EARS.** MOUTH already serves several sessions concurrently (and runs
+  backchannels alongside turns); EARS's batched multi-session step is in progress (see `NOTES.md`).
 - `set_reminder` / `send_message` are **placeholders** — the model says they aren't connected yet.
 - Plain-turn onset ~500 ms, tool turn ~750 ms (smoke test, cloned voice) on a box whose GPU is stuck at half
   memory clock — expect better on a healthy GPU (see `NOTES.md`). VoxCPM2 re-encodes the reference clip on

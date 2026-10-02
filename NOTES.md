@@ -64,9 +64,9 @@ live by that ID.
 | tool turn | 3: reply → tool call; lead-in; phase B answer | 1 for the lead-in + 1 per phase-B chunk |
 | backchannel | 1 (`BC_PROMPT` + few-shot, ≤ `bc_max_new` 12 tokens) | 1 (the ack) |
 
-MOUTH handles one job at a time: turns (`T`), backchannels (`C`) and voice switches (`V`) go through one queue
-in `serve()`, so a backchannel never runs concurrently with a turn, even though the engines could batch
-(`max_num_seqs` 4 / 2).
+These requests run concurrently: across sessions, and within a session a backchannel runs alongside a turn
+(see "Concurrency" below). vLLM / vLLM-Omni batch whatever is in flight (`llm.max_num_seqs` 8,
+`deploy/voxcpm2.yaml` `max_num_seqs` 4).
 
 ## How a backchannel works
 1. **EARS decides when.** In listen mode, every 80 ms frame, the bc head gives `bc_prob`. A `BACKCHANNEL` event
@@ -77,25 +77,54 @@ in `serve()`, so a backchannel never runs concurrently with a turn, even though 
 2. **EARS attaches what the user is saying.** A rolling ASR partial is re-decoded from the last 8 s of user
    audio at most every 0.8 s, off the critical path; the event just reads the latest one. It can be empty early
    in a turn. EARS sends `C {"partial": ...}` to MOUTH.
-3. **MOUTH asks the LLM for the ack** (`Mouth.stream_bc`): `BC_PROMPT` + few-shot examples (EN/RU/ES reactions,
+3. **MOUTH asks the LLM for the ack** (`Session.stream_bc`, on the session's backchannel worker thread):
+   `BC_PROMPT` + few-shot examples (EN/RU/ES reactions,
    `mm-hm` / `угу` hums) + the last 3 acks ("don't repeat those") + the partial. A partial under
    `mouth.bc_min_words` (4) or empty is framed as "only a few words so far", so the model answers with a
    neutral hum; otherwise it reacts to the content, in the user's language. There are no canned acks.
-4. **MOUTH speaks it**: one VoxCPM2 request for the ack text, streamed back as `A` frames, then `D {"bc": true}`.
-   Typical first audio ~260–340 ms after the `C` (this box).
-5. **EARS plays it through to the browser** while `bc_active` is set. Backchannel audio is not fed to the
-   second ear and does not count toward the reply's `play_until`, and it never enters conversation history.
+4. **MOUTH speaks it**: one VoxCPM2 request for the ack text, streamed back as `K` frames (backchannel audio,
+   kept apart from reply audio `A`), then `D {"bc": true}`. Typical first audio ~260–500 ms after the `C`.
+5. **EARS plays it through to the browser** while `bc_active` is set and no reply turn is running. Backchannel
+   audio is not fed to the second ear and does not count toward the reply's `play_until`, and it never enters
+   conversation history.
 
 **Interaction with the user's turn.** If the user's endpoint fires while a backchannel is still being made,
-EARS sends the turn at once, but MOUTH starts it only after the backchannel job finishes (one queue): the reply
-can start up to ~0.3–0.5 s later. The client stops any still-playing ack when the endpoint arrives.
+the turn starts at once on its own worker (no waiting on the backchannel); EARS drops any further `K` audio once
+the reply turn has started, and the client stops any still-playing ack when the endpoint arrives.
+
+## Concurrency (V1.4) — MOUTH: many sessions, backchannels alongside turns
+- **Structure** (`app/mouth.py`): `Mouth` holds the shared engines + voice loading; each EARS connection is a
+  `Session` (history, voice, recent acks) on its own thread, with a turn worker and a backchannel worker.
+  Barge (`B`) stops only the session's turn. Voices are loaded once per clip (`tts.load_voice` → `Voice`) and
+  passed per TTS request, so sessions can use different voices at once. Tokenizer calls are locked (HF fast
+  tokenizers aren't re-entrant across threads).
+- **Engine sizing for 4 sessions**: Qwen `max_num_seqs` 8, KV 3 GiB (~21k tokens); VoxCPM2 `max_num_seqs` 4,
+  KV 2 GiB.
+- **VoxCPM2 `enable_unified_decode_graph` must be off.** With it on, vLLM-Omni's VoxCPM2 scheduler
+  (`voxcpm2/scheduler.py`) defers *every* new admission while any request is decoding, so the decode batch stays
+  on the CUDA-graph path. Under concurrency a new request (a backchannel, another session's sentence) waits until
+  everything running finishes: 2 sessions saw a 42 s backchannel stall and turn p50 1.17 s. Off, single-session
+  onset costs ~+60–100 ms and the stalls are gone.
+- **VoxCPM2 compiles lazily per batch size**, and the first time 2/3/4 requests decode together the *whole engine*
+  stalls ~25 s (seen live: the first backchannel next to a turn took 27.6 s, and the turn with it). TTS warmup
+  therefore runs every batch size up to `max_num_seqs` concurrently before serving (+~18 s startup).
+- **Load test** (`scripts/load_test.py`, MOUTH only: N sessions, 3 turns each, a backchannel fired mid-reply;
+  this throttled box):
+
+  | sessions | turn first-audio p50 / max | backchannel p50 / max | GPU peak |
+  |---|---|---|---|
+  | 1 (cold, first after start) | 510 / 584 ms | 461 / 621 ms | 27.0 GB |
+  | 2 | 691 / 794 ms | 635 / 728 ms | 27.0 GB |
+  | 4 | 833 / 1126 ms | 829 / 1620 ms | 27.0 GB |
+
+- **EARS is still single-session** (`BUSY`); its batched multi-session step is the next stage.
 
 ## Memory + memory pinning
-Both engines pin their KV caches instead of filling a GPU fraction: VoxCPM2 1 GiB (`deploy/voxcpm2.yaml`, also
-`max_num_seqs 2`, `max_model_len 2048`; stock deploy was 6 GiB / 8 seqs for multi-tenant serving), Qwen 2 GiB
-(`llm.kv_cache_gib`, `max_num_seqs 4`, `max_model_len 8192`). `gpu_memory_utilization` is then only vLLM's
-start-up free-memory check. Measured: VoxCPM2 7.4 GB loaded (+0.6 GB after warmup), Qwen ~11 GB, EARS ~4.8 GB;
-**~24 GB / 32 GB** total warm (was ~30.5 GB with MOSS + vLLM server).
+Both engines pin their KV caches instead of filling a GPU fraction: VoxCPM2 2 GiB (`deploy/voxcpm2.yaml`, also
+`max_num_seqs 4`, `max_model_len 2048`; stock deploy was 6 GiB / 8 seqs), Qwen 3 GiB (`llm.kv_cache_gib`,
+`max_num_seqs 8`, `max_model_len 8192`). `gpu_memory_utilization` is then only vLLM's start-up free-memory
+check. Total **~27 GB / 32 GB** warm and under 4-session load (V1.3 single-session sizing was ~24 GB; MOSS +
+vLLM server was ~30.5 GB).
 
 ## V1.3 — smoke test on the box (cloned voice `en`, 9.3 s clip, no transcript)
 - `scripts/smoke_test.py` **PASS**: plain first-audio **503 ms** (first LLM text at 92 ms), Tavily weather tool

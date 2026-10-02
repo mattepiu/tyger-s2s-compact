@@ -25,13 +25,13 @@ ears:                      # arm C endpoint rule + barge/backchannel (exp-12 liv
 llm:                       # responder, in-process vLLM AsyncLLM inside the MOUTH (app/llm.py)
   model: Qwen/Qwen3-4B-Instruct-2507
   gpu_memory_utilization: 0.45   # vLLM start-up free-memory check only; actual KV is pinned below
-  kv_cache_gib: 2.0              # fixed KV budget (~11 GB total with weights + CUDA graphs)
+  kv_cache_gib: 3.0              # fixed KV budget (~21k tokens: 4 sessions x turn + backchannel)
   max_model_len: 8192
-  max_num_seqs: 4                # one conversation; small cap keeps CUDA-graph capture short
+  max_num_seqs: 8                # 4 sessions x (turn + backchannel) batched together
 
 tts:                       # VoxCPM2, in-process vLLM-Omni AsyncOmni inside the MOUTH (app/tts_voxcpm.py)
   model: openbmb/VoxCPM2
-  deploy_config: deploy/voxcpm2.yaml   # right-sized for one session (repo-relative)
+  deploy_config: deploy/voxcpm2.yaml   # sized for up to 4 sessions (repo-relative)
   out_sr: 24000            # VoxCPM2 emits 48 kHz -> resampled to the 24 kHz wire / client / EARS 2nd ear
   ref_max_s: 10.0          # trim the voice clip (reference-only mode) to bound per-request prefill;
                            # with a transcript (voices/<name>.txt) the full clip is used

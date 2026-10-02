@@ -138,8 +138,12 @@ async def ws_handler(request):
         try:
             while True:
                 kind, payload = await async_recv_msg(m_reader)
-                if kind == b"A":
-                    if not (st["speaking"] or st["bc_active"]):
+                if kind == b"K":                          # backchannel audio: only while the user holds the
+                    if st["bc_active"] and not st["speaking"]:  # floor (a reply turn supersedes it)
+                        await ws.send_bytes(payload)
+                    continue
+                if kind == b"A":                          # reply audio
+                    if not st["speaking"]:
                         continue
                     if st["await_onset"] and st["speaking"] and st["turn_t0"] is not None:
                         onset = time.perf_counter() - st["turn_t0"]; st["await_onset"] = False

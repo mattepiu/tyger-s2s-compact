@@ -6,7 +6,7 @@ template emits: <tool_call>{"name": ..., "arguments": {...}}</tool_call>. Text f
 is never yielded as speech (a trailing partial "<tool_c" is held back until it's resolved).
 """
 from __future__ import annotations
-import asyncio, uuid, logging
+import asyncio, threading, uuid, logging
 
 from app.tools import parse_calls
 
@@ -41,12 +41,14 @@ class LocalLLM:
             tok = eng.get_tokenizer()
             return eng, (await tok if asyncio.iscoroutine(tok) else tok)
         self.engine, self.tok = eloop.run(make())
+        self._tok_lock = threading.Lock()
 
     def stream(self, messages, tools=None, max_new=192, temperature=None, stop_flag=None):
         from vllm import SamplingParams
         from vllm.sampling_params import RequestOutputKind
-        prompt = self.tok.apply_chat_template(messages, tools=tools or None, tokenize=False,
-                                              add_generation_prompt=True)
+        with self._tok_lock:      # sessions call this from several threads; HF fast tokenizers aren't re-entrant
+            prompt = self.tok.apply_chat_template(messages, tools=tools or None, tokenize=False,
+                                                  add_generation_prompt=True)
         sp = SamplingParams(max_tokens=int(max_new), output_kind=RequestOutputKind.DELTA,
                             temperature=self.temperature if temperature is None else float(temperature))
         rid = f"llm-{uuid.uuid4().hex[:12]}"
