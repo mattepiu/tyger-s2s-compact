@@ -28,10 +28,10 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | L-03 | latency | lever | **done** | Per-request voice encode (precomputed voice profile) |
 | L-04 | latency | lever | **done** | Tool filler (lead-in) starts only after the whole tool call decodes; one filler, then silence |
 | O-01 | ops | — | — | Endpoint thresholds never tuned live (V2) |
-| O-02 | ops | — | — | Dockerfile never built |
+| O-02 | ops | — | **blocked here** | Dockerfile never built |
 | O-03 | ops | — | — | `main` is still at `First`; all work is on `setup/new-box` / `voxcpm2` |
-| O-04 | ops | — | — | All latency numbers come from a throttled GPU |
-| O-05 | ops | — | — | Little GPU-free test coverage; no CI |
+| O-04 | ops | — | **done** | All latency numbers come from a throttled GPU |
+| O-05 | ops | — | partly done | Little GPU-free test coverage; no CI |
 
 ---
 
@@ -401,13 +401,22 @@ tool-turn first audio p50 640 → 408 ms, worst dead air 2584 → 1265 ms; with 
   - Needs the user driving the mic with `?debug=1`. Do I-04 first so tuning has a real target.
 - **O-02 — The Dockerfile was never built or run.**
   - Untested: `python:3.12-slim` + `uv` + cu130 wheels + vllm-omni + voxcpm.
+  - **Status (2026-10-03): blocked on this box.** The GPU box is itself a Docker container (`/.dockerenv`) with no
+    Docker CLI, daemon or socket, so nothing can be built here. Done instead: the README's non-Docker fresh-box
+    install, run end to end on a clean box, failed on a pin (`accelerate` 1.15 vs vllm-omni's exact 1.12), now
+    fixed in `requirements.txt`, which the Dockerfile installs too. Needs a host with Docker + the NVIDIA runtime.
 - **O-03 — Branches.** `main` = `07d651e First`. Everything since is on `origin/setup/new-box` (=
   local `voxcpm2`). The user pushes and merges.
 - **O-04 — Throttled GPU.** The current 5090 is stuck at P3 (half memory clock); Qwen3-4B decodes at 92
   tok/s against ~150 healthy. Re-run every benchmark on a healthy box before tuning against it.
+  - **Status: done (2026-10-03).** New box, healthy (P1, memory 13 801 MHz); everything re-baselined, NOTES.md
+    → "Box (2026-10-03)".
 - **O-05 — Tests.**
   - GPU-free unit tests cover only the chunker and tool-call parsing.
   - Nothing covers the EARS server state machine (speaking / halting / pending / reset) or the MOUTH
     session flow. Several issues above (I-01, I-02, I-03, I-07) live there.
   - A fake-engine harness would let them run without a GPU.
   - There is no CI.
+  - **Status (2026-10-03):** `tests/fakes.py` + `tests/test_mouth_session.py` cover the MOUTH session (barge
+    history, tool barge, fillers, backchannel cancel, tool history), no GPU. The EARS server state machine is
+    still only covered by GPU scripts (`validate_barge.py`, `smoke_test.py`). No CI.

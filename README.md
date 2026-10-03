@@ -19,9 +19,9 @@ browser mic ──ws──▶ EARS    nemotron L15 → endpoint head: endpoint /
 browser speaker ◀────┘      24 kHz audio, streamed as it decodes
 ```
 
-Two processes, **one venv** (`.venv`, `requirements.txt`). **One GPU, one conversation at a time.** A second
-visitor gets a "busy" page. This is a single-session demo server, not a multi-tenant service — scaling out is
-the big open item (see `HANDOFF.md`).
+Two processes, **one venv** (`.venv`, `requirements.txt`). **One GPU, up to 4 conversations at once**
+(`server.max_sessions`); the next visitor gets a "busy" page. It's a demo server with no auth (see `ISSUES.md`
+I-11 before exposing it beyond an SSH tunnel).
 
 ## How it works
 
@@ -34,8 +34,10 @@ the big open item (see `HANDOFF.md`).
    audio streams back to EARS (and on to the browser) per decode step. The **first** chunk may end at a
    clause (comma, semicolon, dash) so playback doesn't wait for a long opening sentence; later chunks are
    whole sentences; no chunk is cut below 40 characters, so short replies go to the TTS whole. On a tool call
-   it speaks a short lead-in ("let me check that") that overlaps the tool latency, then speaks the result.
-   On a barge it stops within one audio chunk and aborts the live LLM/TTS request in the engine.
+   it speaks a short contextual filler ("Checking the current weather in Oslo.") the moment the call starts
+   decoding, runs the tool as soon as the call parses, adds a "still looking" line if the tool is slow, then
+   speaks the result. On a barge it stops within one audio chunk, aborts the live LLM/TTS requests, and keeps
+   what the user heard of the reply in the conversation history.
 
 ## Hardware
 
@@ -112,11 +114,18 @@ the voice picker. Browser DSP (echo cancellation, noise suppression, auto gain) 
 ```bash
 .venv/bin/python tests/test_chunker.py          # text chunking (no GPU)
 .venv/bin/python tests/test_llm_parse.py        # tool-call text splitting (no GPU)
-.venv/bin/python scripts/smoke_test.py          # needs run.sh up: MOUTH tool turns + EARS speech → endpoint → audio
+.venv/bin/python tests/test_mouth_session.py    # MOUTH turns/barge/tools/backchannels on fake engines (no GPU)
+.venv/bin/python scripts/smoke_test.py          # needs run.sh up: MOUTH tool turns + barge-in + EARS speech → audio
 .venv/bin/python scripts/load_test.py --sessions 4       # needs run.sh up: concurrent MOUTH turns + backchannels
-.venv/bin/python scripts/load_test_ears.py --sessions 4  # needs run.sh up: N real-time WebSocket conversations
+                                                         #   --tools: tool turns (+ --fresh: empty history each)
+.venv/bin/python scripts/load_test_ears.py --sessions 4  # needs run.sh up: N real-time WebSocket conversations;
+                                                         #   hop lag, end of speech -> endpoint -> first audio
 .venv/bin/python scripts/validate_ears_batched.py        # GPU free: batched EARS == single-session reference
 .venv/bin/python scripts/validate_rnnt.py                # GPU free: graphed RNN-T == nemotron generate()
+.venv/bin/python scripts/validate_barge.py               # GPU free: a barge-in keeps the start of the utterance
+.venv/bin/python scripts/validate_long_turn.py           # GPU free: > 20 s turns transcribed whole
+.venv/bin/python scripts/bench_tts_voice.py              # GPU free: cloned-voice TTS first-audio per request
+scripts/stop.sh                                          # stop run.sh (and any stage worker it leaves behind)
 ```
 
 The EARS half of the smoke test uses the MOUTH's own TTS reply (held in memory) as the "user" speech, so no
@@ -138,14 +147,15 @@ onset ms, barge, backchannel, tool name). Voice reference clips and their transc
 
 ## Known limits (v1)
 
-- **Up to 4 conversations** per GPU (`server.max_sessions`); more visitors get a busy page. On this throttled
-  box 4 conversations keep EARS near real time (hop lag p50 122 / p90 353 ms) with reply onset ~810 ms; see
-  `NOTES.md` → Concurrency.
+- **Up to 4 conversations** per GPU (`server.max_sessions`); more visitors get a busy page. On a healthy 5090, 4
+  conversations keep EARS real time (hop lag p50 ~90 / p90 ~200 ms); see `NOTES.md`.
 - `set_reminder` / `send_message` are **placeholders** — the model says they aren't connected yet.
-- Plain-turn onset ~500 ms, tool turn ~750 ms (smoke test, cloned voice) on a box whose GPU is stuck at half
-  memory clock — expect better on a healthy GPU (see `NOTES.md`). VoxCPM2 re-encodes the reference clip on
-  every request; a precomputed voice profile would cut that.
+- The user waits **~1.0 s** from the end of their speech to the first reply audio (`load_test_ears.py`, 1–4
+  conversations), and ~775 ms of that is endpoint detection. Live threshold tuning should cut it (targets in
+  `NOTES.md` → Response gap). MOUTH's part is small: first audio ~265 ms after the endpoint for a plain or a tool
+  turn (smoke test, cloned voice), ~410 ms p50 with 4 busy sessions.
 - Endpoint thresholds are not yet live-tuned (see Configure).
-- The `Dockerfile` has not yet been built and run end to end.
+- The `Dockerfile` has not yet been built and run end to end (the box used so far is itself a container, with no
+  Docker daemon). The non-Docker fresh-box path above has been run end to end on a clean box.
 
 See `NOTES.md` for the current state, `ISSUES.md` for open issues, and `HANDOFF.md` for the current work queue.
