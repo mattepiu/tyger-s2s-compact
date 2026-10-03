@@ -101,7 +101,7 @@ async def _conversation(ws, ears):
     st = {"speaking": False, "reset": False, "halting": False, "pending": None,
           "bc_active": False, "agent_buf": np.zeros(0, np.float32),
           "turn_t0": None, "await_onset": False, "barge_t0": None, "bc_t0": None,
-          "play_until": 0.0, "mouth_done": False, "done_task": None}
+          "play_until": 0.0, "sent_s": 0.0, "mouth_done": False, "done_task": None}
     try:
         m_reader, m_writer = await asyncio.open_connection(mp["mouth_host"], int(mp["mouth_port"]))
         have_mouth = True
@@ -118,7 +118,7 @@ async def _conversation(ws, ears):
 
     async def send_turn(transcript):
         st["speaking"] = True; st["turn_t0"] = time.perf_counter(); st["await_onset"] = True
-        st["mouth_done"] = False; st["play_until"] = 0.0
+        st["mouth_done"] = False; st["play_until"] = 0.0; st["sent_s"] = 0.0
         await async_send_msg(m_writer, b"T", {"transcript": transcript})
 
     async def finish_turn(barged):
@@ -167,6 +167,7 @@ async def _conversation(ws, ears):
                         a24 = np.frombuffer(payload, np.float32)
                         now = time.perf_counter()        # client queues chunks back to back (+40 ms lead-in)
                         st["play_until"] = max(st["play_until"], now + 0.04) + len(a24) / 24000
+                        st["sent_s"] += len(a24) / 24000
                         st["agent_buf"] = np.concatenate([st["agent_buf"], ds24to16(a24)])
                 elif kind == b"X":
                     d = json.loads(payload)
@@ -221,8 +222,9 @@ async def _conversation(ws, ears):
                         st["done_task"].cancel()
                     st["halting"] = False
                     await finish_turn(True)
-                elif have_mouth:
-                    await async_send_msg(m_writer, b"B")
+                elif have_mouth:            # + how much of the reply had played, so MOUTH remembers what was heard
+                    played = st["sent_s"] - max(0.0, st["play_until"] - time.perf_counter())
+                    await async_send_msg(m_writer, b"B", {"played_s": round(max(0.0, played), 2)})
         if last is not None:
             await ws.send_json({"type": "state", "state": last["state"], "yield": yp,
                                 "bc": bcp, "hazard": last.get("hazard", 0.0), "p_end": round(pe, 3)})

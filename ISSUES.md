@@ -11,13 +11,13 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 
 | ID | Area | Severity | Status | One line |
 |---|---|---|---|---|
-| I-01 | MOUTH | high | confirmed in code | Barged turns vanish from LLM history |
+| I-01 | MOUTH | high | **fixed** | Barged turns vanish from LLM history |
 | I-02 | EARS | high | likely | Start of a barge-in utterance is cut from the transcript |
-| I-03 | MOUTH | medium | confirmed in code | Barge during a tool call waits for the tool (up to 15 s) |
+| I-03 | MOUTH | medium | **fixed** | Barge during a tool call waits for the tool (up to 15 s) |
 | I-04 | metrics | medium | **fixed** | "Onset" excludes endpoint detection; real gap is larger (it's ~1.0 s) |
 | I-05 | EARS | medium | confirmed in code | User turns > 20 s silently keep only the last 20 s |
 | I-06 | MOUTH | medium | hypothesis | Voice clip copied as ~480k Python floats on every TTS request |
-| I-07 | MOUTH | low | confirmed in code | Backchannel keeps generating after the reply turn starts |
+| I-07 | MOUTH | low | **fixed** | Backchannel keeps generating after the reply turn starts |
 | I-08 | EARS | low | likely | 2nd-ear agent audio leads what the user actually hears |
 | I-09 | EARS | low | confirmed in code | MOUTH dying leaves the conversation silently dead |
 | I-10 | EARS | low | likely | `play_until` is a server-side guess at client playback |
@@ -56,6 +56,11 @@ full-duplex system, so context loss is routine too.
 
 **Verify:** a scripted session of turn, then barge, then follow-up. Assert that the follow-up's prompt
 contains the first question. A unit test can drive `stream_turn` with a fake LLM/TTS and a stop flag.
+
+**Status: fixed (2026-10-03).** Reproduced on the box: after a barged "octopuses" turn, "which animal were you
+telling me about?" got "I wasn't telling you about any animal". Now the transcript + heard part of the reply (EARS
+sends `played_s` with `B`) are remembered, marked with " —"; the follow-up answers "Octopuses". Tests:
+`tests/test_mouth_session.py`, `smoke_test.py` (MOUTH barge).
 
 ### I-02 — Start of a barge-in utterance is cut from the transcript (high, likely)
 **Where:**
@@ -102,6 +107,9 @@ non-barge path.
 
 **Verify:** stub a tool that sleeps 10 s, barge during it, and assert `D` comes back in < 200 ms.
 
+**Status: fixed (2026-10-03).** Barge → `D` on a live Tavily tool turn: 2.0–2.5 s before, 5 ms after. Unit test
+with a 10 s tool: 9982 ms before, < 200 ms after.
+
 ### I-05 — User turns > 20 s keep only the last 20 s (medium, confirmed in code)
 **Where:**
 - `app/ears_core/batched.py:33`: `TURN_MAX_S = 20.0`.
@@ -138,6 +146,10 @@ event says so.
 
 **Verify:** in `scripts/load_test.py`, fire the backchannel just before the turn. Check that the backchannel
 request is aborted in the logs and that turn first-audio p50 doesn't regress.
+
+**Status: fixed (2026-10-03).** Done with a per-session turn counter instead of a `bc_stop` event (a `C` sent
+after `T`, as `load_test.py` does mid-reply, still runs). `load_test.py --bc-first` at 4 sessions: 12/12
+backchannels aborted; turn first-audio p50 769 → 559 ms.
 
 ### I-08 — 2nd-ear agent audio leads what the user hears (low, likely)
 **Where:** `app/server.py:166-170` and `244-246`.

@@ -50,6 +50,30 @@ buffering for what they hear). A rough split of the ~775 ms detection (estimated
 instrumented): `ep_deb` 2 frames = 160 ms, hop quantisation ~160 ms average (L-02), hop lag ~60–100 ms, final ASR
 ~40–70 ms; the remaining ~350–400 ms is `p_end` climbing to 0.9146 after the speech stops.
 
+### MOUTH barge-in and backchannel fixes (I-01, I-03, I-07)
+- **Barged turns stay in history (I-01).** On a barge MOUTH remembers the user's transcript and the reply up to the
+  chunk that was playing, ending in " —" (the system prompt says a reply ending in a dash was cut off). EARS sends
+  `B {"played_s"}`: reply audio sent minus what is still queued at the client (`play_until`), so generated-ahead
+  audio the user never heard isn't remembered. Before, on the real stack: barge "tell me about octopuses", then
+  "which animal were you telling me about?" got "I wasn't telling you about any animal"; now "Octopuses…".
+  `smoke_test.py` checks this.
+- **A barge doesn't wait for tools (I-03).** Barge → `D`: **5 ms** on a tool turn, against **2.0–2.5 s** before
+  (live Tavily). Tool threads are daemons and finish on their own.
+- **A reply turn cancels the backchannel in flight (I-07).** `T` bumps a per-session turn counter; a backchannel
+  queued before it stops (LLM and TTS requests aborted) and sends `D {"bc", "aborted": true}`.
+- `load_test.py --sessions 4` (6 turns, 24 per run), same protocol before and after:
+
+  | | plain turns, first-audio p50 (3 runs) | backchannel 50 ms before each turn (`--bc-first`): first-audio p50 / max |
+  |---|---|---|
+  | before (`b64c772`) | 535 / 561 / 554 ms | 769 / 1312 ms (backchannel ran to the end) |
+  | after | 596 / 563 / 495 ms | 559 / 676 ms (12/12 aborted) |
+
+  Plain turns are unchanged within run-to-run noise; a turn that starts while a backchannel is being made is
+  ~200 ms faster.
+- GPU-free tests: `tests/fakes.py` (fake LLM/TTS/Mouth) drives `Session.stream_turn` and `Session.run` over a
+  socketpair; `tests/test_mouth_session.py` covers I-01/I-03/I-07 and fails on the old code (I-03 case: `D` came
+  9982 ms after the barge with a 10 s tool).
+
 ## Box (2026-10-02) — old, throttled
 NVIDIA RTX 5090 (32 607 MiB, Blackwell sm_120), driver 595.91 / CUDA 13.2; 96-core CPU. `HF_HOME=/workspace/.hf_home`,
 `HF_HUB_DISABLE_XET=1`, torch **2.13.0+cu130**, Python 3.12, one venv `.venv` (vllm 0.30.0, vllm-omni 0.30.0,

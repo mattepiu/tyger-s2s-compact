@@ -59,6 +59,44 @@ def mouth_backchannel(sock, partial):
     return text, audio
 
 
+def mouth_barge(sock, transcript, label, after_chunks=1, played_s=0.5):
+    """Start a turn, barge after `after_chunks` audio frames (B with played_s, as EARS sends it); returns the
+    time from B to the MOUTH's D and whether D said barged."""
+    send_msg(sock, b"T", {"transcript": transcript})
+    n = 0; t_b = None
+    while True:
+        kind, payload = recv_msg(sock)
+        if kind is None:
+            return -1, False
+        if kind == b"A" and t_b is None:
+            n += 1
+            if n >= after_chunks:
+                send_msg(sock, b"B", {"played_s": played_s}); t_b = time.time()
+        elif kind == b"D":
+            d = json.loads(payload)
+            if d.get("bc"):
+                continue
+            dt = time.time() - t_b if t_b else -1
+            print(f"  [{label}] barge -> D {dt*1e3:.0f}ms barged={d.get('barged')}")
+            return dt, bool(d.get("barged"))
+
+
+def test_barge(cfg):
+    """I-01: a barged turn stays in history; I-03: a barge during a tool call doesn't wait for the tool."""
+    s = mouth_session(cfg)
+    print("== MOUTH barge ==")
+    dt, barged = mouth_barge(s, "Tell me a few interesting facts about octopuses, in some detail please.", "plain")
+    assert barged and dt < 0.3, f"plain barge took {dt*1e3:.0f} ms"
+    _, follow, _ = mouth_turn(s, "Sorry, I cut you off. Which animal were you telling me about?", "follow-up")
+    remembered = "octopus" in follow.lower()
+    print(f"  follow-up remembers the barged turn: {remembered}")
+    assert remembered, "the barged turn's topic is missing from the follow-up reply"
+    dt, barged = mouth_barge(s, "What's the weather in Rome right now?", "tool")
+    assert barged and dt < 0.3, f"tool-turn barge took {dt*1e3:.0f} ms"
+    s.close()
+    print("  MOUTH barge: PASS")
+
+
 def mouth_session(cfg):
     host, port = cfg["server"]["mouth_host"], int(cfg["server"]["mouth_port"])
     s = socket.create_connection((host, port), timeout=120)
@@ -181,6 +219,7 @@ def main():
     speech = None
     if do_mouth:
         speech = test_mouth(cfg)
+        test_barge(cfg)
     if do_ears:
         if args.wav:
             speech16 = load_wav16(args.wav)

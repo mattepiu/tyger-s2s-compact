@@ -43,7 +43,9 @@ TTS_TOOLS_SYS = TTS_SYS + (
     "directly instead of guessing, asking permission, or telling the user to check a website. After a tool "
     "returns, give a short spoken answer in one or two sentences using the result; never read out raw data, "
     "URLs, code, or JSON. If a tool reports it is not connected yet, tell the user that plainly instead of "
-    "pretending it was done.")
+    "pretending it was done. If one of your earlier replies ends with a dash, the user cut you off there and "
+    "heard only that much of it.")
+INTERRUPTED = " —"         # marks a barged reply in history (explained in TTS_TOOLS_SYS); say_clean speaks it as a pause
 
 LEADIN_SYS = (
     "You are a voice assistant and you are about to look something up for the user right now. Say ONE short, "
@@ -146,6 +148,10 @@ class Session:
         self.voice_name, self.voice = m.default_voice()  # every session starts on the configured default
         self.turn_stop = threading.Event()
         self.closed = threading.Event()
+        self.turn_seq = 0                  # T frames seen; a backchannel queued before the latest T is stale
+        self.barge_played_s = None         # reply audio the client had played at the barge (from EARS's B)
+        self._said = []                    # this turn's spoken chunks: (text, audio offset in s when it started)
+        self._audio_s = 0.0                # reply audio generated so far this turn, in s
         self.turn_q: queue.Queue = queue.Queue()
         self.bc_q: queue.Queue = queue.Queue()
 
@@ -173,10 +179,27 @@ class Session:
             self.history.append({"role": "assistant", "content": reply or "..."})
             self.history = self.history[-2 * self.m.history_turns:]
 
+    def _remember_barged(self, user):
+        """A barged turn still enters history: the user's words, and the reply up to the chunk that was playing
+        when they cut in (all generated chunks if EARS didn't say how much had played), marked interrupted."""
+        played = self.barge_played_s
+        heard = [t for t, at in self._said if played is None or at < played]
+        self._remember(user, (" ".join(t.strip() for t in heard) + INTERRUPTED).strip())
+
+    def _say(self, text, voice, stop_flag):
+        """TTS one text chunk as reply audio; logs it in self._said once its first audio is out."""
+        clean = say_clean(text); first = True
+        if not clean:
+            return
+        for w in self.m.tts.stream(clean, voice, stop_flag=stop_flag):
+            if first:
+                self._said.append((text, self._audio_s)); first = False
+            self._audio_s += len(w) / self.m.sr
+            yield ("audio", w)
+
     # ---- speak an LLM text stream: a short first chunk (clause), then whole sentences ----
     def _speak_stream(self, events, voice, stop_flag):
         """Speak the text of an LLM event stream as it arrives. Yields MOUTH events; returns (text, calls)."""
-        tts = self.m.tts
         content = ""; calls = None; done = 0
         for kind, val in events:
             if kind == "text":
@@ -190,28 +213,25 @@ class Session:
                     done += len(safe) - len(rest); safe = rest
                     if stop_flag():
                         break
-                    clean = say_clean(chunk)
-                    if clean:
-                        for w in tts.stream(clean, voice, stop_flag=stop_flag):
-                            yield ("audio", w)
+                    yield from self._say(chunk, voice, stop_flag)
             elif kind == "tool_calls":
                 calls = val
             if stop_flag():
                 return content, calls
-        tail = say_clean(content[done:])
-        if not calls and tail and not stop_flag():
-            for w in tts.stream(tail, voice, stop_flag=stop_flag):
-                yield ("audio", w)
+        if not calls and not stop_flag():
+            yield from self._say(content[done:], voice, stop_flag)
         return content, calls
 
     # ---- a full turn (may call tools) ----
     def stream_turn(self, transcript, stop_flag):
         m = self.m; voice = self.voice                 # one voice per reply (a switch applies to the next one)
+        self._said = []; self._audio_s = 0.0
         msgs = [{"role": "system", "content": TTS_TOOLS_SYS}] + list(self.history) + \
                [{"role": "user", "content": transcript}]
         content, calls = yield from self._speak_stream(
             m.llm.stream(msgs, tools=TOOLS, max_new=m.max_gen, stop_flag=stop_flag), voice, stop_flag)
         if stop_flag():
+            self._remember_barged(transcript)
             yield ("done", content.strip()); return
         if not calls:                                       # plain reply
             reply = content.strip(); self._remember(transcript, reply)
@@ -232,11 +252,12 @@ class Session:
                                   max_new=24, stop_flag=stop_flag)).strip()
         if lead and not stop_flag():
             yield ("text", lead)
-            for w in m.tts.stream(say_clean(lead), voice, stop_flag=stop_flag):
-                yield ("audio", w)
-        for w in workers:
-            w.join()
+            yield from self._say(lead, voice, stop_flag)
+        for w in workers:                                  # a barge doesn't wait for the tools (daemon threads)
+            while w.is_alive() and not stop_flag():
+                w.join(0.01)
         if stop_flag():
+            self._remember_barged(transcript)
             yield ("done", lead); return
 
         asst = {"role": "assistant", "content": content.strip() or None,
@@ -248,7 +269,11 @@ class Session:
                                  for i, r in enumerate(results)]
         full2, _ = yield from self._speak_stream(
             m.llm.stream(msgs2, max_new=m.max_gen, stop_flag=stop_flag), voice, stop_flag)
-        reply = (lead + " " + full2).strip(); self._remember(transcript, full2.strip() or lead)
+        reply = (lead + " " + full2).strip()
+        if stop_flag():
+            self._remember_barged(transcript)
+        else:
+            self._remember(transcript, full2.strip() or lead)
         yield ("done", reply)
 
     # ---- backchannel: always a contextual LLM ack off the ASR partial ----
@@ -282,7 +307,7 @@ class Session:
     # ---- workers ----
     def _turn_worker(self):
         while (turn := self.turn_q.get()) is not None:
-            self.turn_stop.clear()
+            self.turn_stop.clear(); self.barge_played_s = None
             stop = lambda: self.turn_stop.is_set() or self.closed.is_set()   # noqa: E731
             t0 = time.perf_counter(); t_txt = t_aud = None
             try:
@@ -303,8 +328,9 @@ class Session:
                     self.send(b"D", {"text": "", "error": type(e).__name__})
 
     def _bc_worker(self):
-        while (bc := self.bc_q.get()) is not None:
-            stop = self.closed.is_set
+        while (item := self.bc_q.get()) is not None:
+            seq, bc = item                                  # a reply turn (T) after this C makes it moot: EARS
+            stop = lambda seq=seq: self.closed.is_set() or self.turn_seq != seq  # noqa: E731  drops its K audio
             t0 = time.perf_counter(); t_aud = None; partial = bc.get("partial", "")
             try:
                 for kind, val in self.stream_bc(partial, stop):
@@ -314,10 +340,12 @@ class Session:
                         t_aud = t_aud or time.perf_counter() - t0
                         self.send(b"K", val.tobytes())
                     elif kind == "done":
-                        self.send(b"D", {"text": val, "bc": True})
+                        aborted = stop()
+                        self.send(b"D", {"text": val, "bc": True, "aborted": aborted})
                         # counts + timing only, never the words
-                        log.info("backchannel: partial_words=%d ack_chars=%d first-audio %.0fms",
-                                 len(partial.split()), len(val), (t_aud or 0) * 1e3)
+                        log.info("backchannel: partial_words=%d ack_chars=%d first-audio %.0fms%s",
+                                 len(partial.split()), len(val), (t_aud or 0) * 1e3,
+                                 " (aborted: reply turn started)" if aborted else "")
             except Exception as e:
                 if not self.closed.is_set():
                     log.exception("backchannel error: %s", type(e).__name__)
@@ -334,12 +362,14 @@ class Session:
                 if kind is None:
                     break
                 if kind == b"T":
+                    self.turn_seq += 1                      # stops a backchannel still being made
                     self.turn_q.put(json.loads(payload))
                 elif kind == b"C":
-                    self.bc_q.put(json.loads(payload))
+                    self.bc_q.put((self.turn_seq, json.loads(payload)))
                 elif kind == b"V":
                     self.set_voice(json.loads(payload).get("voice", ""))
-                elif kind == b"B":
+                elif kind == b"B":                          # EARS may say how much reply audio had played
+                    self.barge_played_s = (json.loads(payload) if payload else {}).get("played_s")
                     self.turn_stop.set()
         finally:                                            # disconnect: stop + abort whatever is live
             self.closed.set(); self.turn_stop.set()
