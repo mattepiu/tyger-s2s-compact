@@ -14,7 +14,7 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | I-01 | MOUTH | high | confirmed in code | Barged turns vanish from LLM history |
 | I-02 | EARS | high | likely | Start of a barge-in utterance is cut from the transcript |
 | I-03 | MOUTH | medium | confirmed in code | Barge during a tool call waits for the tool (up to 15 s) |
-| I-04 | metrics | medium | confirmed in code | "Onset" excludes endpoint detection; real gap is larger |
+| I-04 | metrics | medium | **fixed** | "Onset" excludes endpoint detection; real gap is larger (it's ~1.0 s) |
 | I-05 | EARS | medium | confirmed in code | User turns > 20 s silently keep only the last 20 s |
 | I-06 | MOUTH | medium | hypothesis | Voice clip copied as ~480k Python floats on every TTS request |
 | I-07 | MOUTH | low | confirmed in code | Backchannel keeps generating after the reply turn starts |
@@ -219,6 +219,10 @@ no auth on `/`, `/ws` or `/voices`.
   to first reply audio alongside the existing metric.
 - Also report endpoint detection delay (end of speech to the `endpoint` event) on its own. It's the number
   live tuning (O-01) should drive down.
+
+**Status: fixed (2026-10-03).** `load_test_ears.py` reports both. Healthy box: end of speech → endpoint p50 779 ms
+(1 conv) / 773 ms (4 conv), end of speech → first audio p50 1013 / 1022 ms, against endpoint → audio 229 / 257 ms.
+Table in NOTES.md → "Response gap (I-04)". The test also injects one sentence now (the whole reply hit inner pauses).
 
 ---
 

@@ -31,6 +31,25 @@ need `datasets` (pulled in by vllm already; nothing to add). First-ever `./run.s
 EARS stats under the 4-conversation load: encoder 12%, head 23%, ASR 14% busy (throttled box: ~40% / ~30%).
 GPU peak with tool turns is 29.3 GB (28.6 GiB): the "28.5 GB" budget in README is about right, with ~3 GB free.
 
+### Response gap (I-04): end of speech → endpoint → first reply audio
+`load_test_ears.py` now times the end of each injected utterance (last voiced 20 ms frame, on the simulated mic
+clock) and reports detection delay and the full gap next to the old endpoint→audio onset. It also injects only the
+**first sentence** of the TTS speech (cut at the first ≥ 300 ms pause). The whole multi-sentence reply made the
+endpoint fire at an inner pause in 5 of 8 turns at 4 conversations: the rest of the utterance then played over the
+reply, and when that didn't barge, the conversation stalled with the words lost (3 of 4 conversations finished
+only 1 of 2 turns). `--full-speech` restores the old input. Utterance ~1.9 s voiced; code at `b64c772`:
+
+| conversations | end of speech → `endpoint` p50 / p90 | endpoint → first audio p50 / p90 | **end of speech → first audio** p50 / p90 / max | hop lag p50 / p90 |
+|---|---|---|---|---|
+| 1 (4 turns) | 779 / 784 ms | 229 / 242 ms | **1013 / 1019 / 1021 ms** | 56 / 73 ms |
+| 4 (3 turns each) | 773 / 877 ms | 257 / 299 ms | **1022 / 1132 / 1192 ms** | 102 / 140 ms |
+
+All endpoints by the head (none by the silence fallback, none inside the utterance). **Detection is ~77% of the
+gap**; first audio arrives at the client ~1.0 s after the user stops (add the client's 40 ms lead-in + playback
+buffering for what they hear). A rough split of the ~775 ms detection (estimated from the parts, not
+instrumented): `ep_deb` 2 frames = 160 ms, hop quantisation ~160 ms average (L-02), hop lag ~60–100 ms, final ASR
+~40–70 ms; the remaining ~350–400 ms is `p_end` climbing to 0.9146 after the speech stops.
+
 ## Box (2026-10-02) — old, throttled
 NVIDIA RTX 5090 (32 607 MiB, Blackwell sm_120), driver 595.91 / CUDA 13.2; 96-core CPU. `HF_HOME=/workspace/.hf_home`,
 `HF_HUB_DISABLE_XET=1`, torch **2.13.0+cu130**, Python 3.12, one venv `.venv` (vllm 0.30.0, vllm-omni 0.30.0,
