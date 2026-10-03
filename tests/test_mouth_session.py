@@ -123,6 +123,87 @@ def test_tool_turn_completes():
     assert s.history[1]["content"].startswith("It is sunny")
 
 
+# ---- L-04: filler starts at the <tool_call> tag, covers slow tools, stops on barge ---------------------------
+def dead_air(evs, sr=24000):
+    """Longest gap in a client playback queue fed by the turn's audio events (as load_test.py measures it)."""
+    end = None; gap = 0.0
+    for kind, val, t in evs:
+        if kind == "audio":
+            if end is not None:
+                gap = max(gap, t - end)
+            end = max(end or t, t) + len(val) / sr
+    return gap
+
+
+def test_filler_starts_before_call_finishes_decoding():
+    llm = FakeLLM(reply=TOOL_REPLY, step_s=0.02, chars=2)    # the call takes ~0.8 s to decode
+    s, m = make_session(llm, FakeTTS(n=3))
+    t_tool = []
+    orig = M.execute_tool
+    M.execute_tool = lambda n, a: (t_tool.append(time.perf_counter()), {"answer": "sunny"})[1]
+    try:
+        t0 = time.perf_counter()
+        evs, _ = run_turn(s, "weather in Paris?")
+    finally:
+        M.execute_tool = orig
+    first_audio = next(t for k, _, t in evs if k == "audio") - t0
+    assert len(t_tool) == 1 and 0.6 < t_tool[0] - t0 < 1.0, "tool should start as soon as the call is parsed"
+    assert first_audio < t_tool[0] - t0 - 0.2, \
+        f"filler first audio {1e3 * first_audio:.0f} ms, call parsed at {1e3 * (t_tool[0] - t0):.0f} ms"
+    assert evs[-1][0] == "done" and "phase_b" in [c[0] for c in llm.calls]
+
+
+def test_still_filler_covers_slow_tool():
+    llm = FakeLLM(reply=TOOL_REPLY)
+    tts = FakeTTS(n=5, chunk_s=0.08, step_s=0.01)           # each line: 0.4 s of audio
+    s, m = make_session(llm, tts)
+    with SlowTool(3.0):
+        evs, _ = run_turn(s, "weather in Paris?")
+    kinds = [c[0] for c in llm.calls]
+    assert kinds.count("still") == M.MAX_STILL, kinds
+    first_still = next(c[1] for c in llm.calls if c[0] == "still")
+    assert llm.leadin in first_still[-1]["content"], "the still line must know what was already said"
+    gap = dead_air(evs)
+    assert gap < M.FILLER_GAP_S + 0.3, f"dead air {1e3 * gap:.0f} ms"
+
+
+def test_no_still_filler_for_fast_tool():
+    llm = FakeLLM(reply=TOOL_REPLY)
+    s, m = make_session(llm, FakeTTS(n=3))
+    with SlowTool(0.05):
+        run_turn(s, "weather in Paris?")
+    assert "still" not in [c[0] for c in llm.calls]
+
+
+def test_barge_during_filler_halts_within_a_chunk():
+    llm = FakeLLM(reply=TOOL_REPLY)
+    tts = FakeTTS(n=20, step_s=0.02)
+    s, m = make_session(llm, tts)
+    with SlowTool(3.0):
+        stop = threading.Event(); t_stop = None; after = 0
+        t_done = None
+        for kind, val in s.stream_turn("weather in Paris?", stop.is_set):
+            if kind == "audio":
+                if t_stop is None:
+                    stop.set(); t_stop = time.perf_counter()
+                else:
+                    after += 1
+            if kind == "done":
+                t_done = time.perf_counter()
+    assert after <= 1, f"{after} audio chunks after the barge"
+    assert t_done - t_stop < 0.05
+    time.sleep(0.05)
+    assert tts.live == 0 and tts.aborted >= 1, "filler TTS still running after the barge"
+
+
+def test_model_words_before_tag_replace_filler():
+    llm = FakeLLM(reply="Sure, let me look up the current weather in Paris for you right now. " + TOOL_REPLY)
+    s, m = make_session(llm, FakeTTS(n=3))
+    with SlowTool(0.05):
+        run_turn(s, "weather in Paris?")
+    assert "leadin" not in [c[0] for c in llm.calls], "spoke both the model's own lead-in and a filler"
+
+
 # ---- I-07: a reply turn cancels the backchannel in flight ------------------------------------------------
 def test_turn_cancels_backchannel():
     llm = FakeLLM(ack="oh wow, that is great news really", step_s=0.03, chars=2)   # slow ack: ~0.5 s

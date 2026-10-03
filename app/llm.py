@@ -1,6 +1,7 @@
 """In-process responder: Qwen3-4B-Instruct-2507 on a vLLM AsyncLLM engine (no OpenAI server, no HTTP).
 
-stream(messages, tools=...) yields ("text", delta) for speakable reply text as it decodes, then at most one
+stream(messages, tools=...) yields ("text", delta) for speakable reply text as it decodes, ("tool_start", None) the
+moment a <tool_call> tag appears (the call itself is still decoding), then at most one
 ("tool_calls", [{"name", "arguments"}, ...]) at the end. Tool calls use the Hermes format the Qwen chat
 template emits: <tool_call>{"name": ..., "arguments": {...}}</tool_call>. Text from the first <tool_call> on
 is never yielded as speech (a trailing partial "<tool_c" is held back until it's resolved).
@@ -66,6 +67,8 @@ class LocalLLM:
             speak, saw_tool = split_speakable(raw)
             if len(speak) > said:
                 yield ("text", speak[said:]); said = len(speak)
+            if saw_tool:                  # the call's arguments are still decoding; the caller can start a filler
+                yield ("tool_start", None)
         if stop_flag and stop_flag():
             return
         if not saw_tool and len(raw) > said:                  # flush a held-back "<..." that wasn't a tag

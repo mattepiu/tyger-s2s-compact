@@ -66,13 +66,43 @@ instrumented): `ep_deb` 2 frames = 160 ms, hop quantisation ~160 ms average (L-0
   | | plain turns, first-audio p50 (3 runs) | backchannel 50 ms before each turn (`--bc-first`): first-audio p50 / max |
   |---|---|---|
   | before (`b64c772`) | 535 / 561 / 554 ms | 769 / 1312 ms (backchannel ran to the end) |
-  | after | 596 / 563 / 495 ms | 559 / 676 ms (12/12 aborted) |
+  | after | 596 / 563 / 495 ms; with L-04 too: 496 / 612 / 573 ms | 500 / 707 ms (24/24 aborted) |
 
   Plain turns are unchanged within run-to-run noise; a turn that starts while a backchannel is being made is
   ~200 ms faster.
 - GPU-free tests: `tests/fakes.py` (fake LLM/TTS/Mouth) drives `Session.stream_turn` and `Session.run` over a
   socketpair; `tests/test_mouth_session.py` covers I-01/I-03/I-07 and fails on the old code (I-03 case: `D` came
   9982 ms after the barge with a 10 s tool).
+
+### Tool fillers (L-04): start at the `<tool_call>` tag, cover slow tools
+- `LocalLLM.stream` yields `tool_start` the moment the tag appears. MOUTH then makes the filler (its own LLM + TTS
+  requests, on a helper thread, relayed as reply audio) while a second helper thread finishes decoding the call and
+  starts the tools the moment it parses. If the tools are still out `FILLER_GAP_S` (0.8 s) after the filler has
+  played (MOUTH tracks the client's playback end like EARS does), one more "still looking" line that is told what
+  was already said, up to `MAX_STILL` (2). All of it shares the turn's `stop_flag`.
+- If the model spoke a full chunk before the tag ("Sure, let me look up…"), that is the lead-in: no filler.
+- **Fillers are contextual via few-shot, not quoted examples.** The old `LEADIN_SYS` quoted 'Sure, let me check
+  that for you.' and the 4B said exactly that on every tool turn. Now: no example inside the system prompt,
+  few-shot turns in EN/RU/ES that name the topic (`LEADIN_SHOTS`, `STILL_SHOTS`). Sampled with a 3 s tool:
+  "Checking today's temperature in Cairo." → "Cairo's temperature is still coming in."; "Сейчас смотрю погоду в
+  Новосибирске." → "Данные из Новосибирска чуть дольше."
+- `TYGER_TOOL_DELAY_S` (env, testing only) sleeps before every tool call; with it the call still hits Tavily, so
+  "3 s stub" below is 3 s + Tavily.
+- Measured with `load_test.py --tools --fresh` (every turn a weather tool turn, empty history; 30/30 turns
+  called the tool) and the smoke weather turn:
+
+  | | first audio p50 / max | longest dead air p50 / max |
+  |---|---|---|
+  | smoke weather turn | 441 → **285–315 ms** | — |
+  | live Tavily, 1 session | 375 / 399 → **279 / 305 ms** | 257 / 2389 → 468 / **838 ms** |
+  | live Tavily, 4 sessions | 640 / 882 → **408 / 740 ms** | 548 / 2584 → 342 / **1265 ms** |
+  | 3 s stub, 1 session | 424 / 555 → **278 / 324 ms** | 3104 / 3489 → **1023 / 1232 ms** |
+  | 3 s stub, 4 sessions | 583 / 752 → **384 / 658 ms** | 3312 / 5031 → **1067 / 1314 ms** |
+
+  The worst silence is now bounded at ~1.0–1.3 s (the 0.8 s gap + making the next line). The median dead air
+  with a fast tool can be a little longer (1 session: 257 → 468 ms): the filler now ends sooner, before Tavily
+  returns. A barge during the filler: `D` 5 ms; the unit test asserts ≤ 1 audio chunk after the stop and the
+  filler's TTS request aborted.
 
 ## Box (2026-10-02) — old, throttled
 NVIDIA RTX 5090 (32 607 MiB, Blackwell sm_120), driver 595.91 / CUDA 13.2; 96-core CPU. `HF_HOME=/workspace/.hf_home`,

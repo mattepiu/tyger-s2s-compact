@@ -25,7 +25,7 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | L-01 | perf | lever | — | Encoder re-encodes the full 8 s window, twice, every hop, in fp32 |
 | L-02 | latency | lever | — | Decisions quantised to 320 ms hops |
 | L-03 | latency | lever | — | Per-request voice encode (precomputed voice profile) |
-| L-04 | latency | lever | — | Tool filler (lead-in) starts only after the whole tool call decodes; one filler, then silence |
+| L-04 | latency | lever | **done** | Tool filler (lead-in) starts only after the whole tool call decodes; one filler, then silence |
 | O-01 | ops | — | — | Endpoint thresholds never tuned live (V2) |
 | O-02 | ops | — | — | Dockerfile never built |
 | O-03 | ops | — | — | `main` is still at `First`; all work is on `setup/new-box` / `voxcpm2` |
@@ -338,6 +338,11 @@ clip are personal data: keep them on the box and gitignore them.
 **Measure:**
 - Tool-turn first-audio before and after (`smoke_test.py` weather turn, and `load_test.py` at 4 sessions).
 - The longest silence during a tool turn with a stubbed tool that sleeps 3 s.
+
+**Status: done (2026-10-03).** As proposed, plus: the filler prompts use few-shot turns instead of a quoted example
+(the old prompt's 'Sure, let me check that for you.' came out verbatim every time). 4 sessions, live Tavily:
+tool-turn first audio p50 640 → 408 ms, worst dead air 2584 → 1265 ms; with a 3 s stub tool, worst dead air
+5031 → 1314 ms. Details in NOTES.md → "Tool fillers (L-04)".
 
 ---
 

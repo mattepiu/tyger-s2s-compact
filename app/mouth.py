@@ -47,11 +47,37 @@ TTS_TOOLS_SYS = TTS_SYS + (
     "heard only that much of it.")
 INTERRUPTED = " —"         # marks a barged reply in history (explained in TTS_TOOLS_SYS); say_clean speaks it as a pause
 
+# Tool fillers (L-04). No example lines inside the system prompts: a 4B model repeats a quoted example nearly every
+# time (it said "Sure, let me check that for you." on every tool turn). Few-shot turns that name the topic, in
+# several languages, make it react to what was asked instead (same fix as BC_SHOTS).
 LEADIN_SYS = (
     "You are a voice assistant and you are about to look something up for the user right now. Say ONE short, "
-    "natural spoken sentence that tells them you're checking or looking it up (for example 'Sure, let me "
-    "check that for you.' or 'One sec, let me look that up.'). Do NOT answer the question, do NOT mention "
-    "tools or say the word tool, do NOT ask anything. Plain spoken words only, at most about ten words.")
+    "natural spoken sentence that tells them what you're checking, naming the specific thing they asked about. "
+    "Do NOT answer the question, do NOT mention tools or say the word tool, do NOT ask anything. Use the same "
+    "language the user spoke. Plain spoken words only, at most about ten words.")
+LEADIN_SHOTS = [
+    ("The user asked: \"what's the weather like in Lisbon this weekend?\"", "Let me pull up the Lisbon forecast."),
+    ("The user asked: \"how much is bitcoin right now\"", "Checking the latest bitcoin price."),
+    ("The user asked: \"какая сейчас погода в Казани?\"", "Сейчас гляну погоду в Казани."),
+    ("The user asked: \"¿quién ganó el partido del Madrid anoche?\"", "Déjame ver el resultado del Madrid."),
+    ("The user asked: \"what time is it in Tokyo?\"", "One moment, checking the time in Tokyo."),
+]
+STILL_SYS = (
+    "You are a voice assistant. You are looking something up for the user and it is taking a moment longer. Say "
+    "ONE very short, natural spoken sentence that you're still on it, tied to what they asked. Do NOT repeat or "
+    "rephrase what you already said, do NOT answer the question, do NOT mention tools. Use the same language the "
+    "user spoke. Plain spoken words only, at most about eight words.")
+STILL_SHOTS = [
+    ("The user asked: \"what's the weather like in Lisbon this weekend?\". You already said: 'Let me pull up the "
+     "Lisbon forecast.'", "Still getting Lisbon's weekend numbers."),
+    ("The user asked: \"how much is bitcoin right now\". You already said: 'Checking the latest bitcoin price.'",
+     "The bitcoin quote is taking a second."),
+    ("The user asked: \"какая сейчас погода в Казани?\". You already said: 'Сейчас гляну погоду в Казани.'",
+     "Данные по Казани ещё грузятся."),
+]
+FILLER_GAP_S = 0.8         # tools still out this long after the filler has played -> one more "still looking" line
+MAX_STILL = 2              # at most this many "still looking" lines per tool turn
+_END = object()
 
 BC_PROMPT = (
     "You are a voice assistant listening to the user, who is STILL speaking. You have NOT been given the "
@@ -194,14 +220,75 @@ class Session:
         for w in self.m.tts.stream(clean, voice, stop_flag=stop_flag):
             if first:
                 self._said.append((text, self._audio_s)); first = False
-            self._audio_s += len(w) / self.m.sr
+            self._audio(w)
             yield ("audio", w)
+
+    def _audio(self, w):
+        """Book-keep one reply audio chunk: total generated, and when the client will have played it all."""
+        d = len(w) / self.m.sr
+        self._audio_s += d
+        self._play_end = max(self._play_end, time.perf_counter()) + d
+
+    # ---- fillers: short lines spoken over tool latency, made on a helper thread ----
+    def _spawn(self, gen_fn):
+        """Run the generator gen_fn() on a daemon thread; returns a queue of its items, then _END."""
+        q: queue.Queue = queue.Queue()
+
+        def run():
+            try:
+                for x in gen_fn():
+                    q.put(x)
+            except Exception as e:
+                log.warning("filler error: %s", type(e).__name__)
+            finally:
+                q.put(_END)
+        threading.Thread(target=run, daemon=True).start()
+        return q
+
+    def _filler(self, sys_prompt, shots, user, voice, stop_flag):
+        """One filler line from the LLM (system prompt + few-shot turns + `user`), then its TTS:
+        ("text", line), ("audio", chunk)..."""
+        msgs = [{"role": "system", "content": sys_prompt}]
+        for q, a in shots:
+            msgs += [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
+        msgs.append({"role": "user", "content": user})
+        line = _text(self.m.llm.stream(msgs, max_new=24, stop_flag=stop_flag)).strip()
+        if not line or stop_flag():
+            return
+        yield ("text", line)
+        clean = say_clean(line)
+        if clean:
+            yield from (("audio", w) for w in self.m.tts.stream(clean, voice, stop_flag=stop_flag))
+
+    def _relay(self, q, stop_flag):
+        """Yield a filler's items from its helper thread as this turn's reply; returns the filler line."""
+        line = None; first = True
+        while not stop_flag():
+            try:
+                x = q.get(timeout=0.005)
+            except queue.Empty:
+                continue
+            if x is _END:
+                break
+            kind, val = x
+            if kind == "text":
+                line = val
+            else:
+                if first:
+                    self._said.append((line, self._audio_s)); first = False
+                self._audio(val)
+            yield x
+        return line
 
     # ---- speak an LLM text stream: a short first chunk (clause), then whole sentences ----
     def _speak_stream(self, events, voice, stop_flag):
-        """Speak the text of an LLM event stream as it arrives. Yields MOUTH events; returns (text, calls)."""
+        """Speak the text of an LLM event stream as it arrives. Yields MOUTH events; returns (text, calls, started).
+        Returns at "tool_start" (started=True) without consuming the rest: the call is still decoding, and the
+        caller finishes `events` itself. Text before the tag that didn't close a chunk is never spoken."""
         content = ""; calls = None; done = 0
         for kind, val in events:
+            if kind == "tool_start":
+                return content, None, True
             if kind == "text":
                 content += val
                 yield ("text", content)
@@ -217,47 +304,84 @@ class Session:
             elif kind == "tool_calls":
                 calls = val
             if stop_flag():
-                return content, calls
+                return content, calls, False
         if not calls and not stop_flag():
             yield from self._say(content[done:], voice, stop_flag)
-        return content, calls
+        return content, calls, False
 
     # ---- a full turn (may call tools) ----
     def stream_turn(self, transcript, stop_flag):
         m = self.m; voice = self.voice                 # one voice per reply (a switch applies to the next one)
-        self._said = []; self._audio_s = 0.0
+        self._said = []; self._audio_s = 0.0; self._play_end = time.perf_counter()
         msgs = [{"role": "system", "content": TTS_TOOLS_SYS}] + list(self.history) + \
                [{"role": "user", "content": transcript}]
-        content, calls = yield from self._speak_stream(
-            m.llm.stream(msgs, tools=TOOLS, max_new=m.max_gen, stop_flag=stop_flag), voice, stop_flag)
+        events = m.llm.stream(msgs, tools=TOOLS, max_new=m.max_gen, stop_flag=stop_flag)
+        content, calls, started = yield from self._speak_stream(events, voice, stop_flag)
         if stop_flag():
             self._remember_barged(transcript)
             yield ("done", content.strip()); return
-        if not calls:                                       # plain reply
+        if not calls and not started:                       # plain reply
             reply = content.strip(); self._remember(transcript, reply)
             yield ("done", reply); return
 
-        # ---- tool path: run tool(s) in BG threads, speak a lead-in over them, then phase B ----
-        log.info("tool calls: %s", [c["name"] for c in calls])
-        results = [None] * len(calls)
+        # ---- tool path (L-04). The <tool_call> tag just appeared: a helper thread finishes decoding the call
+        # and runs the tools the moment it parses, while this one speaks a filler made alongside (vLLM batches the
+        # two requests). If the tools are still out FILLER_GAP_S after the filler has played, one more short
+        # "still looking" line, up to MAX_STILL. Everything stops on barge (stop_flag); tool threads are daemons.
+        box = {"calls": calls or [], "results": []}; tools_done = threading.Event()
 
-        def _run(i, c):
-            results[i] = execute_tool(c["name"], c.get("arguments", {}))
-        workers = [threading.Thread(target=_run, args=(i, c), daemon=True) for i, c in enumerate(calls)]
-        for w in workers:
-            w.start()
+        def finish_call_and_run_tools():
+            try:
+                for kind, val in events:                    # no-op if _speak_stream already drained it
+                    if kind == "tool_calls":
+                        box["calls"] = val
+                if stop_flag() or not box["calls"]:
+                    return
+                log.info("tool calls: %s", [c["name"] for c in box["calls"]])
+                results = [None] * len(box["calls"])
 
-        lead = _text(m.llm.stream([{"role": "system", "content": LEADIN_SYS},
-                                   {"role": "user", "content": transcript}],
-                                  max_new=24, stop_flag=stop_flag)).strip()
-        if lead and not stop_flag():
-            yield ("text", lead)
-            yield from self._say(lead, voice, stop_flag)
-        for w in workers:                                  # a barge doesn't wait for the tools (daemon threads)
-            while w.is_alive() and not stop_flag():
-                w.join(0.01)
+                def _run(i, c):
+                    results[i] = execute_tool(c["name"], c.get("arguments", {}))
+                workers = [threading.Thread(target=_run, args=(i, c), daemon=True)
+                           for i, c in enumerate(box["calls"])]
+                for w in workers:
+                    w.start()
+                for w in workers:
+                    w.join()
+                box["results"] = results
+            except Exception as e:
+                log.warning("tool call error: %s", type(e).__name__)
+            finally:
+                tools_done.set()
+        threading.Thread(target=finish_call_and_run_tools, daemon=True).start()
+
+        fillers = []; n_still = 0
+        if not self._said:                     # the model's own words before the tag already did the job
+            q = self._spawn(lambda: self._filler(LEADIN_SYS, LEADIN_SHOTS, f"The user asked: \"{transcript}\"",
+                                                 voice, stop_flag))
+            line = yield from self._relay(q, stop_flag)
+            if line:
+                fillers.append(line)
+        while not tools_done.is_set() and not stop_flag():
+            if n_still < MAX_STILL and time.perf_counter() >= self._play_end + FILLER_GAP_S:
+                n_still += 1
+                said = " ".join(f"'{f}'" for f in fillers) or "nothing yet"
+                q = self._spawn(lambda said=said: self._filler(
+                    STILL_SYS, STILL_SHOTS, f"The user asked: \"{transcript}\". You already said: {said}",
+                    voice, stop_flag))
+                line = yield from self._relay(q, stop_flag)
+                if line:
+                    fillers.append(line)
+            else:
+                tools_done.wait(0.01)
+        lead = " ".join(f for f in fillers if f)
         if stop_flag():
             self._remember_barged(transcript)
+            yield ("done", lead); return
+        calls, results = box["calls"], box["results"]
+        results = results if len(results) == len(calls) else [None] * len(calls)
+        if not calls:                                       # a tag with no parseable call: nothing to answer from
+            self._remember(transcript, lead)
             yield ("done", lead); return
 
         asst = {"role": "assistant", "content": content.strip() or None,
@@ -267,7 +391,7 @@ class Session:
         msgs2 = msgs + [asst] + [{"role": "tool", "tool_call_id": f"call_{i}",
                                   "content": json.dumps(r if r is not None else {"error": "no result"})}
                                  for i, r in enumerate(results)]
-        full2, _ = yield from self._speak_stream(
+        full2, _, _ = yield from self._speak_stream(
             m.llm.stream(msgs2, max_new=m.max_gen, stop_flag=stop_flag), voice, stop_flag)
         reply = (lead + " " + full2).strip()
         if stop_flag():

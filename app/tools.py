@@ -98,7 +98,13 @@ def send_message(recipient, body):
 _DISPATCH = {"get_weather": get_weather, "web_search": web_search, "get_current_time": get_current_time,
              "set_reminder": set_reminder, "send_message": send_message}
 
+_DELAY_S = float(os.environ.get("TYGER_TOOL_DELAY_S") or 0)   # testing only: a slow tool (L-04 / I-03 checks)
+
+
 def execute_tool(name, args):
+    if _DELAY_S:
+        import time
+        time.sleep(_DELAY_S)
     fn = _DISPATCH.get(name)
     if fn is None:
         return {"error": f"unknown tool '{name}'"}
