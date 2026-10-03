@@ -1,6 +1,37 @@
 # tyger v1 — build notes
 
-## Box (2026-10-02)
+## Box (2026-10-03) — new, healthy RTX 5090
+NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
+(torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at
+**P1, SM 2940 MHz, memory 13 801 MHz** (max 3090 / 14 001). The old box ran memory at 7001. Every number from
+here on is from this box unless it says "throttled box".
+
+Fresh-box install (`README` step 1) failed on a clean checkout: `vllm-omni==0.30.0` pins `accelerate==1.12.0`
+but `requirements.txt` asked for 1.15.0, so uv found no solution. Pinned 1.12.0. The validation scripts also
+need `datasets` (pulled in by vllm already; nothing to add). First-ever `./run.sh` with all downloads: ~12.5 min
+(MOUTH ready after ~9.5 min, EARS after another ~3 min, mostly nemotron + head download).
+
+### Baseline (code at `b64c772`, cloned voice `en` 9.3 s, no transcript)
+| test | metric | healthy box | throttled box (V1.4) |
+|---|---|---|---|
+| `smoke_test.py` | plain / weather tool / reminder first-audio | **354 / 441 / 473 ms**, PASS | 503 / 743 / 770 ms |
+| | backchannel first-audio | 363 ms | — |
+| `load_test.py --sessions 4` | turn first-audio p50 / max | **539 / 732 ms** | 833 / 1126 ms |
+| | backchannel p50 / max | 643 / 1011 ms | 829 / 1620 ms |
+| | GPU peak | 28 356 MiB | 27.0 GB |
+| `load_test.py --tools` (new, every turn a Tavily weather call) | 1 session: first-audio p50, dead air max | 441 ms, 348 ms | — |
+| | 4 sessions: first-audio p50 / max, dead air max | 658 / 897 ms, **2224 ms** | — |
+| | GPU peak | 29 268 MiB | — |
+| `load_test_ears.py` (old script, whole TTS reply as speech) | 1 conv: hop lag p50/p90/max, endpoint→audio | 61 / 78 / 189, 266 ms | 59 / 114 / 202, 529 ms |
+| | 4 conv | **97 / 238 / 455**, 399 ms | 122 / 353 / 716, 810 ms |
+| `validate_ears_batched.py` | events match / max head diff | all True / 0.0067 | all True / ~0.007 |
+| | tick ms 1 session, 4 sessions (p50 / p90) | 44 / 60, 80 / 138 | — |
+| `validate_rnnt.py` | identical; graphed 8 s ×4, 20 s ×1 | 40/40 + 40/40; 53, 67 ms | 80/80; 74, 88 ms |
+
+EARS stats under the 4-conversation load: encoder 12%, head 23%, ASR 14% busy (throttled box: ~40% / ~30%).
+GPU peak with tool turns is 29.3 GB (28.6 GiB): the "28.5 GB" budget in README is about right, with ~3 GB free.
+
+## Box (2026-10-02) — old, throttled
 NVIDIA RTX 5090 (32 607 MiB, Blackwell sm_120), driver 595.91 / CUDA 13.2; 96-core CPU. `HF_HOME=/workspace/.hf_home`,
 `HF_HUB_DISABLE_XET=1`, torch **2.13.0+cu130**, Python 3.12, one venv `.venv` (vllm 0.30.0, vllm-omni 0.30.0,
 voxcpm 2.0.3, transformers 5.14.1).

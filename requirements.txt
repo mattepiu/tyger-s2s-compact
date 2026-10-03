@@ -10,7 +10,7 @@ vllm==0.30.0
 vllm-omni==0.30.0
 voxcpm==2.0.3            # VoxCPM2 runtime; needed by the vLLM-Omni stage worker but not pulled in by vllm-omni
 peft==0.21.2             # EARS endpoint-head LoRA
-accelerate==1.15.0
+accelerate==1.12.0       # vllm-omni 0.30.0 pins exactly 1.12.0
 safetensors==0.8.0
 huggingface_hub
 soundfile==0.14.0
