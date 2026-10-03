@@ -139,6 +139,17 @@ the reply lengths change run to run (here 3–4× more hops in speaking mode tha
 - Not done: precomputing the agent channel's features while speaking (L-01 option 2), the streaming encoder
   (option 3, needs head work upstream). The head (~20–24% busy) is now as large as the encoder.
 
+### Long user turns (I-05): transcribed in segments
+A listening turn used to keep only its last 20 s for the endpoint transcript, silently. Now, past 15 s (`SEG_S`),
+EARS cuts it at the quietest 80 ms frame of the last 4 s and transcribes that block on the ASR thread at once;
+the endpoint transcribes the tail (≤ ~15 s) and joins. `scripts/validate_long_turn.py` (GPU free):
+
+| turn | before: word recall (first 10 words) | after: recall (first 10), segments | endpoint hop before → after |
+|---|---|---|---|
+| 27 s | 0.85 (0.60) | **1.00 (1.00)**, 2 | 133 → 150 ms |
+| 33 s | 0.67 (0.40) | **0.97 (1.00)**, 2 | 136 → 127 ms |
+| 51 s | 0.42 (0.20) | **0.94 (1.00)**, 3 | 162 → 156 ms |
+
 ### Tool calls stay in history (I-12, found on the box)
 History used to keep only the final reply text of a tool turn. The model then answered later live questions from
 its own history, without calling a tool: 6 weather questions per session called the tool 2/6 times (1 session)

@@ -13,7 +13,7 @@ from datasets import load_dataset
 from app.config import load_config
 from app import weights
 from app.ears_core.endpoint_ears import EndpointEars
-from app.ears_core.batched import EarsEngine, EarsSession
+from app.ears_core.batched import EarsEngine, EarsSession, SEG_S
 from app.server import HOP_N
 
 ap = argparse.ArgumentParser(); ap.add_argument("--no-merge", action="store_true"); ap.add_argument("--no-graph", action="store_true")
@@ -51,7 +51,8 @@ def run_ref(hops):
     for uh, ah, mode in hops:
         for ev in ref.feed(uh, ah, mode):
             if ev["kind"] != "FRAME":
-                evs.append((ev["kind"], len(ref_trace), ev.get("transcript", "")[:40] if ev["kind"] == "ENDPOINT" else ""))
+                evs.append((ev["kind"], len(ref_trace), ev.get("transcript", "")[:40] if ev["kind"] == "ENDPOINT" else "",
+                            ev.get("turn_s", 0.0)))
     return list(ref_trace), evs
 S = 4
 scen = [scenario(4 * k) for k in range(S)]
@@ -75,24 +76,34 @@ def run_eng(sessions, hop_lists, offsets):
         torch.cuda.synchronize(); ticks.append(((time.perf_counter() - t0) * 1e3, len(items)))
         for s, *_ in items:
             events, finals = res[s]
-            if finals:
+            if finals:                                 # a long turn's earlier segments come from the ASR thread
                 for (ev, wav), txt in zip(finals, eng.transcribe([w for _, w in finals])):
-                    ev["transcript"] = txt
+                    deadline = time.time() + 10
+                    while any(t is None for t in ev.get("seg_texts", [])) and time.time() < deadline:
+                        time.sleep(0.01)
+                    ev["transcript"] = " ".join(t for t in [*ev.pop("seg_texts", []), txt] if t)
             k = sessions.index(s)
             for ev in events:
                 if ev["kind"] != "FRAME":
-                    out[k].append((ev["kind"], len(s.trace), (ev.get("transcript") or "")[:40] if ev["kind"] == "ENDPOINT" else ""))
+                    out[k].append((ev["kind"], len(s.trace), (ev.get("transcript") or "")[:40] if ev["kind"] == "ENDPOINT" else "",
+                                   ev.get("turn_s", 0.0)))
     return [(list(s.trace), o) for s, o in zip(sessions, out)], ticks
 
 def compare(name, ref_tr, got_tr, ref_ev, got_ev):
     n = min(len(ref_tr), len(got_tr))
     r = np.array(ref_tr[:n]); g = np.array([x[1:] for x in got_tr[:n]])
     d = np.abs(r - g).max(0)
+    same = [x[:2] for x in ref_ev] == [x[:2] for x in got_ev]
+    # endpoint transcripts: the reference keeps only a turn's last 20 s, the engine transcribes a turn longer
+    # than SEG_S in segments (I-05), so only turns up to SEG_S must read the same
+    short = [(r[2], g[2]) for r, g in zip(ref_ev, got_ev) if r[0] == "ENDPOINT" and g[3] <= SEG_S]
+    n_long = sum(1 for g in got_ev if g[0] == "ENDPOINT" and g[3] > SEG_S)
     print(f"  {name}: frames {len(ref_tr)}/{len(got_tr)} | max|diff| haz {d[0]:.4f} yield {d[1]:.4f} bc {d[2]:.4f} p_end {d[3]:.4f}"
-          f" | events match: {ref_ev == got_ev}")
-    if ref_ev != got_ev:
-        for kind, fi, _ in sorted(set(ref_ev) ^ set(got_ev), key=lambda x: x[1]):
-            src = "ref only" if (kind, fi, _) in ref_ev else "got only"
+          f" | events match: {same} | transcripts match: {sum(a == b for a, b in short)}/{len(short)}"
+          + (f" (+{n_long} turn(s) > {SEG_S:.0f} s, segmented)" if n_long else ""))
+    if not same:
+        for kind, fi in sorted(set(x[:2] for x in ref_ev) ^ set(x[:2] for x in got_ev), key=lambda x: x[1]):
+            src = "ref only" if (kind, fi) in [x[:2] for x in ref_ev] else "got only"
             lo = max(0, fi - 3)
             print(f"    {src}: {kind} at frame {fi} | yield ref {[round(x[1],3) for x in ref_tr[lo:fi]]} got {[round(x[2],3) for x in got_tr[lo:fi]]}")
 

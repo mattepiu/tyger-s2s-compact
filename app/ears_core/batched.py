@@ -30,7 +30,9 @@ from . import policy as fp
 log = logging.getLogger("ears")
 MODEL_ID = "nvidia/nemotron-3.5-asr-streaming-0.6b"
 VAD_DB = -50.0; MIN_SPEECH_MS = 350.0; WARMUP_FRAMES = 6      # as LiveEars
-TURN_MAX_S = 20.0                                               # user audio kept for the endpoint transcript
+TURN_MAX_S = 20.0                       # longest audio one transcription gets (sizes the RNN-T graph); a safety cap
+SEG_S = 15.0                            # a turn longer than this is transcribed in blocks as it grows (I-05):
+SEG_SEARCH_S = 4.0                      #   cut at the quietest 80 ms frame of the block's last 4 s
 BARGE_PRE_S = 2.0                     # user audio kept while the agent speaks: seeds the turn a barge-in starts (I-02)
 L15 = 15                                                        # encoder layer the heads read
 
@@ -174,7 +176,9 @@ class EarsSession:
 
     def _clear(self):
         self.win_u = np.zeros(0, np.float32); self.win_a = np.zeros(0, np.float32)
-        self.turn_u = np.zeros(0, np.float32)
+        self.turn_u = np.zeros(0, np.float32)  # this turn's user audio not yet sent for transcription
+        self.seg_s = 0.0                       # seconds of this turn already cut into segments
+        self.segs = []                         # their texts, filled in by the ASR thread (None until done)
         self.pre_u = np.zeros(0, np.float32)   # last BARGE_PRE_S of user audio in speaking mode
         self.seed_u = None                     # set on BARGE: the next reset starts turn_u with it
         self.prev_state = LISTEN; self.yield_run = 0
@@ -187,12 +191,17 @@ class EarsSession:
         self.pending_reset = True
 
 
+    def turn_len_s(self):
+        return self.seg_s + len(self.turn_u) / ENC_SR
+
+
 class _StopAtL15(Exception):
     pass
 
 
 class _Job:
     __slots__ = ("kind", "sess", "gen", "wav", "done")
+    # kind: "final" (endpoint transcript), "segment" (a finished block of a long turn), "partial" (backchannels)
 
     def __init__(self, kind, sess, gen, wav, done=None):
         self.kind = kind; self.sess = sess; self.gen = gen; self.wav = wav; self.done = done
@@ -300,7 +309,8 @@ class EarsEngine:
                     jobs.append(self.asr_q.get_nowait())
                 except queue.Empty:
                     break
-            finals = [j for j in jobs if j.kind == "final"]
+            finals = [j for j in jobs if j.kind in ("final", "segment")]   # enqueue order: a turn's segments
+                                                                           # are done before its final
             partials = [j for j in jobs if j.kind == "partial"]
             t0 = time.perf_counter()
             try:
@@ -337,7 +347,10 @@ class EarsEngine:
             sess.win_u = np.concatenate([sess.win_u, uh])[-int(WINDOW_S * ENC_SR):]
             sess.win_a = np.concatenate([sess.win_a, ah])[-int(WINDOW_S * ENC_SR):]
             if mode == "listen":
-                sess.turn_u = np.concatenate([sess.turn_u, uh])[-int(TURN_MAX_S * ENC_SR):]
+                sess.turn_u = np.concatenate([sess.turn_u, uh])
+                if len(sess.turn_u) > SEG_S * ENC_SR:
+                    self._cut_segment(sess)
+                sess.turn_u = sess.turn_u[-int(TURN_MAX_S * ENC_SR):]
             else:
                 sess.pre_u = np.concatenate([sess.pre_u, uh])[-int(BARGE_PRE_S * ENC_SR):]
             res[sess] = ([], [])
@@ -368,9 +381,23 @@ class EarsEngine:
         self.t_enc += t1 - t0; self.t_head += time.perf_counter() - t1
         return res
 
+    def _cut_segment(self, sess):
+        """Send the turn's audio so far, up to a pause, for transcription now (on the ASR thread); keep the rest."""
+        hop = int(FRAME_S * ENC_SR)
+        lo = int((SEG_S - SEG_SEARCH_S) * ENC_SR) // hop
+        e = frame_energy(sess.turn_u[lo * hop:int(SEG_S * ENC_SR)])
+        cut = (lo + int(np.argmin(e)) + 1) * hop if e.size else int(SEG_S * ENC_SR)
+        seg, sess.turn_u = sess.turn_u[:cut], sess.turn_u[cut:]
+        segs, i = sess.segs, len(sess.segs)
+        segs.append(None); sess.seg_s += cut / ENC_SR
+
+        def done(text, segs=segs, i=i):
+            segs[i] = text
+        self.asr_q.put(_Job("segment", sess, sess.turn_gen, seg, done=done))
+
     def _maybe_partial(self, sess):
         """LiveEars._refresh_partial, asynchronous: same throttle, decoded on the ASR thread."""
-        cur_s = len(sess.turn_u) / ENC_SR
+        cur_s = sess.turn_len_s()
         if sess.partial_inflight or cur_s - sess.partial_at_s < sess.partial_refresh_s:
             return
         if sess.win_u.size < int(0.3 * ENC_SR):
@@ -408,7 +435,7 @@ class EarsEngine:
             sess.bc_run = sess.bc_run + 1 if bcp >= sess.bc_thr else 0
             if sess.bc_run >= sess.bc_deb:
                 events.append(dict(kind="BACKCHANNEL", partial=sess.partial_asr, bc_prob=round(bcp, 3),
-                                   turn_s=round(len(sess.turn_u) / ENC_SR, 2)))
+                                   turn_s=round(sess.turn_len_s(), 2)))
                 sess.bc_run = 0; sess.bc_cooldown = sess.bc_refractory
         if sess.warm > WARMUP_FRAMES:                          # ENDPOINT: p_end >= tau for deb frames
             sess.ep_run = sess.ep_run + 1 if pep >= sess.ep_thr else 0
@@ -418,10 +445,12 @@ class EarsEngine:
         learned_end = sess.ep_run >= sess.ep_deb
         fallback_end = sess.sil_run >= sess.FALLBACK_SIL_FRAMES
         if spoke and (learned_end or fallback_end):
-            ev = dict(kind="ENDPOINT", transcript=None, turn_s=len(sess.turn_u) / ENC_SR,
+            ev = dict(kind="ENDPOINT", transcript=None, turn_s=sess.turn_len_s(), segments=len(sess.segs),
+                      seg_texts=sess.segs,
                       by="head" if learned_end else "silence", p_end=round(pep, 3))
             events.append(ev); finals.append((ev, sess.turn_u.copy()))
             sess.turn_u = np.zeros(0, np.float32); sess.voiced_ms = 0.0; sess.in_turn = False
+            sess.seg_s = 0.0; sess.segs = []
             self.head.reset_slot(sess.slot); sess.prev_state = LISTEN; sess.warm = 0
             sess.bc_run = 0; sess.bc_cooldown = 0; sess.ep_run = 0
             sess.partial_asr = ""; sess.partial_at_s = 0.0; sess.turn_gen += 1
@@ -529,7 +558,8 @@ class EarsService:
             left = [len(finals)]
 
             def done(text, ev, it=it, events=events, left=left):
-                ev["transcript"] = text
+                segs = ev.pop("seg_texts", None) or []                 # a long turn's earlier blocks (I-05)
+                ev["transcript"] = " ".join(t for t in [*segs, text] if t)
                 left[0] -= 1
                 if left[0] == 0:
                     self._resolve(it, events)

@@ -198,7 +198,8 @@ async def _conversation(ws, ears):
                 bcp = max(bcp, e.get("bc_prob", 0.0) or 0.0)
                 pe = max(pe, e.get("p_end", 0.0) or 0.0); last = e
             elif e["kind"] == "ENDPOINT" and not st["speaking"]:
-                log.info("endpoint by=%s turn_s=%.2f", e.get("by"), e.get("turn_s", 0.0))
+                log.info("endpoint by=%s turn_s=%.2f segments=%d", e.get("by"), e.get("turn_s", 0.0),
+                         e.get("segments", 0))
                 await ws.send_json({"type": "endpoint", "turn_s": round(e["turn_s"], 1),
                                     "by": e.get("by")})
                 if have_mouth and e["transcript"].strip():

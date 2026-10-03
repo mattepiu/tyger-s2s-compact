@@ -15,7 +15,7 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | I-02 | EARS | high | **fixed** | Start of a barge-in utterance is cut from the transcript |
 | I-03 | MOUTH | medium | **fixed** | Barge during a tool call waits for the tool (up to 15 s) |
 | I-04 | metrics | medium | **fixed** | "Onset" excludes endpoint detection; real gap is larger (it's ~1.0 s) |
-| I-05 | EARS | medium | confirmed in code | User turns > 20 s silently keep only the last 20 s |
+| I-05 | EARS | medium | **fixed** | User turns > 20 s silently keep only the last 20 s |
 | I-06 | MOUTH | medium | **not reproduced** (real cost elsewhere, fixed) | Voice clip copied as ~480k Python floats on every TTS request |
 | I-07 | MOUTH | low | **fixed** | Backchannel keeps generating after the reply turn starts |
 | I-08 | EARS | low | likely | 2nd-ear agent audio leads what the user actually hears |
@@ -135,6 +135,14 @@ event says so.
 - Either way, log a count when truncation happens (counts only, never words).
 
 **Verify:** a 30 s synthetic turn; the transcript covers all of it.
+
+**Status: fixed (2026-10-03), option A.** Past 15 s (`SEG_S`) a listening turn is cut at the quietest 80 ms frame
+of its last 4 s and that block is transcribed on the ASR thread right away; the endpoint transcribes only the tail
+and joins. `scripts/validate_long_turn.py` (public LibriSpeech, 27 / 33 / 51 s turns): word recall 0.85 / 0.67 /
+0.42 → 1.00 / 0.97 / 0.94, first 10 words 0.60 / 0.40 / 0.20 → 1.00; the endpoint hop (final ASR) stays 127–156 ms
+at any length. The ENDPOINT event and the EARS log carry a segment count (no words).
+`validate_ears_batched.py` now matches events by kind + frame and transcripts for turns ≤ 15 s (its single-session
+reference still keeps only a turn's last 20 s).
 
 ### I-07 — Backchannel keeps generating after the reply turn starts (low, confirmed in code)
 **Where:**
