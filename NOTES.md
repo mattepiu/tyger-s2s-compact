@@ -74,6 +74,12 @@ instrumented): `ep_deb` 2 frames = 160 ms, hop quantisation ~160 ms average (L-0
   socketpair; `tests/test_mouth_session.py` covers I-01/I-03/I-07 and fails on the old code (I-03 case: `D` came
   9982 ms after the barge with a 10 s tool).
 
+### Tool calls stay in history (I-12, found on the box)
+History used to keep only the final reply text of a tool turn. The model then answered later live questions from
+its own history, without calling a tool: 6 weather questions per session called the tool 2/6 times (1 session)
+and 9/24 (4 sessions). History is now a list of turns trimmed whole, and a tool turn keeps its call plus a compact
+result (`_compact_result`: no raw search hits, ≤ 600 chars): 6/6 and 24/24.
+
 ### Tool fillers (L-04): start at the `<tool_call>` tag, cover slow tools
 - `LocalLLM.stream` yields `tool_start` the moment the tag appears. MOUTH then makes the filler (its own LLM + TTS
   requests, on a helper thread, relayed as reply audio) while a second helper thread finishes decoding the call and

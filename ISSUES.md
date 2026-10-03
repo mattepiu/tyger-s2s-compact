@@ -22,6 +22,7 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | I-09 | EARS | low | confirmed in code | MOUTH dying leaves the conversation silently dead |
 | I-10 | EARS | low | likely | `play_until` is a server-side guess at client playback |
 | I-11 | security | low (demo) / high (public) | confirmed in code | No auth, no message-size or buffer limits on :7860 |
+| I-12 | MOUTH | high | **fixed** | Tool calls never enter history, so later turns stop calling tools and invent answers |
 | L-01 | perf | lever | — | Encoder re-encodes the full 8 s window, twice, every hop, in fp32 |
 | L-02 | latency | lever | — | Decisions quantised to 320 ms hops |
 | L-03 | latency | lever | — | Per-request voice encode (precomputed voice profile) |
@@ -206,6 +207,19 @@ no auth on `/`, `/ws` or `/voices`.
 - `max_msg_size` around 64 KB.
 - Drop or close when `buf` exceeds a few seconds.
 - A per-IP session cap.
+
+### I-12 — Tool calls never enter history; later turns answer live questions from memory (high, found on the box)
+**Where:** `app/mouth.py` `Session._remember`, called with only the final reply text.
+
+**What happened:** the history kept `user` + final `assistant` text and dropped the tool call and its result. The
+model then copied its own history: weather questions answered directly, without a tool, i.e. invented values.
+Measured with `load_test.py --tools` (6 weather questions per session, different cities): tool called on 2/6
+turns at 1 session and 9/24 at 4 sessions. At 4 sessions turns 1–2 called it every time, turn 3 once, turns 4–6
+never.
+
+**Fix (2026-10-03):** history is a list of turns (trimmed whole, so a tool message never loses its call), and a
+tool turn keeps the assistant `tool_calls` message plus a compact result (no raw search hits, ≤ 600 chars). Now
+6/6 and 24/24. Tests: `tests/test_mouth_session.py`.
 
 ---
 

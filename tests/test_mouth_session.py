@@ -120,7 +120,37 @@ def test_tool_turn_completes():
     kinds = [k for k, _, _ in evs]
     assert kinds[-1] == "done" and kinds.count("audio") >= 6, kinds      # filler + answer
     assert [c[0] for c in llm.calls][:1] == ["reply"] and "phase_b" in [c[0] for c in llm.calls]
-    assert s.history[1]["content"].startswith("It is sunny")
+    assert s.history[-1]["content"].startswith("It is sunny")
+
+
+# ---- I-12: tool calls stay in history, trimmed by whole turns ----------------------------------------------
+def test_tool_exchange_kept_in_history():
+    llm = FakeLLM(reply=TOOL_REPLY)
+    s, m = make_session(llm, FakeTTS(n=2))
+    orig = M.execute_tool
+    M.execute_tool = lambda n, a: {"location": "Paris", "answer": "sunny, 20 C",
+                                   "sources": [{"content": "x" * 2000}]}
+    try:
+        run_turn(s, "weather in Paris?")
+    finally:
+        M.execute_tool = orig
+    assert [h["role"] for h in s.history] == ["user", "assistant", "tool", "assistant"]
+    assert s.history[1]["tool_calls"][0]["function"]["name"] == "get_weather"
+    tool = s.history[2]["content"]
+    assert "sunny, 20 C" in tool and "xxxx" not in tool, tool       # raw search hits dropped
+    run_turn(s, "and in Rome?")                                     # the next prompt carries the exchange
+    nxt = next(c[1] for c in reversed(llm.calls) if c[0] == "reply")
+    assert any(x["role"] == "tool" for x in nxt)
+
+
+def test_history_trimmed_by_whole_turns():
+    llm = FakeLLM(reply=TOOL_REPLY)
+    s, m = make_session(llm, FakeTTS(n=1))
+    with SlowTool(0.0):
+        for i in range(m.history_turns + 3):
+            run_turn(s, f"weather question {i}")
+    assert len(s.turns) == m.history_turns
+    assert s.history[0]["role"] == "user" and s.history[0]["content"] == "weather question 3"
 
 
 # ---- L-04: filler starts at the <tool_call> tag, covers slow tools, stops on barge ---------------------------

@@ -40,7 +40,7 @@ class FakeLLM:
             return "bc"
         if getattr(M, "STILL_SYS", None) and sys_txt.startswith(M.STILL_SYS[:40]):
             return "still"
-        if any(m["role"] == "tool" for m in messages):
+        if messages[-1]["role"] == "tool":
             return "phase_b"
         return "reply"
 

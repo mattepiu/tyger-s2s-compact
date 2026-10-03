@@ -104,6 +104,16 @@ def _text(events):
     return "".join(v for k, v in events if k == "text")
 
 
+def _compact_result(r, cap=600):
+    """A tool result as kept in history: the answer without the raw search hits, capped. Enough for the model to
+    see that it called a tool and what came back, so later turns keep calling tools instead of answering live
+    questions from memory (I-12)."""
+    if isinstance(r, dict):
+        r = {k: v for k, v in r.items() if k not in ("results", "sources")}
+    txt = json.dumps(r if r is not None else {"error": "no result"}, ensure_ascii=False)
+    return txt if len(txt) <= cap else txt[:cap] + "…"
+
+
 class Mouth:
     """Shared by all sessions: the two engines and voice loading. Per-conversation state lives in Session."""
     def __init__(self, cfg):
@@ -169,7 +179,7 @@ class Session:
     def __init__(self, m: Mouth, conn):
         self.m = m; self.conn = conn
         self.send_lock = threading.Lock()
-        self.history = []
+        self.turns = []                    # conversation history, one message list per turn (trimmed whole)
         self.recent_acks = deque(maxlen=RECENT_ACKS)   # in memory only; so backchannels don't repeat
         self.voice_name, self.voice = m.default_voice()  # every session starts on the configured default
         self.turn_stop = threading.Event()
@@ -199,18 +209,23 @@ class Session:
         self.voice_name, self.voice = name, v
         log.info("voice -> %s", name)
 
-    def _remember(self, user, reply):
-        if user.strip():
-            self.history.append({"role": "user", "content": user.strip()})
-            self.history.append({"role": "assistant", "content": reply or "..."})
-            self.history = self.history[-2 * self.m.history_turns:]
+    @property
+    def history(self):
+        return [msg for turn in self.turns for msg in turn]
 
-    def _remember_barged(self, user):
+    def _remember(self, user, reply, tool_msgs=()):
+        """One turn into history: the user's words, the tool call + compact results if any, the reply."""
+        if user.strip():
+            self.turns.append([{"role": "user", "content": user.strip()}, *tool_msgs,
+                               {"role": "assistant", "content": reply or "..."}])
+            self.turns = self.turns[-self.m.history_turns:]
+
+    def _remember_barged(self, user, tool_msgs=()):
         """A barged turn still enters history: the user's words, and the reply up to the chunk that was playing
         when they cut in (all generated chunks if EARS didn't say how much had played), marked interrupted."""
         played = self.barge_played_s
         heard = [t for t, at in self._said if played is None or at < played]
-        self._remember(user, (" ".join(t.strip() for t in heard) + INTERRUPTED).strip())
+        self._remember(user, (" ".join(t.strip() for t in heard) + INTERRUPTED).strip(), tool_msgs)
 
     def _say(self, text, voice, stop_flag):
         """TTS one text chunk as reply audio; logs it in self._said once its first audio is out."""
@@ -391,13 +406,15 @@ class Session:
         msgs2 = msgs + [asst] + [{"role": "tool", "tool_call_id": f"call_{i}",
                                   "content": json.dumps(r if r is not None else {"error": "no result"})}
                                  for i, r in enumerate(results)]
+        kept = [asst] + [{"role": "tool", "tool_call_id": f"call_{i}", "content": _compact_result(r)}
+                         for i, r in enumerate(results)]
         full2, _, _ = yield from self._speak_stream(
             m.llm.stream(msgs2, max_new=m.max_gen, stop_flag=stop_flag), voice, stop_flag)
         reply = (lead + " " + full2).strip()
         if stop_flag():
-            self._remember_barged(transcript)
+            self._remember_barged(transcript, kept)
         else:
-            self._remember(transcript, full2.strip() or lead)
+            self._remember(transcript, full2.strip() or lead, kept)
         yield ("done", reply)
 
     # ---- backchannel: always a contextual LLM ack off the ASR partial ----
