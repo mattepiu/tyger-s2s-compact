@@ -122,8 +122,11 @@ async def _conversation(ws, ears):
         await async_send_msg(m_writer, b"T", {"transcript": transcript})
 
     async def finish_turn(barged):
-        """The reply is over (played out, or barged): back to listening; send a held turn if any."""
-        st["speaking"] = False; st["reset"] = True; st["agent_buf"] = np.zeros(0, np.float32)
+        """The reply is over (played out, or barged): back to listening; send a held turn if any. A barge already
+        reset EARS (seeding the new turn with the start of the user's speech, I-02): don't wipe that turn again."""
+        st["speaking"] = False; st["agent_buf"] = np.zeros(0, np.float32)
+        if not barged:
+            st["reset"] = True
         st["mouth_done"] = False; st["done_task"] = None
         if st["barge_t0"] is not None and barged:
             log.info("barge_halted tail %.0f ms", (time.perf_counter() - st["barge_t0"]) * 1e3)

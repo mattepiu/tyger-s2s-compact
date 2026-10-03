@@ -31,6 +31,7 @@ log = logging.getLogger("ears")
 MODEL_ID = "nvidia/nemotron-3.5-asr-streaming-0.6b"
 VAD_DB = -50.0; MIN_SPEECH_MS = 350.0; WARMUP_FRAMES = 6      # as LiveEars
 TURN_MAX_S = 20.0                                               # user audio kept for the endpoint transcript
+BARGE_PRE_S = 2.0                     # user audio kept while the agent speaks: seeds the turn a barge-in starts (I-02)
 L15 = 15                                                        # encoder layer the heads read
 
 
@@ -174,6 +175,8 @@ class EarsSession:
     def _clear(self):
         self.win_u = np.zeros(0, np.float32); self.win_a = np.zeros(0, np.float32)
         self.turn_u = np.zeros(0, np.float32)
+        self.pre_u = np.zeros(0, np.float32)   # last BARGE_PRE_S of user audio in speaking mode
+        self.seed_u = None                     # set on BARGE: the next reset starts turn_u with it
         self.prev_state = LISTEN; self.yield_run = 0
         self.voiced_ms = 0.0; self.sil_run = 0; self.in_turn = False; self.warm = 0
         self._mode = "listen"; self.bc_run = 0; self.bc_cooldown = 0; self.ep_run = 0
@@ -304,11 +307,19 @@ class EarsEngine:
         res = {}
         for sess, uh, ah, mode in items:
             if sess.pending_reset:
+                seed = sess.seed_u
                 sess._clear(); sess.turn_gen += 1; self.head.reset_slot(sess.slot); sess.pending_reset = False
+                if seed is not None:        # a barge-in: the user started talking over the agent; keep that start
+                    sess.turn_u = seed
+                    sess.voiced_ms = float((frame_energy(seed) > VAD_DB).sum()) * FRAME_S * 1e3
+                    sess.in_turn = sess.voiced_ms > 0
+            sess.seed_u = None              # only the reset right after the BARGE hop uses it
             sess.win_u = np.concatenate([sess.win_u, uh])[-int(WINDOW_S * ENC_SR):]
             sess.win_a = np.concatenate([sess.win_a, ah])[-int(WINDOW_S * ENC_SR):]
             if mode == "listen":
                 sess.turn_u = np.concatenate([sess.turn_u, uh])[-int(TURN_MAX_S * ENC_SR):]
+            else:
+                sess.pre_u = np.concatenate([sess.pre_u, uh])[-int(BARGE_PRE_S * ENC_SR):]
             res[sess] = ([], [])
         t0 = time.perf_counter()
         hs = self.encode([w for sess, *_ in items for w in (sess.win_u, sess.win_a)])
@@ -361,7 +372,7 @@ class EarsEngine:
                 sess.yield_run = sess.yield_run + 1 if yp >= sess.barge_thr else 0
                 if sess.yield_run >= sess.barge_deb:
                     events.append(dict(kind="BARGE", yield_prob=round(yp, 3)))
-                    sess.yield_run = 0
+                    sess.yield_run = 0; sess.seed_u = sess.pre_u.copy()
             events.append(dict(kind="FRAME", state="SPEAK", yield_prob=round(yp, 3), hazard=round(haz, 3),
                                p_end=round(pep, 3)))
             sess.prev_state = SPEAK

@@ -74,6 +74,14 @@ instrumented): `ep_deb` 2 frames = 160 ms, hop quantisation ~160 ms average (L-0
   socketpair; `tests/test_mouth_session.py` covers I-01/I-03/I-07 and fails on the old code (I-03 case: `D` came
   9982 ms after the barge with a 10 s tool).
 
+### Barge-in keeps the start of the user's utterance (I-02)
+While the agent speaks, user audio never entered `turn_u`, and both the barge and MOUTH's barged `D` reset it, so the
+endpoint transcript lost the words that triggered the barge. Now EARS keeps the last `BARGE_PRE_S` (2 s) of user
+audio in speaking mode; on `BARGE` the next reset seeds the new turn with it (and credits its voiced frames toward
+the 350 ms minimum), and `finish_turn` doesn't reset again after a barge. `scripts/validate_barge.py` (GPU free;
+12 public LibriSpeech barge-ins over agent speech; numbers only): first 3 words recalled **14% → 83%**, all words
+**69% → 94%**; the barge fires a median 1.22 s after the user starts talking.
+
 ### Tool calls stay in history (I-12, found on the box)
 History used to keep only the final reply text of a tool turn. The model then answered later live questions from
 its own history, without calling a tool: 6 weather questions per session called the tool 2/6 times (1 session)

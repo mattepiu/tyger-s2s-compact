@@ -12,7 +12,7 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | ID | Area | Severity | Status | One line |
 |---|---|---|---|---|
 | I-01 | MOUTH | high | **fixed** | Barged turns vanish from LLM history |
-| I-02 | EARS | high | likely | Start of a barge-in utterance is cut from the transcript |
+| I-02 | EARS | high | **fixed** | Start of a barge-in utterance is cut from the transcript |
 | I-03 | MOUTH | medium | **fixed** | Barge during a tool call waits for the tool (up to 15 s) |
 | I-04 | metrics | medium | **fixed** | "Onset" excludes endpoint detection; real gap is larger (it's ~1.0 s) |
 | I-05 | EARS | medium | confirmed in code | User turns > 20 s silently keep only the last 20 s |
@@ -90,6 +90,13 @@ sends `played_s` with `B`) are remembered, marked with " —"; the follow-up ans
 **Verify:** play a reply, inject user speech mid-reply (`load_test_ears.py`-style), and compare the endpoint
 transcript to the injected text. Check event parity with `scripts/validate_ears_batched.py` for the
 non-barge path.
+
+**Status: fixed (2026-10-03).** Confirmed: `scripts/validate_barge.py` (12 LibriSpeech barge-ins, engine-level, the
+server's reset protocol) recalled only 14% of the utterances' first 3 words (69% of all words) with the old code.
+Now the engine keeps the last 2 s of user audio while the agent speaks and seeds the barge's turn with it
+(crediting its voiced frames), and `finish_turn` no longer resets again on a barged `D`: first 3 words 83%, all
+words 94%. Barge fires a median 1.22 s after the user starts, so 2 s covers it. Dropping only the second reset gave
+22% / 72%. `validate_ears_batched.py` parity unchanged.
 
 ### I-03 — Barge during a tool call waits for the tool (medium, confirmed in code)
 **Where:**
