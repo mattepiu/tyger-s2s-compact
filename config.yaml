@@ -29,7 +29,10 @@ ears:                      # arm C endpoint rule + barge/backchannel (exp-12 liv
   cpu_threads: 4           # torch CPU threads (the default 48 mostly spin-wait: 14x the CPU, slower)
 
 llm:                       # responder, in-process vLLM AsyncLLM inside the MOUTH (app/llm.py)
-  model: Qwen/Qwen3-4B-Instruct-2507
+  model: Qwen/Qwen3.5-4B   # hybrid (24 linear + 8 full attention layers); was Qwen/Qwen3-4B-Instruct-2507: to roll
+                           # back, set that and drop enable_thinking / language_model_only
+  enable_thinking: false   # Qwen3.5 thinks by default (its prompt opens <think>): far too slow for a voice reply
+  language_model_only: true  # the checkpoint is multimodal: skip the vision tower (GPU memory)
   gpu_memory_utilization: 0.45   # vLLM start-up free-memory check only; actual KV is pinned below
   kv_cache_gib: 3.0              # fixed KV budget (~21k tokens: 4 sessions x turn + backchannel)
   max_model_len: 8192

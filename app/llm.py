@@ -2,8 +2,9 @@
 
 stream(messages, tools=...) yields ("text", delta) for speakable reply text as it decodes, ("tool_start", None) the
 moment a <tool_call> tag appears (the call itself is still decoding), then at most one
-("tool_calls", [{"name", "arguments"}, ...]) at the end. Tool calls use the Hermes format the Qwen chat
-template emits: <tool_call>{"name": ..., "arguments": {...}}</tool_call>. Text from the first <tool_call> on
+("tool_calls", [{"name", "arguments"}, ...]) at the end. Tool calls are whatever the model's chat
+template emits inside <tool_call>...</tool_call>: Hermes JSON (Qwen3-2507) or XML <function=...> (Qwen3.5);
+tools.parse_calls reads both. Text from the first <tool_call> on
 is never yielded as speech (a trailing partial "<tool_c" is held back until it's resolved).
 """
 from __future__ import annotations
@@ -28,14 +29,18 @@ def split_speakable(raw: str):
 
 class LocalLLM:
     def __init__(self, eloop, model, gpu_memory_utilization=0.45, kv_cache_gib=2.0, max_model_len=8192,
-                 max_num_seqs=4, temperature=0.7):
+                 max_num_seqs=4, temperature=0.7, enable_thinking=None, language_model_only=False):
         from vllm import AsyncEngineArgs
         from vllm.v1.engine.async_llm import AsyncLLM
         self.eloop = eloop
         self.temperature = float(temperature)
-        args = AsyncEngineArgs(model=model, gpu_memory_utilization=float(gpu_memory_utilization),
+        # chat-template switches: Qwen3.5 thinks by default (its prompt opens <think>), which a voice reply can't
+        # afford; None leaves templates without the switch (Qwen3-2507 Instruct) as they are
+        self.template_kw = {} if enable_thinking is None else {"enable_thinking": bool(enable_thinking)}
+        extra = {"language_model_only": True} if language_model_only else {}   # multimodal checkpoints: text only,
+        args = AsyncEngineArgs(model=model, gpu_memory_utilization=float(gpu_memory_utilization),  # no vision tower
                                kv_cache_memory_bytes=int(float(kv_cache_gib) * 2**30),
-                               max_model_len=int(max_model_len), max_num_seqs=int(max_num_seqs))
+                               max_model_len=int(max_model_len), max_num_seqs=int(max_num_seqs), **extra)
 
         async def make():                                     # construct on the loop that will drive it
             eng = AsyncLLM.from_engine_args(args)
@@ -49,7 +54,7 @@ class LocalLLM:
         from vllm.sampling_params import RequestOutputKind
         with self._tok_lock:      # sessions call this from several threads; HF fast tokenizers aren't re-entrant
             prompt = self.tok.apply_chat_template(messages, tools=tools or None, tokenize=False,
-                                                  add_generation_prompt=True)
+                                                  add_generation_prompt=True, **self.template_kw)
         sp = SamplingParams(max_tokens=int(max_new), output_kind=RequestOutputKind.DELTA,
                             temperature=self.temperature if temperature is None else float(temperature))
         rid = f"llm-{uuid.uuid4().hex[:12]}"

@@ -13,7 +13,7 @@ browser mic ──ws──▶ EARS    nemotron L15 → endpoint head: endpoint /
                      │                                    also serves the web app on :7860
                      ▼ tcp :8770
                     MOUTH   orchestrator + two in-process vLLM engines on one asyncio loop:
-                     │        • Qwen3-4B-Instruct-2507 (vLLM AsyncLLM, Hermes tool calls)
+                     │        • Qwen3.5-4B, text only, no thinking (vLLM AsyncLLM, tool calls)
                      │        • VoxCPM2 voice clone (vLLM-Omni AsyncOmni, 48 kHz → 24 kHz)
                      ▼ ws
 browser speaker ◀────┘      24 kHz audio, streamed as it decodes
@@ -45,7 +45,7 @@ Built on one **NVIDIA RTX 5090** (32 GB, Blackwell sm_120), CUDA-13 driver (≥ 
 
 GPU memory in use ≈ **28.5 GB of 32 GB** with everything loaded, warm, and under a 4-conversation load: VoxCPM2
 ~9.8 GB (2 GiB pinned KV, `deploy/voxcpm2.yaml`), Qwen3-4B ~11.8 GB (3 GiB pinned KV, `llm.kv_cache_gib`),
-EARS ~7 GB. Both engines pin their KV budgets, so the total is predictable.
+EARS ~7 GB (measured with Qwen3-4B-Instruct-2507; Qwen3.5-4B adds ~0.5 GB at peak). Both engines pin their KV budgets, so the total is predictable.
 
 ## Setup
 
@@ -136,7 +136,7 @@ test audio file is needed; pass `--wav` to use your own.
 | component | model | licence |
 |---|---|---|
 | ASR encoder + turn-taking | `nvidia/nemotron-3.5-asr-streaming-0.6b` + endpoint head (private) | NVIDIA Open Model Licence / private head |
-| responder | `Qwen/Qwen3-4B-Instruct-2507` | Apache-2.0 |
+| responder | `Qwen/Qwen3.5-4B` (was `Qwen/Qwen3-4B-Instruct-2507`) | Apache-2.0 |
 | TTS | `openbmb/VoxCPM2` | Apache-2.0 |
 | web tools | Tavily API | commercial API (your key) |
 

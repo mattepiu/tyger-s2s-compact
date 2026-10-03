@@ -27,14 +27,35 @@ TOOLS = [
    "parameters": {"type": "object", "properties": {"recipient": {"type": "string"}, "body": {"type": "string"}}, "required": ["recipient", "body"]}}},
 ]
 
-TCALL = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
+TCALL = re.compile(r"<tool_call>(.*?)</tool_call>", re.S)
+TFUNC = re.compile(r"<function=([^>\s]+)>(.*?)</function>", re.S)
+TPARAM = re.compile(r"<parameter=([^>\s]+)>\n?(.*?)\n?</parameter>", re.S)
+
+
+def _param(v):
+    """An XML-format parameter value: JSON if it parses as a number/bool/list/object, else the raw string."""
+    try:
+        x = json.loads(v)
+        return x if not isinstance(x, str) else v
+    except Exception:
+        return v
+
+
 def parse_calls(text):
+    """Tool calls in either format the Qwen chat templates emit, inside <tool_call>...</tool_call>:
+    Hermes JSON (Qwen3-2507: {"name": ..., "arguments": {...}}) or XML (Qwen3.5:
+    <function=NAME><parameter=P>value</parameter>...</function>)."""
     out = []
     for m in TCALL.finditer(text):
+        body = m.group(1).strip()
+        f = TFUNC.search(body)
+        if f:
+            out.append({"name": f.group(1), "arguments": {p: _param(v) for p, v in TPARAM.findall(f.group(2))}})
+            continue
         try:
-            out.append(json.loads(m.group(1)))
+            out.append(json.loads(body))
         except Exception:
-            out.append({"_unparseable": m.group(1)[:120]})
+            out.append({"_unparseable": body[:120]})
     return out
 
 # ---- Tavily (web_search + get_weather) ---------------------------------------------------------

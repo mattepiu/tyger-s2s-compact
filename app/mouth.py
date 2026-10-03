@@ -132,7 +132,9 @@ class Mouth:
         log.info("loading responder %s", lc["model"])
         self.llm = LocalLLM(self.eloop, lc["model"], gpu_memory_utilization=lc.get("gpu_memory_utilization", 0.45),
                             kv_cache_gib=lc.get("kv_cache_gib", 3.0), max_model_len=lc.get("max_model_len", 8192),
-                            max_num_seqs=lc.get("max_num_seqs", 8), temperature=self.temperature)
+                            max_num_seqs=lc.get("max_num_seqs", 8), temperature=self.temperature,
+                            enable_thinking=lc.get("enable_thinking"),
+                            language_model_only=bool(lc.get("language_model_only", False)))
         self.sr = self.tts.out_sr
         self._voices = {}                     # clip path -> (mtime, Voice): each clip is read once
         self._voice_lock = threading.Lock()

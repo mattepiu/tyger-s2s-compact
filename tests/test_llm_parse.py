@@ -38,6 +38,22 @@ def test_text_before_tool_call_is_spoken():
     assert said.strip() == "Let me check." and saw
 
 
+def test_xml_tool_call_qwen35():
+    raw = ('<tool_call>\n<function=get_weather>\n<parameter=location>\nSan Francisco\n</parameter>\n'
+           '<parameter=unit>\ncelsius\n</parameter>\n</function>\n</tool_call>')
+    assert parse_calls(raw) == [{"name": "get_weather", "arguments": {"location": "San Francisco", "unit": "celsius"}}]
+    for step in (1, 3, 7):
+        assert stream_speakable(raw, step) == ("", True)
+
+
+def test_xml_tool_call_values_and_multiple():
+    raw = ('<tool_call>\n<function=web_search>\n<parameter=query>\nbtc price\n</parameter>\n</function>\n</tool_call>\n'
+           '<tool_call>\n<function=x>\n<parameter=n>\n3\n</parameter>\n<parameter=s>\n"quoted"\n</parameter>\n'
+           '</function>\n</tool_call>')
+    assert parse_calls(raw) == [{"name": "web_search", "arguments": {"query": "btc price"}},
+                                {"name": "x", "arguments": {"n": 3, "s": '"quoted"'}}]
+
+
 def test_partial_tag_held_back():
     assert split_speakable("Okay <tool_c") == ("Okay ", False)
     assert split_speakable("Okay <b") == ("Okay <b", False)

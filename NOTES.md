@@ -196,6 +196,31 @@ voxcpm 2.0.3, transformers 5.14.1).
 ~150 on the previous box with the same vLLM. **Every latency number below from this box is pessimistic**;
 re-measure on a healthy GPU before tuning anything against them.
 
+## Responder: Qwen3.5-4B (2026-10-03, user's call)
+`llm.model` is now `Qwen/Qwen3.5-4B` (was Qwen3-4B-Instruct-2507; rollback = one line in `config.yaml`). What changed:
+- **Thinking off.** Qwen3.5's template opens `<think>` by default; `llm.enable_thinking: false` passes
+  `enable_thinking=False` to the template (an empty think block), so replies start with speech.
+- **Text only.** The checkpoint is multimodal; `llm.language_model_only: true` skips the vision tower: 8.0 GiB of
+  weights loaded.
+- **XML tool calls.** It emits `<tool_call><function=NAME><parameter=P>value</parameter></function></tool_call>`
+  instead of Hermes JSON; `tools.parse_calls` reads both. The `<tool_call>` tag the fillers start on is unchanged,
+  and the template renders our history's tool calls in its own format (checked).
+- **Hybrid attention** (24 linear + 8 full layers): the same pinned 3 GiB of KV holds 69k tokens instead of ~21k.
+  vLLM runs its mamba cache in 'align' mode for prefix caching.
+- Measured, same box, same code otherwise:
+
+  | | Qwen3-4B-Instruct-2507 | Qwen3.5-4B |
+  |---|---|---|
+  | idle turn: first text / first audio | ~50 / 263–272 ms | ~78 / 233–277 ms |
+  | `load_test.py --sessions 4` turn first-audio p50 (3 runs × 24) | 400–425 ms | 446–550 ms |
+  | 4 sessions, MOUTH first text p50 (log) | 50 ms | 254 ms |
+  | tool turns `--tools --fresh` / `--tools`: tool called | 24/24, 24/24 | 24/24, 24/24 |
+  | tool-turn first-audio p50 (4 sessions) | 408 ms | 456–460 ms |
+  | GPU peak (4 sessions) | 27.0 GB | 27.5 GB |
+
+  Under concurrent load its prefill is slower (first text 50 → 254 ms p50), costing ~50–100 ms of turn
+  first-audio at 4 sessions; idle it's level. Reply quality is the user's call (listen live).
+
 ## Architecture (V1.3) — two processes, one venv, both MOUTH models in-process on vLLM
 - **MOUTH** (`app/mouth.py`): orchestrator + an `EngineLoop` (`app/engines.py`: one asyncio loop in a thread,
   bridged to MOUTH's synchronous generators; aborts the engine request on barge) hosting
