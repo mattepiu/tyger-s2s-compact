@@ -90,6 +90,39 @@ the 350 ms minimum), and `finish_turn` doesn't reset again after a barge. `scrip
 12 public LibriSpeech barge-ins over agent speech; numbers only): first 3 words recalled **14% → 83%**, all words
 **69% → 94%**; the barge fires a median 1.22 s after the user starts talking.
 
+### Cloned-voice onset (I-06 / L-03): resample once, VoxCPM2's speaker cache
+`scripts/bench_tts_voice.py` (TTS only, GPU free; clip `en` 9.3 s @ 44.1 kHz; p50 of 12 short sentences, time to the
+first audio output of one VoxCPM2 request):
+
+| how the clip is passed | prompt build | generate → first audio |
+|---|---|---|
+| 44.1 kHz list, every request (old) | 2.0 ms | **146 ms** |
+| 16 kHz list (the VAE's rate), every request | 0.4 ms | 97 ms |
+| 16 kHz + speaker cache (current) | 0.5 ms | **78 ms** |
+| zero-shot, no clip | 0.5 ms | 81 ms |
+
+The I-06 hypothesis (the tuple of ~480k Python floats) was wrong: building the prompt took 2 ms. The cost was the
+stage worker **resampling the clip on the CPU for every request** (~50 ms) and **re-encoding it** (~20 ms). Now
+`load_voice` resamples once, and reference-only voices (no transcript) use the worker's in-memory speaker cache:
+the first request carries the clip + a `voice_name` (`tyger-<name>-<mtime>`), later ones only the encoded length.
+MOUTH primes every clip in `voices/` at startup, so no conversation pays the first-use cost. Nothing derived from a
+clip is written to disk (vLLM-Omni's file-based `custom_voice_dir` profiles would do the same from disk; not
+needed). A clip passed as a tensor arrives garbled in the stage worker and kills it: keep lists.
+
+Full stack after this (and everything above), same box:
+
+| | baseline (`b64c772`) | now |
+|---|---|---|
+| smoke plain / weather tool / reminder first-audio | 354 / 441 / 473 ms | **263 / 264 / 301 ms** |
+| `load_test.py --sessions 4`: turn first-audio p50 (3 runs × 24) | 535 / 561 / 554 ms | **425 / 410 / 400 ms** |
+| backchannel first-audio p50 | 643 ms | 451–490 ms |
+| GPU peak | 28.4 GB | 27.0 GB |
+| `load_test_ears.py`: end of speech → first audio p50, 1 / 4 conv | 1013 / 1022 ms | 954 / 992–1109 ms |
+
+The EARS numbers vary with the test's speech: it is the LLM's reply to a "Say: …" prompt, so the utterance and
+the reply lengths change run to run (here 3–4× more hops in speaking mode than in the I-04 run: hop lag p90
+223–256 ms, encoder ~33% busy). A fixed test utterance would make runs comparable.
+
 ### Tool calls stay in history (I-12, found on the box)
 History used to keep only the final reply text of a tool turn. The model then answered later live questions from
 its own history, without calling a tool: 6 weather questions per session called the tool 2/6 times (1 session)
@@ -326,7 +359,6 @@ reminder/message tools return a "not connected" demo marker so the model says so
 
 ## Still open
 - Judge the VoxCPM2 cloned voice live (user), and add `voices/<name>.txt` transcripts if quality needs it.
-- Precomputed VoxCPM2 voice profile to drop the per-request reference encode.
 - V2: retune `ep_thr`/`ep_deb` + barge/bc live with `?debug=1` (0.9146 was never retuned live). Freeze into `config.yaml`.
 - V3: Docker build/run + container smoke.
 - Re-benchmark everything on a healthy GPU.

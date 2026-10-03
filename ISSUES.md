@@ -16,7 +16,7 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | I-03 | MOUTH | medium | **fixed** | Barge during a tool call waits for the tool (up to 15 s) |
 | I-04 | metrics | medium | **fixed** | "Onset" excludes endpoint detection; real gap is larger (it's ~1.0 s) |
 | I-05 | EARS | medium | confirmed in code | User turns > 20 s silently keep only the last 20 s |
-| I-06 | MOUTH | medium | hypothesis | Voice clip copied as ~480k Python floats on every TTS request |
+| I-06 | MOUTH | medium | **not reproduced** (real cost elsewhere, fixed) | Voice clip copied as ~480k Python floats on every TTS request |
 | I-07 | MOUTH | low | **fixed** | Backchannel keeps generating after the reply turn starts |
 | I-08 | EARS | low | likely | 2nd-ear agent audio leads what the user actually hears |
 | I-09 | EARS | low | confirmed in code | MOUTH dying leaves the conversation silently dead |
@@ -25,7 +25,7 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | I-12 | MOUTH | high | **fixed** | Tool calls never enter history, so later turns stop calling tools and invent answers |
 | L-01 | perf | lever | — | Encoder re-encodes the full 8 s window, twice, every hop, in fp32 |
 | L-02 | latency | lever | — | Decisions quantised to 320 ms hops |
-| L-03 | latency | lever | — | Per-request voice encode (precomputed voice profile) |
+| L-03 | latency | lever | **done** | Per-request voice encode (precomputed voice profile) |
 | L-04 | latency | lever | **done** | Tool filler (lead-in) starts only after the whole tool call decodes; one filler, then silence |
 | O-01 | ops | — | — | Endpoint thresholds never tuned live (V2) |
 | O-02 | ops | — | — | Dockerfile never built |
@@ -282,6 +282,11 @@ the clip as a tuple, as an `np.float32` array, and with no clip.
 - Pass whatever type `build_voxcpm2_prompt` accepts without conversion.
 - Resample the clip to the model's expected rate once, at load.
 
+**Status (2026-10-03): the hypothesis didn't hold; the resample did.** Building the prompt from the tuple took 2 ms.
+Per request, generate → first audio was 146 ms with the 44.1 kHz clip, 97 ms with the clip resampled once at load
+to the VAE's 16 kHz (the stage worker resampled it on the CPU every time), 78 ms with L-03 on top (zero-shot: 81).
+`scripts/bench_tts_voice.py`.
+
 ### L-01 — Encoder re-encodes the full 8 s window, twice, every hop, in fp32
 **Where:**
 - `app/ears_core/batched.py:308-314`: `win_u` and `win_a` are 8 s windows, both encoded every 320 ms.
@@ -316,6 +321,11 @@ cloned was ~500 ms on the plain turn (NOTES.md V1.3).
 
 **Lever:** vLLM-Omni can load precomputed voice profiles from a directory. Profiles derived from the user's
 clip are personal data: keep them on the box and gitignore them.
+
+**Status: done (2026-10-03), in memory instead of files.** The VoxCPM2 worker has a process-wide speaker cache
+keyed by `voice_name`: the first request stores the encoded clip, later ones send a `voice_profile` with only its
+length. MOUTH primes every clip at startup. Per-request first audio 97 → 78 ms; with I-06's resample, 146 → 78 ms.
+Smoke plain-turn first audio 354 → 263 ms. No voice-derived files on disk.
 
 ### L-04 — Contextual tool filler: start it earlier, cover slow tools
 **Where:**

@@ -145,6 +145,8 @@ class Mouth:
             raise RuntimeError("no voice reference clips found (put a *.wav in voices.dir)")
         log.info("warming TTS (voice=%s)", default)
         self.tts.warmup(self.default_voice()[1])
+        for name in sorted(names):                     # every clip into VoxCPM2's speaker cache before serving
+            self.tts.prime_voice(self.voice(name))
         # first request with the tools prompt is cold (~490 ms to first token vs ~55 ms after) -> pay it here
         for _ in self.llm.stream([{"role": "system", "content": TTS_TOOLS_SYS}, {"role": "user", "content": "Hi."}],
                                  tools=TOOLS, max_new=8):

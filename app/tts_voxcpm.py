@@ -4,12 +4,16 @@ Surface: load_voice(path) -> Voice, then stream(text, voice) / render / warmup. 
 one VoxCPM2 request for one text chunk; audio is yielded per decode step as it arrives. VoxCPM2 emits 48 kHz;
 a stateful polyphase resampler brings it to out_sr (24 kHz: the EARS<->browser wire and the 2nd ear).
 
-Voice cloning: the reference clip goes into every request's prompt (VoxCPM2 encodes it per request). If a
-transcript sits next to the clip (voices/<name>.txt) it runs in "ultimate cloning" mode (prompt_audio +
-prompt_text, the full clip is used so it matches the transcript); otherwise reference-only mode with the clip
-trimmed to ref_max_s to bound the per-request prefill.
+Voice cloning: the clip is resampled once, at load, to the rate VoxCPM2's audio VAE encodes at (the stage worker
+otherwise resampled it on the CPU for every request: ~50 ms). If a transcript sits next to the clip
+(voices/<name>.txt) it runs in "ultimate cloning" mode (prompt_audio + prompt_text, the full clip, so it matches
+the transcript), with the clip in every request. Otherwise reference-only mode, clip trimmed to ref_max_s, and the
+stage worker's speaker cache: the first request carries the clip plus a voice_name, and the worker stores the
+encoded clip under it; later requests send only voice_name + the encoded length (a voice_profile), so the clip is
+neither shipped nor re-encoded (~20 ms more). With both, a cloned voice starts as fast as zero-shot (I-06 / L-03).
 
-Privacy: the clip and transcript are read into memory only; nothing is written to disk or logged.
+Privacy: the clip and transcript are read into memory only (the speaker cache is in the stage worker's memory);
+nothing is written to disk or logged.
 """
 from __future__ import annotations
 import threading, uuid, logging
@@ -21,14 +25,16 @@ import numpy as np
 log = logging.getLogger("tts")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Voice:
     """A loaded reference clip (+ optional transcript). Passed per request, so sessions can use different
     voices concurrently on the one engine."""
     name: str
-    ref: tuple            # mono float samples
-    sr: int
+    ref: list             # mono float samples at sr (the VAE's rate); never mutated. A list: the stage IPC
+    sr: int               # passes lists through, while a tensor arrives garbled and kills the stage worker
     text: str | None      # transcript -> "ultimate cloning"; None -> reference-only
+    cache_key: str = ""   # speaker-cache name (reference-only voices): changes when the clip file does
+    feat_len: int = 0     # encoded clip length, which the prompt needs once the clip itself isn't sent
 
 
 class VoxCPM2TTS:
@@ -51,6 +57,10 @@ class VoxCPM2TTS:
         self.split_map = build_cjk_split_map(self.tok)
         self.params = coerce_param_message_types(list(self.engine.default_sampling_params_list), True)
         self._tok_lock = threading.Lock()
+        self._cached = set()                  # voice cache keys the stage worker has stored
+        vae = self.hf_config.audio_vae_config
+        self.vae_sr = int(vae["sample_rate"])
+        self.patch_samples = int(self.hf_config.patch_size * np.prod(vae["encoder_rates"]))
         self.max_batch = 1                    # the deploy config's max_num_seqs: batch sizes warmup must cover
         if deploy_config:
             import yaml
@@ -58,7 +68,7 @@ class VoxCPM2TTS:
             self.max_batch = int(stages[0].get("max_num_seqs", 1))
 
     def load_voice(self, ref_path, name=None) -> Voice:
-        import soundfile as sf
+        import os, soundfile as sf, librosa
         wav, sr = sf.read(str(ref_path), dtype="float32", always_2d=True)
         wav = wav.mean(1)
         txt = Path(ref_path).with_suffix(".txt")
@@ -67,14 +77,24 @@ class VoxCPM2TTS:
             text = None
             wav = wav[:int(self.ref_max_s * sr)]
         log.info("voice loaded: %.1fs clip, transcript=%s", len(wav) / sr, text is not None)
-        return Voice(name or Path(ref_path).stem, tuple(wav.tolist()), int(sr), text)
+        if sr != self.vae_sr:
+            wav = librosa.resample(wav, orig_sr=sr, target_sr=self.vae_sr).astype(np.float32)
+        name = name or Path(ref_path).stem
+        key = "" if text else f"tyger-{name}-{os.stat(ref_path).st_mtime_ns}"
+        return Voice(name, wav.tolist(), self.vae_sr, text, key, -(-len(wav) // self.patch_samples))
 
     def _prompt(self, text, voice):
         from vllm_omni.model_executor.models.voxcpm2.voxcpm2_talker import build_voxcpm2_prompt
-        ref = list(voice.ref) if voice else None
-        return build_voxcpm2_prompt(hf_config=self.hf_config, tokenizer=self.tok, split_map=self.split_map,
-                                    text=text, ref_audio=ref, ref_sr=voice.sr if voice else None,
-                                    ref_text=voice.text if voice else None)
+        kw = dict(hf_config=self.hf_config, tokenizer=self.tok, split_map=self.split_map, text=text)
+        if voice is None:
+            return build_voxcpm2_prompt(**kw)
+        if voice.cache_key and voice.cache_key in self._cached:          # the worker has the encoded clip
+            prompt = build_voxcpm2_prompt(**kw, voice_profile={"mode": "reference", "ref_audio_feat_len": voice.feat_len})
+        else:
+            prompt = build_voxcpm2_prompt(**kw, ref_audio=voice.ref, ref_sr=voice.sr, ref_text=voice.text)
+        if voice.cache_key:                                              # look up, or store on first use
+            prompt["additional_information"]["voice_name"] = [voice.cache_key]
+        return prompt
 
     def stream(self, text, voice=None, stop_flag=None):
         """Yield mono float32 chunks @ out_sr for one text chunk, in `voice` (None = zero-shot)."""
@@ -107,6 +127,8 @@ class VoxCPM2TTS:
         for a, sr in self.eloop.iterate(chunks, abort=lambda: self.engine.abort(rid), stop_flag=stop_flag):
             if rs is None:
                 rs = StreamingAudioResampler(sr, self.out_sr)
+                if voice is not None and voice.cache_key:   # audio out => prefill done => the worker stored it
+                    self._cached.add(voice.cache_key)
             out = rs.process(a)
             if out.size:
                 yield np.clip(out, -1.0, 1.0).astype(np.float32)
@@ -114,6 +136,13 @@ class VoxCPM2TTS:
             tail = rs.process(np.zeros(0, np.float32), final=True)
             if tail.size:
                 yield np.clip(tail, -1.0, 1.0).astype(np.float32)
+
+    def prime_voice(self, voice):
+        """Get a reference-only voice into the stage worker's speaker cache now (one tiny request), so its first
+        real request doesn't pay the clip transfer + encode. No-op for transcript voices and cached ones."""
+        if voice is not None and voice.cache_key and voice.cache_key not in self._cached:
+            for _ in self.stream("Hi.", voice):
+                pass
 
     def render(self, text, voice=None):
         chunks = list(self.stream(text, voice))
