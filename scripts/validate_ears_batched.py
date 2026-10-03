@@ -111,4 +111,5 @@ for k in range(S):
     compare(f"session {k}", refs[k][0], gots[k][0], refs[k][1], gots[k][1])
 full = [t for t, b in ticksN if b == S]
 print(f"  tick ms with {S} sessions: p50 {np.median(full):.0f}  p90 {np.percentile(full,90):.0f}  max {max(full):.0f}  (n={len(full)})")
+print(f"  engine busy over the 4-session run: encoder {eng.t_enc:.2f} s, head {eng.t_head:.2f} s")
 print(f"  GPU memory allocated {torch.cuda.memory_allocated()//2**20} MiB, reserved {torch.cuda.memory_reserved()//2**20} MiB")

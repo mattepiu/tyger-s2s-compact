@@ -204,6 +204,8 @@ class EarsEngine:
         from transformers import AutoModel, AutoProcessor
         self.device = device; self.slots = slots
         self.proc = AutoProcessor.from_pretrained(model_id)
+        self.fe = self.proc.feature_extractor
+        self.fe.mel_filters = self.fe.mel_filters.to(device)   # features are computed on the GPU (self.features)
         self.asr = AutoModel.from_pretrained(model_id, dtype=torch.float32).to(device).eval()
         self.enc = self.asr.encoder
         self.ym = EndpointModel(device=device); self.ym.load(heads_ckpt); self.ym.eval()
@@ -233,6 +235,26 @@ class EarsEngine:
 
     # ---- GPU helpers ----
     @torch.no_grad()
+    def features(self, wavs):
+        """list of 16 kHz clips -> (log-mel features, attention mask) on the GPU: the processor's feature extraction
+        (right-pad, preemphasis, STFT, mel, mask) with the waveform on the GPU. Its CPU STFT was ~20 ms per tick at
+        4 conversations (8 windows), more than the encoder; this is ~2 ms. Same values within float noise (~2e-4 on
+        log-mels of ~16). The extractor's own device="cuda" leaves the waveform on the CPU and fails."""
+        fe, dev = self.fe, self.device
+        n = max(len(w) for w in wavs)
+        x = np.zeros((len(wavs), n), np.float32)
+        for i, w in enumerate(wavs):
+            x[i, :len(w)] = w
+        x = torch.from_numpy(x).to(dev, non_blocking=True)
+        lens = torch.tensor([len(w) for w in wavs], device=dev)
+        inside = torch.arange(n, device=dev)[None] < lens[:, None]
+        x = torch.cat([x[:, :1], x[:, 1:] - fe.preemphasis * x[:, :-1]], 1).masked_fill(~inside, 0.0)
+        f = fe._torch_extract_fbank_features(x, dev, center=True)
+        flen = torch.floor_divide(lens + fe.n_fft // 2 * 2 - fe.n_fft, fe.hop_length)
+        am = torch.arange(f.shape[1], device=dev)[None] < flen[:, None]
+        return f * am.unsqueeze(-1), am
+
+    @torch.no_grad()
     def encode(self, wavs):
         """list of 16 kHz windows -> list of (T, 1024) L15 tensors on the GPU; equal lengths are batched.
         All-zero windows (the agent channel while listening) are encoded once per length and cached: same input,
@@ -244,12 +266,10 @@ class EarsEngine:
             else:
                 groups.setdefault(len(w), []).append(i)
         for n, idx in groups.items():
-            inp = self.proc([wavs[i] for i in idx], sampling_rate=ENC_SR, return_tensors="pt")
-            feats = inp["input_features"].to(self.device); am = inp.get("attention_mask")
+            feats, am = self.features([wavs[i] for i in idx])
             self._tls.stop = True
             try:
-                self.enc(input_features=feats, attention_mask=(am.to(self.device) if am is not None else None),
-                         num_lookahead_tokens=0)
+                self.enc(input_features=feats, attention_mask=am, num_lookahead_tokens=0)
             except _StopAtL15:
                 pass
             finally:
@@ -268,8 +288,8 @@ class EarsEngine:
         if not wavs:
             return []
         with self._gen_lock, torch.cuda.stream(self.asr_stream):
-            inp = self.proc(wavs, sampling_rate=ENC_SR, return_tensors="pt").to(self.device)
-            seqs = self.rnnt(inp["input_features"], inp.get("attention_mask"))
+            feats, am = self.features(wavs)
+            seqs = self.rnnt(feats, am)
             return [self.proc.decode(q, skip_special_tokens=True).strip() for q in seqs]
 
     def _asr_loop(self):

@@ -123,6 +123,22 @@ The EARS numbers vary with the test's speech: it is the LLM's reply to a "Say: �
 the reply lengths change run to run (here 3–4× more hops in speaking mode than in the I-04 run: hop lag p90
 223–256 ms, encoder ~33% busy). A fixed test utterance would make runs comparable.
 
+### EARS encoder cost (L-01): features on the GPU; bf16 rejected
+- **bf16 encoder: rejected.** Autocast to bf16 around the L15 encode (thread-local, so the ASR stayed fp32) gave
+  no speedup (encoder busy 12.3 s vs 11.5 s fp32 over `validate_ears_batched.py`'s 4-session run), head-output
+  diffs 4–20× larger (p_end up to 0.14 vs ~0.007), and one session's events changed.
+- **Why: the encoder is launch-bound and the CPU features weren't.** To L15, 8 s windows ×1 / ×4 / ×8: GPU encoder
+  14 / 15 / 21 ms, while the processor's CPU feature extraction took 4 / 14 / 28 ms. At 4 conversations a tick
+  encodes 8 windows (user + agent channel each), so the CPU STFT cost more than the encoder.
+- **Fix: `EarsEngine.features`** runs the processor's own extraction (pad, preemphasis, STFT, mel, mask) with the
+  waveform on the GPU: 8 windows 19 → 1.9 ms, values within ~2e-4 of log-mels ~16, identical masks. Used for both
+  the L15 encode and the ASR. (The extractor's `device="cuda"` leaves the waveform on the CPU and fails.)
+  `validate_ears_batched.py`: all events match (endpoint transcripts included), head diffs ≤ 0.0077; 4-session
+  tick p50 90 → 59 ms, encoder busy 11.5 → 8.4 s. Full stack, 4 conversations, 3 runs: encoder busy 21–23% (was
+  32–35% with similar reply lengths), hop lag p90 192–216 ms (was 223–256), detection p50 550–778 ms.
+- Not done: precomputing the agent channel's features while speaking (L-01 option 2), the streaming encoder
+  (option 3, needs head work upstream). The head (~20–24% busy) is now as large as the encoder.
+
 ### Tool calls stay in history (I-12, found on the box)
 History used to keep only the final reply text of a tool turn. The model then answered later live questions from
 its own history, without calling a tool: 6 weather questions per session called the tool 2/6 times (1 session)

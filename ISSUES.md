@@ -23,7 +23,7 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | I-10 | EARS | low | likely | `play_until` is a server-side guess at client playback |
 | I-11 | security | low (demo) / high (public) | confirmed in code | No auth, no message-size or buffer limits on :7860 |
 | I-12 | MOUTH | high | **fixed** | Tool calls never enter history, so later turns stop calling tools and invent answers |
-| L-01 | perf | lever | — | Encoder re-encodes the full 8 s window, twice, every hop, in fp32 |
+| L-01 | perf | lever | **partly done** | Encoder re-encodes the full 8 s window, twice, every hop, in fp32 |
 | L-02 | latency | lever | — | Decisions quantised to 320 ms hops |
 | L-03 | latency | lever | **done** | Per-request voice encode (precomputed voice profile) |
 | L-04 | latency | lever | **done** | Tool filler (lead-in) starts only after the whole tool call decodes; one filler, then silence |
@@ -306,6 +306,13 @@ to the VAE's 16 kHz (the stage worker resampled it on the CPU every time), 78 ms
 3. **Cache-aware streaming encode.** nemotron-3.5-asr-*streaming* supports it in principle. But the heads
    were trained on L15 of rolling 8 s windows, so the features differ, and this needs upstream
    validation or retraining (the head repo, not here).
+
+**Status (2026-10-03).** Option 1 (bf16) rejected: no speedup (the encoder is launch-bound: 8 windows cost 21 ms
+vs 14 ms for one), head diffs up to 0.14, an event changed. The real cost was the **CPU feature extraction**
+(28 ms for 8 windows, more than the encoder); it now runs on the GPU (1.9 ms), same events and transcripts. 4
+conversations: encoder busy ~33% → ~22%, hop lag p90 ~240 → ~205 ms. Option 2 not tried. **Option 3 stays a
+recommendation for the head repo**: a cache-aware streaming encode would cut the encoder to the new 320 ms per
+hop, but needs the heads validated or retrained on streaming L15 features.
 
 ### L-02 — Decisions quantised to 320 ms hops
 **Where:** `HOP_FRAMES = 4` in `app/ears_core/live_ears.py`.
