@@ -148,4 +148,4 @@ onset ms, barge, backchannel, tool name). Voice reference clips and their transc
 - Endpoint thresholds are not yet live-tuned (see Configure).
 - The `Dockerfile` has not yet been built and run end to end.
 
-See `HANDOFF.md` for the original work queue and `NOTES.md` for the current state.
+See `NOTES.md` for the current state, `ISSUES.md` for open issues, and `HANDOFF.md` for the current work queue.
