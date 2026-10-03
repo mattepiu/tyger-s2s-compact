@@ -50,6 +50,14 @@ buffering for what they hear). A rough split of the ~775 ms detection (estimated
 instrumented): `ep_deb` 2 frames = 160 ms, hop quantisation ~160 ms average (L-02), hop lag ~60–100 ms, final ASR
 ~40–70 ms; the remaining ~350–400 ms is `p_end` climbing to 0.9146 after the speech stops.
 
+**Targets for live tuning (O-01).** Drive *end of speech → endpoint* from ~775 ms p50 to **≤ 450 ms p50 (p90
+≤ 550 ms)**, which puts end of speech → first audio at ~700 ms. With today's hop and debounce the floor is ~380 ms
+(160 debounce + ~160 hop quantisation + ~60 lag), so the threshold part has ~70–150 ms to work with: in practice a
+lower `ep_thr` (the offline 0.9146 was seen ~2× too high on a real mic). `ep_deb` 1 saves another 80 ms and L-02
+(160 ms hops) ~80 ms. Guard rail: the endpoint must not fire inside an utterance more often. Track
+`load_test_ears.py --full-speech` "fired inside the utterance" (5/8 at 4 conversations today, with the
+multi-sentence test speech) and, live, how often the agent cuts in mid-sentence.
+
 ### MOUTH barge-in and backchannel fixes (I-01, I-03, I-07)
 - **Barged turns stay in history (I-01).** On a barge MOUTH remembers the user's transcript and the reply up to the
   chunk that was playing, ending in " —" (the system prompt says a reply ending in a dash was cut off). EARS sends
