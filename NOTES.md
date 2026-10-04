@@ -108,6 +108,30 @@ endpoint from the energy fake, hop lag ~1 ms, no vLLM in the log. `test_plugin_c
 and, with `TYGER_CONTRACT_LOCAL=1` (GPU free), for qwen3.5-4b and qwen3-4b-2507 (both call get_weather for two
 cities, unique IDs, stop within one item), voxcpm2 and nemotron-tyger-1.0 (ENDPOINT on a LibriSpeech clip).
 
+**Step 6 (`openai` LLM, live against OpenAI, user's OK, synthetic prompts only).** Model probe through the plugin
+(5 plain + 3 weather prompts each; all called get_weather 3/3): first text p50 gpt-4.1-nano 517 ms, gpt-4o-mini
+587 ms, gpt-4.1-mini 852 ms (min 402). Runs below use gpt-4.1-nano as `reply` (fastest; weakest replies: it did not
+say reminders aren't connected in one smoke run).
+
+| | local Qwen3.5-4B (step 2/4) | reply openai, filler local | reply + filler openai |
+|---|---|---|---|
+| MOUTH first text p50 (log) | ~80 idle / 254 at 4 sessions | 597 ms | — |
+| smoke plain / weather / reminder / backchannel | 240 / 305 / 419 / 198 ms | 726 / 924 / 858 / 186 ms | 1096 / 1426 / 1679 / 697 ms |
+| `load_test.py` 4 sessions turn first-audio p50 | 502 / 457 / 502 | 824 / 860 / 871 | 813 / 842 |
+| backchannel first-audio p50 | 474–591 | 286–355 | 838–903 |
+| `--tools --fresh` first-audio p50 / max, dead air max | 486 / 547, 1431 | 951 / 3454, 1893 | 1553 / 1902, 1716 |
+| `load_test.py` 1 session turn p50 | — | 776 | — |
+| `load_test_ears.py` end of speech → first audio p50, 1 / 4 conv | 970 / 1260 | 1504 / 1591–1661 | — |
+| barge → D | 5 ms | 5–6 ms | — |
+| GPU peak | 27.7 GB | 27.4 GB | **15.3 GB** (no local LLM: ~12 GB free) |
+
+The network round trip (~0.5–0.6 s to first text) dominates; a remote `reply` costs ~0.35 s of first audio over
+local Qwen, and a remote `filler` makes backchannels ~0.55 s slower and tool lead-ins slower still. With nano's
+default sampling the "count to ten" reply varies (4–10 distinct texts), so those EARS runs are measurements, not
+parity comparisons. `smoke_test.py`'s EARS part now speaks a fixed sentence through `S`: it used the previous
+reply's TTS audio, which with a slow first audio let the rest of a multi-sentence "user" utterance barge in
+before any reply audio arrived.
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at

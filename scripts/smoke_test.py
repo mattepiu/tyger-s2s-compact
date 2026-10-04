@@ -4,8 +4,9 @@
               (weather), and a placeholder tool turn (reminder) -- asserting audio comes back and the
               placeholder reply admits it isn't connected. Deterministic (text in).
   --ears    : connect to the running EARS web app over WebSocket, stream speech as the mic, and assert an
-              endpoint fires and reply audio returns (speech -> endpoint -> audio out). The speech is the
-              MOUTH's own TTS reply held in memory (or --wav).
+              endpoint fires and reply audio returns (speech -> endpoint -> audio out). The speech is one fixed
+              sentence spoken by the MOUTH's TTS (the S message: no LLM), held in memory (or --wav). A fixed
+              sentence has no inner pause for the endpoint to fire at, whatever model wrote the earlier replies.
   (default) : run both. Requires `run.sh` (EARS + MOUTH) to be up for --ears; only MOUTH for --mouth.
 
 Run: HF_HOME=/workspace/.hf_home .venv/bin/python scripts/smoke_test.py [--mouth|--ears] [--wav x.wav]
@@ -124,13 +125,18 @@ def test_mouth(cfg):
     return speech
 
 
-def speech_from_mouth(cfg):
-    """Synthesize a test utterance with the MOUTH's own TTS (kept in memory, never written to disk)."""
+def speech_from_mouth(cfg, text="I would like to know what the weather is like in Berlin today."):
+    """`text` spoken by the MOUTH's TTS (S: TTS only, no LLM), 24 kHz, kept in memory (never written to disk)."""
     s = mouth_session(cfg)
-    _, _, wav = mouth_turn(s, "Say: I would like to know what the weather is like in Berlin today.",
-                           "speech-for-ears", keep_audio=True)
+    send_msg(s, b"S", {"text": text}); chunks = []
+    while True:
+        kind, payload = recv_msg(s)
+        if kind == b"A":
+            chunks.append(np.frombuffer(payload, np.float32))
+        elif kind in (b"D", None):
+            break
     s.close()
-    return wav
+    return np.concatenate(chunks) if chunks else np.zeros(0, np.float32)
 
 
 def to16k(x, sr):
@@ -216,15 +222,11 @@ def main():
     cfg = load_config(args.config)
     do_mouth = args.mouth or not args.ears
     do_ears = args.ears or not args.mouth
-    speech = None
     if do_mouth:
-        speech = test_mouth(cfg)
+        test_mouth(cfg)
         test_barge(cfg)
     if do_ears:
-        if args.wav:
-            speech16 = load_wav16(args.wav)
-        else:
-            speech16 = to16k(speech if speech is not None and speech.size else speech_from_mouth(cfg), 24000)
+        speech16 = load_wav16(args.wav) if args.wav else to16k(speech_from_mouth(cfg), 24000)
         test_ears(cfg, speech16)
     print("SMOKE OK")
 
