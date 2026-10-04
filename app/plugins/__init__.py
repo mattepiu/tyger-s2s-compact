@@ -22,3 +22,22 @@ def plugin_class(kind: str, name: str):
         raise KeyError(f"no {kind} plugin '{name}' (known: {known})") from None
     mod, cls = target.split(":")
     return getattr(importlib.import_module(mod), cls)
+
+
+def build_llms(cfg: dict, eloop) -> dict:
+    """{role: LLM plugin instance} for llm.reply / filler / smart. Roles that share a block share one instance."""
+    import logging
+    from app.config import llm_roles
+    from app.plugins.base import PluginContext
+    log = logging.getLogger("plugins")
+    by_name, out = {}, {}
+    for role, (name, block) in llm_roles(cfg).items():
+        if name not in by_name:
+            log.info("loading LLM %s (plugin %s) for %s", name, block["plugin"], role)
+            by_name[name] = plugin_class("llm", block["plugin"])(block, PluginContext(eloop, cfg, name))
+        out[role] = by_name[name]
+    remote = sorted(r for r, p in out.items() if getattr(p, "remote", False))
+    if remote:   # transcripts leave the box for these roles: say so once, by role and instance name only
+        log.warning("remote LLM roles (transcripts leave the box): %s",
+                    ", ".join(f"{r}={n}" for r, (n, _) in llm_roles(cfg).items() if r in remote))
+    return out

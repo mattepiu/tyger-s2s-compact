@@ -47,6 +47,12 @@ def test_separate_filler_block_and_name():
     assert roles["filler"][0] == "small" and roles["filler"] is not roles["reply"]
 
 
+def test_same_name_twice_rejected():
+    cfg = copy.deepcopy(BASE)
+    cfg["llm"]["filler"] = {"plugin": cfg["llm"]["reply"]["plugin"], "kv_cache_gib": 1.0}
+    rejects(cfg, "llm.reply", "llm.filler", "`name:`")
+
+
 def test_bad_roles_and_plugins_rejected():
     cfg = copy.deepcopy(BASE); cfg["llm"]["fast"] = "reply"
     rejects(cfg, "llm.fast", "not a role")

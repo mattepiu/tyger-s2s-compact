@@ -135,12 +135,25 @@ def test_tool_exchange_kept_in_history():
     finally:
         M.execute_tool = orig
     assert [h["role"] for h in s.history] == ["user", "assistant", "tool", "assistant"]
-    assert s.history[1]["tool_calls"][0]["function"]["name"] == "get_weather"
+    assert s.history[1]["tool_calls"][0]["name"] == "get_weather"   # neutral format: {"id", "name", "arguments"}
     tool = s.history[2]["content"]
     assert "sunny, 20 C" in tool and "xxxx" not in tool, tool       # raw search hits dropped
     run_turn(s, "and in Rome?")                                     # the next prompt carries the exchange
     nxt = next(c[1] for c in reversed(llm.calls) if c[0] == "reply")
     assert any(x["role"] == "tool" for x in nxt)
+
+
+def test_tool_call_ids_unique_and_matched():
+    """Plugin-issued IDs: each tool result answers its own call, and IDs never repeat across turns."""
+    llm = FakeLLM(reply=TOOL_REPLY)
+    s, m = make_session(llm, FakeTTS(n=2))
+    with SlowTool(0):
+        for q in ("weather in Paris?", "and in Rome?", "and in Oslo?"):
+            run_turn(s, q)
+    calls = [c for h in s.history if h.get("tool_calls") for c in h["tool_calls"]]
+    results = [h["tool_call_id"] for h in s.history if h["role"] == "tool"]
+    assert len(calls) == 3 and len({c["id"] for c in calls}) == 3
+    assert results == [c["id"] for c in calls]
 
 
 def test_history_trimmed_by_whole_turns():

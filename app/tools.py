@@ -1,11 +1,11 @@
 """exp-12 EXTRA: tool layer for the function-calling MOUTH. Tool SCHEMAS are exp-10's (live-mic
-toolcall_eval), the Hermes <tool_call>{"name","arguments"}</tool_call> format the Qwen responder emits.
+toolcall_eval), in the OpenAI function format; each LLM plugin converts them and parses its model's calls.
 Executors (this file): web_search + get_weather via Tavily (env TAVILY_API_KEY, key never logged),
 get_current_time local (zoneinfo), set_reminder/send_message local stubs. Pure stdlib (urllib) so it runs
 in venv_cbx with no extra deps. Any executor returns a small JSON-able dict; on failure it returns
 {"error": ...} so the model can tell the user instead of crashing the turn.
 """
-import os, json, re, urllib.request, urllib.error
+import os, json, urllib.request, urllib.error
 from datetime import datetime
 try:
     from zoneinfo import ZoneInfo
@@ -42,37 +42,6 @@ def build_tools(prompts):
                         **{k: v for k, v in spec.items() if k != "type"}} if p in pdesc else dict(spec)
         out.append({"type": "function", "function": {"name": f["name"], "description": d["description"],
                     "parameters": {**f["parameters"], "properties": props}}})
-    return out
-
-TCALL = re.compile(r"<tool_call>(.*?)</tool_call>", re.S)
-TFUNC = re.compile(r"<function=([^>\s]+)>(.*?)</function>", re.S)
-TPARAM = re.compile(r"<parameter=([^>\s]+)>\n?(.*?)\n?</parameter>", re.S)
-
-
-def _param(v):
-    """An XML-format parameter value: JSON if it parses as a number/bool/list/object, else the raw string."""
-    try:
-        x = json.loads(v)
-        return x if not isinstance(x, str) else v
-    except Exception:
-        return v
-
-
-def parse_calls(text):
-    """Tool calls in either format the Qwen chat templates emit, inside <tool_call>...</tool_call>:
-    Hermes JSON (Qwen3-2507: {"name": ..., "arguments": {...}}) or XML (Qwen3.5:
-    <function=NAME><parameter=P>value</parameter>...</function>)."""
-    out = []
-    for m in TCALL.finditer(text):
-        body = m.group(1).strip()
-        f = TFUNC.search(body)
-        if f:
-            out.append({"name": f.group(1), "arguments": {p: _param(v) for p, v in TPARAM.findall(f.group(2))}})
-            continue
-        try:
-            out.append(json.loads(body))
-        except Exception:
-            out.append({"_unparseable": body[:120]})
     return out
 
 # ---- Tavily (web_search + get_weather) ---------------------------------------------------------

@@ -81,6 +81,14 @@ def validate_config(cfg: dict) -> dict:
                 raise ConfigError(f"`llm.{role}: {block}`: a role can only reuse `reply`")
             continue
         _check_block(REGISTRY, "llm", f"llm.{role}", block)
+    seen = {}                       # instance name -> role: two different blocks can't share a name (or instance)
+    for role, block in llm.items():
+        if isinstance(block, dict):
+            name = block.get("name") or block["plugin"]
+            if name in seen:
+                raise ConfigError(f"`llm.{seen[name]}` and `llm.{role}` are both named `{name}`: give one a "
+                                  f"`name:`, or write `{role}: reply` to share the reply instance")
+            seen[name] = role
     _check_block(REGISTRY, "tts", "tts", cfg.get("tts"))
     _check_block(REGISTRY, "ears", "ears", cfg.get("ears"))
     return cfg

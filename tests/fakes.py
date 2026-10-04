@@ -53,8 +53,7 @@ class FakeLLM:
                 "still": "Still looking, almost there."}[kind]
 
     def stream(self, messages, tools=None, max_new=192, temperature=None, stop_flag=None):
-        from app.llm import split_speakable
-        from app.tools import parse_calls
+        from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id
         kind = self._kind(messages)
         self.calls.append((kind, [dict(m) for m in messages]))
         raw_all = self.text_for(kind)
@@ -75,14 +74,14 @@ class FakeLLM:
                     yield ("text", speak[said:]); said = len(speak)
                 if saw_tool and not started and getattr(self, "emit_tool_start", True):
                     started = True
-                    yield ("tool_start", None)
+                    yield ("tool_start", {"name": None})
             if stop_flag and stop_flag():
                 return
             if not saw_tool and len(raw) > said:
                 yield ("text", raw[said:])
             if saw_tool:
-                calls = [c for c in parse_calls(raw) if isinstance(c, dict) and c.get("name")]
-                yield ("tool_calls", [{"name": c["name"], "arguments": c.get("arguments") or {}} for c in calls])
+                calls = parse_calls(raw, "hermes_json")
+                yield ("tool_calls", [{"id": new_call_id(), **c} for c in calls], None)
         finally:
             with self.lock:
                 self.live -= 1
@@ -120,6 +119,7 @@ class FakeMouth:
         self.max_gen = 192; self.history_turns = 8; self.bc_min_words = 4; self.bc_max_new = 12
         self.temperature = 0.7; self.sr = self.tts.out_sr
         self.prompts = {"reply": PROMPTS, "filler": PROMPTS}; self.tools = build_tools(PROMPTS)
+        self.llms = {"reply": self.llm, "filler": self.llm}
 
     def default_voice(self):
         return "fake", None

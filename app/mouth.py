@@ -1,10 +1,12 @@
 """MOUTH process: the responder LLM and the TTS, both in-process on vLLM engines, plus the turn orchestration.
 
 Architecture:
-  * One process hosts two in-process engines on a shared asyncio loop (app/engines.py): Qwen3-4B-Instruct-2507
-    on a vLLM AsyncLLM (app/llm.py) and VoxCPM2 on a vLLM-Omni AsyncOmni (app/tts_voxcpm.py). No HTTP between
-    MOUTH and the models. They can't be one vLLM-Omni pipeline: stages chain stage 0 -> stage 1, and MOUTH
-    has to sit between them (chunking, tools + lead-in, backchannels, barge-in).
+  * The models are plugins (app/plugins, PLUGINS.md), chosen in config. LLM roles: `reply` (turns and the tool
+    phase-B answer) and `filler` (backchannels, tool lead-ins, still-looking lines), the same instance unless
+    configured apart. Local plugins run in-process on a shared asyncio loop (app/engines.py): the Qwen LLMs on
+    vLLM AsyncLLM, VoxCPM2 on vLLM-Omni AsyncOmni (app/tts_voxcpm.py). No HTTP between MOUTH and the models.
+    They can't be one vLLM-Omni pipeline: MOUTH has to sit between them (chunking, tools + lead-in,
+    backchannels, barge-in).
   * The LLM reply is chunked by chunker.next_chunk: the FIRST chunk may end at a clause boundary (comma,
     semicolon, dash) so playback doesn't wait for a long opening sentence, then whole sentences. No chunk
     is cut below MIN_CHARS (40), so short replies/sentences go to the TTS whole. Each chunk is one VoxCPM2
@@ -18,8 +20,8 @@ Architecture:
     hum when the partial is too short (< mouth.bc_min_words) to react to. No canned/pre-rendered acks.
 EARS<->MOUTH wire: T/C/B/V in; X/A/D out, plus K = backchannel audio (kept apart from reply audio A, since the
 two can now be generated at the same time). S in = speak this text, TTS only (no LLM, no history): EARS never
-sends it; test tools use it for a fixed utterance (load_test_ears.py). Audio is 24 kHz float32. No audio or transcript is written to disk
-or logs; only timings and event types.
+sends it; test tools use it for a fixed utterance (load_test_ears.py). Audio is 24 kHz float32. No audio or
+transcript is written to disk or logs; only timings and event types.
 
 Run: HF_HOME=/workspace/.hf_home .venv/bin/python -m app.mouth
 """
@@ -34,7 +36,7 @@ from app.chunker import next_chunk, say_clean
 from app.config import load_config, discover_voices, repo_path, llm_roles
 from app.prompts import load_prompts
 from app.engines import EngineLoop
-from app.llm import LocalLLM
+from app.plugins import build_llms
 from app.tts_voxcpm import VoxCPM2TTS
 
 log = logging.getLogger("mouth")
@@ -77,7 +79,7 @@ def bc_messages(p, recent_acks, partial, bc_min_words):
 
 
 def _text(events):
-    return "".join(v for k, v in events if k == "text")
+    return "".join(e[1] for e in events if e[0] == "text")
 
 
 def _compact_result(r, cap=600):
@@ -90,19 +92,14 @@ def _compact_result(r, cap=600):
     return txt if len(txt) <= cap else txt[:cap] + "…"
 
 
-# Until the LLM plugins land (PLUGINS.md step 2): each local plugin's model and engine/template switches.
-_LLM_PLUGIN_MODELS = {"qwen3.5-4b": ("Qwen/Qwen3.5-4B", {"enable_thinking": False, "language_model_only": True}),
-                      "qwen3-4b-2507": ("Qwen/Qwen3-4B-Instruct-2507", {})}
-
-
 class Mouth:
-    """Shared by all sessions: the two engines and voice loading. Per-conversation state lives in Session."""
+    """Shared by all sessions: the model plugins, prompts and voice loading. Per-conversation state lives in
+    Session."""
     def __init__(self, cfg):
         roles = llm_roles(cfg)
-        if roles["filler"] is not roles["reply"] or "smart" in roles:
-            raise NotImplementedError("separate filler / smart LLM instances come with the LLM plugins")
-        m = cfg["mouth"]; lc = cfg["llm"]["reply"]; t = cfg["tts"]
-        model, switches = _LLM_PLUGIN_MODELS[lc["plugin"]]
+        if "smart" in roles:
+            raise NotImplementedError("the smart role (escalation, background tasks) comes in PLUGINS.md step 10")
+        m = cfg["mouth"]; t = cfg["tts"]
         self.cfg = cfg
         # prompts first: a bad prompts.yaml stops start-up before minutes of engine loading
         by_name = load_prompts(cfg, {name for name, _ in roles.values()})
@@ -112,18 +109,12 @@ class Mouth:
         self.history_turns = int(m.get("history_turns", 8))
         self.bc_min_words = int(m.get("bc_min_words", 4))
         self.bc_max_new = int(m.get("bc_max_new", 12))
-        self.temperature = float(lc.get("temperature", 0.7))
         self.eloop = EngineLoop()
         # TTS first: its deploy config pins a small KV budget; the LLM's start-up check then sees what's left.
         log.info("loading TTS %s", t["model"])
         self.tts = VoxCPM2TTS(self.eloop, t["model"], deploy_config=repo_path(t.get("deploy_config")),
                               out_sr=t.get("out_sr", 24000), ref_max_s=t.get("ref_max_s", 10.0))
-        log.info("loading responder %s (%s)", lc["plugin"], model)
-        self.llm = LocalLLM(self.eloop, model, gpu_memory_utilization=lc.get("gpu_memory_utilization", 0.45),
-                            kv_cache_gib=lc.get("kv_cache_gib", 3.0), max_model_len=lc.get("max_model_len", 8192),
-                            max_num_seqs=lc.get("max_num_seqs", 8), temperature=self.temperature,
-                            enable_thinking=switches.get("enable_thinking"),
-                            language_model_only=bool(switches.get("language_model_only", False)))
+        self.llms = build_llms(cfg, self.eloop)          # role -> LLM plugin instance
         self.sr = self.tts.out_sr
         self._voices = {}                     # clip path -> (mtime, Voice): each clip is read once
         self._voice_lock = threading.Lock()
@@ -138,9 +129,11 @@ class Mouth:
         self.tts.warmup(self.default_voice()[1])
         for name in sorted(names):                     # every clip into VoxCPM2's speaker cache before serving
             self.tts.prime_voice(self.voice(name))
+        for llm in {id(x): x for x in self.llms.values()}.values():
+            llm.warmup()
         # first request with the tools prompt is cold (~490 ms to first token vs ~55 ms after) -> pay it here
         p = self.prompts["reply"]
-        for _ in self.llm.stream([{"role": "system", "content": p.text("system", "voice_tools")},
+        for _ in self.llms["reply"].stream([{"role": "system", "content": p.text("system", "voice_tools")},
                                   {"role": "user", "content": p.text("warmup", "user")}], tools=self.tools, max_new=8):
             pass
 
@@ -261,7 +254,7 @@ class Session:
         then its TTS: ("text", line), ("audio", chunk)..."""
         p = self.m.prompts["filler"]
         msgs = _with_shots(p.text(section, "system"), p.shots(section), user)
-        line = _text(self.m.llm.stream(msgs, max_new=24, stop_flag=stop_flag)).strip()
+        line = _text(self.m.llms["filler"].stream(msgs, max_new=24, stop_flag=stop_flag)).strip()
         if not line or stop_flag():
             return
         yield ("text", line)
@@ -291,13 +284,14 @@ class Session:
 
     # ---- speak an LLM text stream: a short first chunk (clause), then whole sentences ----
     def _speak_stream(self, events, voice, stop_flag):
-        """Speak the text of an LLM event stream as it arrives. Yields MOUTH events; returns (text, calls, started).
-        Returns at "tool_start" (started=True) without consuming the rest: the call is still decoding, and the
-        caller finishes `events` itself. Text before the tag that didn't close a chunk is never spoken."""
-        content = ""; calls = None; done = 0
-        for kind, val in events:
+        """Speak the text of an LLM event stream as it arrives. Yields MOUTH events; returns (text, calls, native,
+        started). Returns at "tool_start" (started=True) without consuming the rest: the call is still decoding,
+        and the caller finishes `events` itself. Text before the tag that didn't close a chunk is never spoken."""
+        content = ""; calls = None; native = None; done = 0
+        for ev in events:
+            kind, val = ev[0], ev[1]
             if kind == "tool_start":
-                return content, None, True
+                return content, None, None, True
             if kind == "text":
                 content += val
                 yield ("text", content)
@@ -311,12 +305,12 @@ class Session:
                         break
                     yield from self._say(chunk, voice, stop_flag)
             elif kind == "tool_calls":
-                calls = val
+                calls, native = val, ev[2]
             if stop_flag():
-                return content, calls, False
+                return content, calls, native, False
         if not calls and not stop_flag():
             yield from self._say(content[done:], voice, stop_flag)
-        return content, calls, False
+        return content, calls, native, False
 
     # ---- a full turn (may call tools) ----
     def stream_turn(self, transcript, stop_flag):
@@ -324,8 +318,8 @@ class Session:
         self._said = []; self._audio_s = 0.0; self._play_end = time.perf_counter()
         msgs = [{"role": "system", "content": m.prompts["reply"].text("system", "voice_tools")}] + list(self.history) + \
                [{"role": "user", "content": transcript}]
-        events = m.llm.stream(msgs, tools=m.tools, max_new=m.max_gen, stop_flag=stop_flag)
-        content, calls, started = yield from self._speak_stream(events, voice, stop_flag)
+        events = m.llms["reply"].stream(msgs, tools=m.tools, max_new=m.max_gen, stop_flag=stop_flag)
+        content, calls, native, started = yield from self._speak_stream(events, voice, stop_flag)
         if stop_flag():
             self._remember_barged(transcript)
             yield ("done", content.strip()); return
@@ -337,13 +331,13 @@ class Session:
         # and runs the tools the moment it parses, while this one speaks a filler made alongside (vLLM batches the
         # two requests). If the tools are still out FILLER_GAP_S after the filler has played, one more short
         # "still looking" line, up to MAX_STILL. Everything stops on barge (stop_flag); tool threads are daemons.
-        box = {"calls": calls or [], "results": []}; tools_done = threading.Event()
+        box = {"calls": calls or [], "native": native, "results": []}; tools_done = threading.Event()
 
         def finish_call_and_run_tools():
             try:
-                for kind, val in events:                    # no-op if _speak_stream already drained it
-                    if kind == "tool_calls":
-                        box["calls"] = val
+                for ev in events:                           # no-op if _speak_stream already drained it
+                    if ev[0] == "tool_calls":
+                        box["calls"], box["native"] = ev[1], ev[2]
                 if stop_flag() or not box["calls"]:
                     return
                 log.info("tool calls: %s", [c["name"] for c in box["calls"]])
@@ -391,17 +385,19 @@ class Session:
             self._remember(transcript, lead)
             yield ("done", lead); return
 
+        # neutral format: plugin-issued IDs, unique for the session; `native` is the plugin's own, passed through
         asst = {"role": "assistant", "content": content.strip() or None,
-                "tool_calls": [{"id": f"call_{i}", "type": "function",
-                                "function": {"name": c["name"], "arguments": c.get("arguments", {})}}
-                               for i, c in enumerate(calls)]}
-        msgs2 = msgs + [asst] + [{"role": "tool", "tool_call_id": f"call_{i}",
+                "tool_calls": [{"id": c["id"], "name": c["name"], "arguments": c.get("arguments", {})}
+                               for c in calls]}
+        if box["native"] is not None:
+            asst["native"] = box["native"]
+        msgs2 = msgs + [asst] + [{"role": "tool", "tool_call_id": c["id"],
                                   "content": json.dumps(r if r is not None else {"error": "no result"})}
-                                 for i, r in enumerate(results)]
-        kept = [asst] + [{"role": "tool", "tool_call_id": f"call_{i}", "content": _compact_result(r)}
-                         for i, r in enumerate(results)]
-        full2, _, _ = yield from self._speak_stream(
-            m.llm.stream(msgs2, max_new=m.max_gen, stop_flag=stop_flag), voice, stop_flag)
+                                 for c, r in zip(calls, results)]
+        kept = [asst] + [{"role": "tool", "tool_call_id": c["id"], "content": _compact_result(r)}
+                         for c, r in zip(calls, results)]
+        full2, _, _, _ = yield from self._speak_stream(
+            m.llms["reply"].stream(msgs2, max_new=m.max_gen, stop_flag=stop_flag), voice, stop_flag)
         reply = (lead + " " + full2).strip()
         if stop_flag():
             self._remember_barged(transcript, kept)
@@ -421,7 +417,7 @@ class Session:
         (< bc_min_words, flagged to it explicitly) or gives nothing to react to."""
         m = self.m
         messages = bc_messages(m.prompts["filler"], list(self.recent_acks), partial, m.bc_min_words)
-        text = _text(m.llm.stream(messages, max_new=m.bc_max_new, stop_flag=stop_flag)).strip()
+        text = _text(m.llms["filler"].stream(messages, max_new=m.bc_max_new, stop_flag=stop_flag)).strip()
         if text:
             self.recent_acks.append(text)
             yield ("text", text)
@@ -542,9 +538,9 @@ def main():
 
     def stop(signum, frame):                      # shut the engines down so their worker processes exit too
         log.info("MOUTH stopping (signal %d)", signum)    # (a bare SIGTERM orphans the VoxCPM2 stage process)
-        for eng in (m.tts.engine, m.llm.engine):
+        for shutdown in [m.tts.engine.shutdown] + [x.shutdown for x in {id(x): x for x in m.llms.values()}.values()]:
             try:
-                eng.shutdown()
+                shutdown()
             except Exception as e:
                 log.warning("engine shutdown: %s", type(e).__name__)
         os._exit(0)

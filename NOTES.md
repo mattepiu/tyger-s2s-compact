@@ -69,6 +69,23 @@ plugin step on branch `plugins` is compared against these:
 | `validate_rnnt.py` | padded batch vs alone | 40/40 identical |
 | `bench_tts_voice.py` | cloned voice (speaker cache) generate → first audio p50 | 89 ms (zero-shot 89, clip every request 115) |
 
+**Step 1b (prompts.yaml):** byte-identical by test (constants, f-string outputs, tool JSON against `ddb1128`); smoke
+PASS.
+
+**Step 2 (LLM plugins `qwen3.5-4b` / `qwen3-4b-2507` on `vllm_base`, roles `reply` / `filler`, plugin-issued
+tool-call IDs, neutral history):** rendered chat prompts for a tool-turn history are identical to the old ones for
+both models (neither template renders the IDs).
+
+| | baseline | step 2 |
+|---|---|---|
+| smoke plain / weather / reminder / backchannel | 243 / 351 / 429 / 194 ms | 240 / 305 / 419 / 198 ms, PASS |
+| `load_test.py` turn first-audio p50, 3 runs | 514 / 482 / 481 (median 482) | 502 / 457 / 502 (median 502) |
+| `--tools --fresh` first-audio p50, runs | 454 | 493 / 457 / 486; tool called 72/72, no parse failures |
+| GPU peak | 27 696 MiB | 27 706 MiB |
+
+`qwen3-4b-2507` (the one-line rollback, Hermes JSON calls): smoke PASS, `--tools --fresh` 24/24 tools called,
+first-audio p50 360 ms, GPU peak 27 666 MiB.
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at
