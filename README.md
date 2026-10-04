@@ -141,8 +141,46 @@ CONFIG=config.fake.yaml ./run.sh                 # the whole stack on the fake p
 scripts/stop.sh                                          # stop run.sh (and any stage worker it leaves behind)
 ```
 
-The EARS half of the smoke test uses the MOUTH's own TTS reply (held in memory) as the "user" speech, so no
-test audio file is needed; pass `--wav` to use your own.
+The EARS half of the smoke test speaks one fixed sentence with the MOUTH's TTS (held in memory) as the "user"
+speech, so no test audio file is needed; pass `--wav` to use your own.
+
+## Plugins
+
+The LLM, the TTS and the turn-taking model are **plugins chosen in `config.yaml`** (`app/plugins/`; the design is
+in `PLUGINS.md`). Each block names its `plugin:`; the rest of the block is that plugin's options.
+
+| kind | plugin | runs | notes |
+|---|---|---|---|
+| LLM | `qwen3.5-4b` | local, vLLM in MOUTH | the default responder: thinking off, text only, XML tool calls |
+| LLM | `qwen3-4b-2507` | local, vLLM in MOUTH | the previous responder (Hermes JSON tool calls); rollback = one line |
+| LLM | `openai` | **hosted** | any OpenAI-compatible chat endpoint (`base_url`: OpenAI, Groq, Cerebras, a vLLM server) |
+| LLM | `anthropic` | **hosted** | the Claude Messages API; default `claude-opus-5-5`, `effort: low`, server-side refusal fallback |
+| TTS | `voxcpm2` | local, vLLM-Omni in MOUTH | cloned voices from `voices/` |
+| EARS | `nemotron-tyger-1.0` | local, in EARS | nemotron ASR + the tyger 1.0 turn-taking heads |
+| all three | `fake` | no model, CPU | scripted / energy-based; tests and `CONFIG=config.fake.yaml ./run.sh` |
+
+**LLM roles.** `llm.reply` answers turns (and the tool phase-B answer); `llm.filler` makes backchannels, tool
+lead-ins and still-looking lines. `filler: reply` (the default) shares one instance. Any role can use any LLM
+plugin; two blocks with the same plugin need a `name:` each. Keys live in `.env` under the variable the block's
+`api_key_env` names. Example, a hosted `reply` with the local model kept for the latency-critical `filler`:
+
+```yaml
+llm:
+  reply: {plugin: openai, model: gpt-4.1-nano, api_key_env: OPENAI_API_KEY, max_tokens: 256}
+  filler: {plugin: qwen3.5-4b, kv_cache_gib: 3.0, max_num_seqs: 8, temperature: 0.7}
+```
+
+Measured on the box (`NOTES.md` → step 6): a hosted `reply` adds ~0.35 s to first audio (OpenAI first text
+~0.6 s against ~0.08 s local); a hosted `filler` makes backchannels ~0.55 s slower. With no local LLM at all
+(`filler: reply` on a hosted plugin) MOUTH never loads vLLM for the LLM, which frees ~12 GB of GPU memory. A hosted
+TTS was tried and removed: every text chunk paid a request's time to first audio (`NOTES.md` → step 8). A hosted
+request that fails (rate limit, timeout, network) ends the turn with a short spoken apology; a refusal with a short
+neutral line (both in `prompts.yaml` → `spoken`).
+
+**Adding a plugin:** a module under `app/plugins/<llm|tts|ears>/` with a class that implements the protocol in
+`app/plugins/base.py` (constructor `(conf, ctx)`; import heavy dependencies inside it, so the class stays light to
+import), one line in `REGISTRY` (`app/plugins/__init__.py`), and a run in `tests/test_plugin_contract.py`.
+Per-model prompt changes go in `prompts/<instance name>.yaml`, never in code.
 
 ## Models & licences
 
@@ -158,14 +196,21 @@ test audio file is needed; pass `--wav` to use your own.
 No audio or transcript is written to disk or logs. Logs carry only timings and event types (endpoint source,
 onset ms, barge, backchannel, tool name). Voice reference clips and their transcripts stay on the box.
 
+**Hosted plugins send text off the box**, and only because the config names one: a hosted `reply` gets every
+turn's transcript, the conversation history and tool results; a hosted `filler` gets the user's question (tool
+lead-ins) and the running ASR partial (backchannels). Audio and voice clips are never sent. The startup log names
+the remote roles; request and response bodies are never logged, and MOUTH refuses to start with the SDKs' debug
+logging on (`OPENAI_LOG` / `ANTHROPIC_LOG` = `debug`). Run hosted plugins only with the provider terms you accept
+for that data.
+
 ## Known limits (v1)
 
 - **Up to 4 conversations** per GPU (`server.max_sessions`); more visitors get a busy page. On a healthy 5090, 4
   conversations keep EARS real time (hop lag p50 ~90 / p90 ~200 ms); see `NOTES.md`.
 - `set_reminder` / `send_message` are **placeholders** — the model says they aren't connected yet.
 - The user waits **~1.0 s** from the end of their speech to the first reply audio at 1 conversation and
-  **~1.25 s** at 4 (`load_test_ears.py`), and ~700–850 ms of that is endpoint detection. Live threshold tuning should cut it (targets in
-  `NOTES.md` → Response gap). MOUTH's part is small: first audio ~265 ms after the endpoint for a plain or a tool
+  **~1.25 s** at 4 (`load_test_ears.py`), and ~700–850 ms of that is endpoint detection. Live threshold tuning
+  should cut it (targets in `NOTES.md` → Response gap). MOUTH's part is small: first audio ~265 ms after the endpoint for a plain or a tool
   turn (smoke test, cloned voice), ~410 ms p50 with 4 busy sessions.
 - Endpoint thresholds are not yet live-tuned (see Configure).
 - The `Dockerfile` has not yet been built and run end to end (the box used so far is itself a container, with no
