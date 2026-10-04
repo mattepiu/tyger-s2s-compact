@@ -16,7 +16,7 @@ from datasets import load_dataset
 from app.config import load_config
 from app import weights
 from app.ears_core.batched import EarsEngine, EarsService
-from app.server import HOP_N
+from app.ears_core.batched import HOP_N
 
 ap = argparse.ArgumentParser(); ap.add_argument("--seconds", type=float, nargs="+", default=[12.0, 30.0, 45.0])
 a = ap.parse_args()

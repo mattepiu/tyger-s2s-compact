@@ -92,6 +92,16 @@ first-audio p50 360 ms, GPU peak 27 666 MiB.
 vLLM-Omni (`app/resample.py`, bit-identical output): importing it from there loads torch + vLLM (~12 s), which a
 hosted-only MOUTH must not.
 
+**Step 4 (EARS plugin `nemotron-tyger-1.0`; `server.py` only on the EarsPlugin interface):**
+- `validate_ears_batched.py`: identical to the baseline (all events and transcripts match, same head diffs, tick
+  p50 / p90 48 / 67 and 71 / 166 ms). `validate_barge.py` (recall 0.94, first 3 words 0.83, barge 1.22 s) and
+  `validate_long_turn.py` (recall 1.00 / 0.97 / 0.94) unchanged.
+- `load_test_ears.py`: 1 conversation, gap p50 970 / 969 ms (baseline 970 / 966); 4 conversations 1292 / 1260 /
+  1230 ms (median 1260 vs 1265), detection p50 866 / 836 / 845 (baseline 838–885). Smoke PASS.
+- In one of the three 4-conversation runs the reply text varied once (2 distinct texts in 16): counting to ten is
+  forced, but not absolutely under 4-way batching at temperature 0.7. The test flags it; compare runs without
+  the warning, or take medians over 3.
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at

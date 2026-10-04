@@ -54,3 +54,10 @@ def build_tts(cfg: dict, eloop):
     if getattr(tts, "remote", False):
         logging.getLogger("plugins").warning("remote TTS %s: reply text leaves the box", block["plugin"])
     return tts if tts.out_sr == WIRE_SR else AtWireRate(tts)
+
+
+def build_ears(cfg: dict):
+    """The configured EARS plugin instance (EARS process; no engine loop)."""
+    from app.plugins.base import PluginContext
+    block = cfg["ears"]
+    return plugin_class("ears", block["plugin"])(block, PluginContext(None, cfg, block.get("name") or block["plugin"]))

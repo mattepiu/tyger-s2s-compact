@@ -16,7 +16,7 @@ def test_plugin_classes_import_light():
     """EARS imports the TTS class for list_voices, and a hosted-only config must not load vLLM: importing any
     registered class must not pull in vllm / vllm_omni (they load in constructors)."""
     code = ("import sys; from app.plugins import REGISTRY, plugin_class\n"
-            "[plugin_class(k, n) for k in ('llm', 'tts') for n in REGISTRY[k]]\n"   # + ears in step 4
+            "[plugin_class(k, n) for k in REGISTRY for n in REGISTRY[k]]\n"
             "bad = [m for m in ('vllm', 'vllm_omni') if m in sys.modules]\n"
             "print(','.join(bad))")
     out = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, check=True)

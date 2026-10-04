@@ -1,11 +1,12 @@
-"""EARS process + web app: nemotron L15 -> the exp-10 chain + endpoint head (arm C), serving the mic page +
-WebSocket on one port and wiring each conversation to the MOUTH over its own TCP connection. Adapted from
-codebase/exp-12/server/ears_server.py (copy, not import), trimmed to ARM C ONLY: the 4-way endpointer,
-SPEAK-lock watchdog, A/B blinding, and code->ckpt map are dropped.
+"""EARS process + web app: the turn-taking plugin (ears.plugin; nemotron-tyger-1.0 = nemotron L15 + the tyger 1.0
+heads, app/plugins/ears/nemotron.py) behind the EarsPlugin interface, serving the mic page + WebSocket on one port
+and wiring each conversation to the MOUTH over its own TCP connection. This file owns the conversation state
+machine (speaking / halting / pending / reset); the plugin owns the model. Adapted from
+codebase/exp-12/server/ears_server.py (copy, not import).
 
-Multi-session: up to server.max_sessions WebSocket conversations at once. The models are shared; each
-conversation is an EarsSession, and one GPU thread runs a single batched step per 320 ms hop for every
-session with a hop ready (app/ears_core/batched.py). Visitors beyond the cap get a "busy" page.
+Multi-session: up to server.max_sessions WebSocket conversations at once. Each conversation is a plugin session;
+nemotron-tyger-1.0 runs one batched GPU step per 320 ms hop for every session with a hop ready. Visitors beyond
+the cap get a "busy" page.
 
 PRIVACY: no audio or transcript is written to disk or logs. We log only timings + event types (endpoint
 source, onset ms, barge, bc).
@@ -20,21 +21,15 @@ from aiohttp import web, WSMsgType
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root on path
 from app.wire import async_send_msg, async_recv_msg
-from app.ears_core.batched import EarsEngine, EarsService
-from app.ears_core.live_ears import HOP_FRAMES
-from app.ears_core.encoder_stream import ENC_SR
-from app.ears_core.labeling import FRAME_S
 from app.config import load_config
-from app.plugins import plugin_class
-from app import weights
+from app.plugins import plugin_class, build_ears
 
 log = logging.getLogger("ears")
 HERE = Path(__file__).resolve().parent
 STATIC = HERE.parent / "static"
-HOP_N = int(HOP_FRAMES * FRAME_S * ENC_SR)     # samples per hop (320 ms @ 16 kHz = 5120)
 PLAYBACK_MARGIN_S = 0.25                        # slack for network + client scheduling on top of play_until
 
-SERVICE: EarsService | None = None
+EARS = None                                     # the EARS plugin (app/plugins/base.py EarsPlugin)
 CFG = None
 VOICES: list[str] = []      # voice names from the TTS plugin's list_voices (EARS never builds the TTS)
 DEFAULT_VOICE = None
@@ -46,8 +41,8 @@ def list_voices(cfg):
 
 
 def ds24to16(x):
-    """assistant audio (MOUTH 24 kHz) -> 16 kHz for the encoder / yield head 2nd ear."""
-    n = int(len(x) * ENC_SR / 24000)
+    """assistant audio (MOUTH 24 kHz) -> the EARS rate (16 kHz) for the encoder / yield head 2nd ear."""
+    n = int(len(x) * EARS.sr / 24000)
     if n <= 0:
         return np.zeros(0, np.float32)
     return np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x).astype(np.float32)
@@ -60,7 +55,7 @@ BUSY_HTML = ("<!doctype html><meta charset=utf-8><title>tyger - busy</title>"
 
 
 async def index(request):
-    if SERVICE.full():
+    if EARS.full():
         return web.Response(text=BUSY_HTML, content_type="text/html", status=503)
     return web.FileResponse(STATIC / "index.html")
 
@@ -76,17 +71,10 @@ async def voices_handler(request):
     return web.json_response({"voices": VOICES, "voice": DEFAULT_VOICE})
 
 
-def session_thresholds(cfg):
-    e = cfg["ears"]
-    return dict(ep_thr=float(e["ep_thr"]), ep_deb=int(e["ep_deb"]), barge_thr=float(e["barge_thr"]),
-                barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]),
-                fallback_frames=int(e.get("fallback_sil_frames", 15)))
-
-
 async def ws_handler(request):
     ws = web.WebSocketResponse(max_msg_size=0)
     await ws.prepare(request)
-    ears = SERVICE.open(**session_thresholds(CFG))       # this conversation's EARS state (+ its own thresholds)
+    ears = EARS.open()                    # this conversation's EARS state (+ its own thresholds, from config)
     if ears is None:
         await ws.send_json({"type": "busy"})
         await ws.close()
@@ -94,7 +82,7 @@ async def ws_handler(request):
     try:
         return await _conversation(ws, ears)
     finally:
-        SERVICE.close(ears)
+        EARS.close(ears)
 
 
 async def _conversation(ws, ears):
@@ -114,13 +102,14 @@ async def _conversation(ws, ears):
     except OSError as e:
         have_mouth = False; log.warning("no MOUTH: %s", e)
 
-    await ws.send_json({"type": "ready", "hop_ms": int(HOP_FRAMES * FRAME_S * 1e3), "sr": ENC_SR,
+    th = EARS.thresholds(ears)
+    await ws.send_json({"type": "ready", "hop_ms": int(EARS.hop_samples / EARS.sr * 1e3), "sr": EARS.sr,
                         "mouth": have_mouth,
                         "voices": VOICES, "voice": DEFAULT_VOICE,
-                        "thresholds": {"barge_thr": ears.barge_thr, "bc_thr": ears.bc_thr,
-                                       "ep_thr": ears.ep_thr, "ep_deb": ears.ep_deb,
-                                       "endpoint": "ep", "fallback_frames": ears.FALLBACK_SIL_FRAMES}})
-    log.info("conversation start (active=%d)", SERVICE.active())
+                        "thresholds": {"barge_thr": th["barge_thr"], "bc_thr": th["bc_thr"],
+                                       "ep_thr": th["ep_thr"], "ep_deb": th["ep_deb"],
+                                       "endpoint": "ep", "fallback_frames": th["fallback_frames"]}})
+    log.info("conversation start (active=%d)", EARS.active())
 
     async def send_turn(transcript):
         st["speaking"] = True; st["turn_t0"] = time.perf_counter(); st["await_onset"] = True
@@ -244,6 +233,8 @@ async def _conversation(ws, ears):
     # this conversation is behind) is visible to the batcher, which then waits for its catch-up hop.
     hop_ready = asyncio.Event()
 
+    HOP_N = EARS.hop_samples                      # samples per hop (320 ms @ 16 kHz = 5120)
+
     async def run_hops():
         nonlocal buf
         try:
@@ -258,7 +249,7 @@ async def _conversation(ws, ears):
                     n = min(HOP_N, len(ab)); ah[:n] = ab[:n]; st["agent_buf"] = ab[n:]; mode = "speaking"
                 else:
                     ah = np.zeros(HOP_N, np.float32); mode = "listen"
-                evs = await SERVICE.feed(ears, uh, ah, mode, more=len(buf) >= HOP_N)  # batched across sessions
+                evs = await EARS.feed(ears, uh, ah, mode, more=len(buf) >= HOP_N)  # batched across sessions
                 await handle_events(evs)
         except (ConnectionError, asyncio.CancelledError):
             pass
@@ -283,17 +274,11 @@ async def _conversation(ws, ears):
                         await async_send_msg(m_writer, b"V", {"voice": name})
                         await ws.send_json({"type": "voice", "voice": name})
                 elif data.startswith("set:"):
-                    try:
+                    try:                                       # per conversation (the sliders)
                         _, attr, val = data.split(":", 2)
-                        if attr in ("barge_thr", "bc_thr", "ep_thr"):      # per conversation (the sliders)
-                            setattr(ears, attr, float(val))
-                        elif attr in ("ep_deb", "bc_deb", "barge_deb"):
-                            setattr(ears, attr, int(val))
-                        elif attr == "fallback_frames":
-                            ears.FALLBACK_SIL_FRAMES = int(val)
-                        cur = getattr(ears, "FALLBACK_SIL_FRAMES") if attr == "fallback_frames" else getattr(ears, attr)
+                        cur = EARS.set_threshold(ears, attr, val)
                         await ws.send_json({"type": "threshold", "attr": attr, "value": cur})
-                    except (ValueError, AttributeError):
+                    except (ValueError, KeyError):
                         pass
     finally:
         hops.cancel()
@@ -306,19 +291,8 @@ async def _conversation(ws, ears):
                 m_writer.close()
             except Exception:
                 pass
-        log.info("conversation end (active=%d)", SERVICE.active() - 1)
+        log.info("conversation end (active=%d)", EARS.active() - 1)
     return ws
-
-
-def build_service(cfg):
-    heads = weights.ensure_heads(cfg["ears"]["heads_repo"], cfg["ears"]["heads_file"])
-    e = cfg["ears"]
-    n = int(cfg["server"].get("max_sessions", 4))
-    log.info("loading EARS (arm C) for %d sessions, ep_thr=%s ep_deb=%s", n, e["ep_thr"], e["ep_deb"])
-    engine = EarsEngine(heads, slots=n, ring_len=int(e.get("ring_frames", 2048)))
-    return EarsService(engine, gather_s=float(e.get("gather_ms", 15)) / 1e3,
-                       expect_s=float(e.get("expect_ms", 60)) / 1e3,
-                       stats_every_s=float(e.get("stats_s", 60)))
 
 
 def main():
@@ -327,13 +301,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
     args = ap.parse_args()
-    global SERVICE, CFG, VOICES, DEFAULT_VOICE
+    global EARS, CFG, VOICES, DEFAULT_VOICE
     CFG = load_config(args.config)
-    import torch
-    torch.set_num_threads(int(CFG["ears"].get("cpu_threads", 4)))   # default 48 threads mostly spin-wait
     VOICES, DEFAULT_VOICE = list_voices(CFG)
-    SERVICE = build_service(CFG)
-    log.info("=== EARS ready (up to %d conversations) ===", SERVICE.engine.slots)
+    EARS = build_ears(CFG)
+    log.info("=== EARS ready (up to %d conversations) ===", int(CFG["server"].get("max_sessions", 4)))
     app = web.Application()
     app.add_routes([web.get("/", index), web.get("/voices", voices_handler), web.get("/ws", ws_handler)])
     host, port = CFG["server"]["host"], int(CFG["server"]["port"])

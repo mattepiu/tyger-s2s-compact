@@ -65,6 +65,10 @@ class TTSPlugin(Protocol):
 
 
 class EarsPlugin(Protocol):
+    """Turn-taking for up to N conversations. A session (from open) has reset(): start a new turn before its next
+    hop. feed() takes one hop of user mic audio and of the agent's own audio (the 2nd ear; zeros when it isn't
+    speaking) with mode "listen" | "speaking", and returns events: {"kind": "FRAME" | "ENDPOINT" | "BARGE" |
+    "BACKCHANNEL", ...} (ENDPOINT carries "transcript", "turn_s", "by"; BACKCHANNEL "partial")."""
     hop_samples: int                       # user/agent samples per feed() call
     sr: int                                # their sample rate
 
@@ -73,3 +77,5 @@ class EarsPlugin(Protocol):
     async def feed(self, session, user_hop, agent_hop, mode, more=False) -> list[dict]: ...
     def full(self) -> bool: ...
     def active(self) -> int: ...
+    def thresholds(self, session) -> dict: ...                         # name -> value, this conversation's
+    def set_threshold(self, session, name, value) -> Any: ...          # KeyError / ValueError if not settable

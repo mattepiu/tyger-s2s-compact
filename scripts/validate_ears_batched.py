@@ -14,7 +14,7 @@ from app.config import load_config
 from app import weights
 from app.ears_core.endpoint_ears import EndpointEars
 from app.ears_core.batched import EarsEngine, EarsSession, SEG_S
-from app.server import HOP_N
+from app.ears_core.batched import HOP_N
 
 ap = argparse.ArgumentParser(); ap.add_argument("--no-merge", action="store_true"); ap.add_argument("--no-graph", action="store_true")
 a = ap.parse_args()

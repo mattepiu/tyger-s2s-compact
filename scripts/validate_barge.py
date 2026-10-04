@@ -17,7 +17,7 @@ from datasets import load_dataset
 from app.config import load_config
 from app import weights
 from app.ears_core.batched import EarsEngine, EarsSession
-from app.server import HOP_N
+from app.ears_core.batched import HOP_N
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--double-reset", action="store_true", help="emulate the old finish_turn reset after the barge")

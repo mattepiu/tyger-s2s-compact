@@ -35,6 +35,7 @@ SEG_S = 15.0                            # a turn longer than this is transcribed
 SEG_SEARCH_S = 4.0                      #   cut at the quietest 80 ms frame of the block's last 4 s
 BARGE_PRE_S = 2.0                     # user audio kept while the agent speaks: seeds the turn a barge-in starts (I-02)
 L15 = 15                                                        # encoder layer the heads read
+HOP_N = int(HOP_FRAMES * FRAME_S * ENC_SR)                      # samples per hop (320 ms @ 16 kHz = 5120)
 
 
 def frame_energy(wav):
