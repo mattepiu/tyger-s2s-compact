@@ -17,7 +17,8 @@ Architecture:
   * Backchannels are always contextual LLM acks off the ASR partial: a reaction to the content, or a neutral
     hum when the partial is too short (< mouth.bc_min_words) to react to. No canned/pre-rendered acks.
 EARS<->MOUTH wire: T/C/B/V in; X/A/D out, plus K = backchannel audio (kept apart from reply audio A, since the
-two can now be generated at the same time). Audio is 24 kHz float32. No audio or transcript is written to disk
+two can now be generated at the same time). S in = speak this text, TTS only (no LLM, no history): EARS never
+sends it; test tools use it for a fixed utterance (load_test_ears.py). Audio is 24 kHz float32. No audio or transcript is written to disk
 or logs; only timings and event types.
 
 Run: HF_HOME=/workspace/.hf_home .venv/bin/python -m app.mouth
@@ -421,6 +422,12 @@ class Session:
             self._remember(transcript, full2.strip() or lead, kept)
         yield ("done", reply)
 
+    # ---- say (S): TTS of a given text only; no LLM, not remembered ----
+    def stream_say(self, text, stop_flag):
+        self._said = []; self._audio_s = 0.0; self._play_end = time.perf_counter()
+        yield from self._say(text, self.voice, stop_flag)
+        yield ("done", text)
+
     # ---- backchannel: always a contextual LLM ack off the ASR partial ----
     def stream_bc(self, partial, stop_flag):
         """The LLM picks the ack: a reaction to the content, or a neutral hum when the partial is too short
@@ -455,8 +462,9 @@ class Session:
             self.turn_stop.clear(); self.barge_played_s = None
             stop = lambda: self.turn_stop.is_set() or self.closed.is_set()   # noqa: E731
             t0 = time.perf_counter(); t_txt = t_aud = None
+            gen = self.stream_say(turn["say"], stop) if "say" in turn else self.stream_turn(turn["transcript"], stop)
             try:
-                for kind, val in self.stream_turn(turn["transcript"], stop):
+                for kind, val in gen:
                     if kind == "text":
                         t_txt = t_txt or time.perf_counter() - t0
                         self.send(b"X", {"text": val})
@@ -509,6 +517,8 @@ class Session:
                 if kind == b"T":
                     self.turn_seq += 1                      # stops a backchannel still being made
                     self.turn_q.put(json.loads(payload))
+                elif kind == b"S":                          # test tools only: speak a fixed text
+                    self.turn_q.put({"say": json.loads(payload).get("text", "")})
                 elif kind == b"C":
                     self.bc_q.put((self.turn_seq, json.loads(payload)))
                 elif kind == b"V":

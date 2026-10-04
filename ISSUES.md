@@ -23,6 +23,7 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | I-10 | EARS | low | likely | `play_until` is a server-side guess at client playback |
 | I-11 | security | low (demo) / high (public) | confirmed in code | No auth, no message-size or buffer limits on :7860 |
 | I-12 | MOUTH | high | **fixed** | Tool calls never enter history, so later turns stop calling tools and invent answers |
+| I-13 | metrics | medium | **fixed** | `load_test_ears.py` runs don't compare: LLM-made speech and replies, random hop phase |
 | L-01 | perf | lever | **partly done** | Encoder re-encodes the full 8 s window, twice, every hop, in fp32 |
 | L-02 | latency | lever | — | Decisions quantised to 320 ms hops |
 | L-03 | latency | lever | **done** | Per-request voice encode (precomputed voice profile) |
@@ -264,6 +265,22 @@ tool turn keeps the assistant `tool_calls` message plus a compact result (no raw
 **Status: fixed (2026-10-03).** `load_test_ears.py` reports both. Healthy box: end of speech → endpoint p50 779 ms
 (1 conv) / 773 ms (4 conv), end of speech → first audio p50 1013 / 1022 ms, against endpoint → audio 229 / 257 ms.
 Table in NOTES.md → "Response gap (I-04)". The test also injects one sentence now (the whole reply hit inner pauses).
+
+### I-13 — `load_test_ears.py` runs don't compare (medium, found on the box)
+**What happened:**
+- The utterance was the LLM's reply to a "Say: …" prompt, and the agent's reply to it was free text, so both
+  lengths changed run to run (hop lag p90 190–260 ms between identical runs).
+- Where the speech ended inside a 320 ms hop depended on wall-clock turn timing, so detection moved by up to a
+  hop between runs.
+- It is the yardstick for the plugin refactor's parity checks (PLUGINS.md), so it has to be repeatable.
+
+**Fix:** a fixed sentence spoken by MOUTH's TTS through a new TTS-only wire message `S`; a request whose reply the
+LLM can't vary (count to ten), checked by comparing reply-text hashes; lead-in silence so each utterance ends at a
+fixed hop phase (cycling ¼ hop steps over turns).
+
+**Status: fixed (2026-10-04).** 4 conversations, 3 runs: end of speech → first audio p50 1250–1268 ms (was
+1208–1356 with the fixed speech alone); 1 conversation, 2 runs within 4 ms. NOTES.md → "`load_test_ears.py` made
+deterministic (I-13)".
 
 ---
 

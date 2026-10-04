@@ -120,6 +120,7 @@ the voice picker. Browser DSP (echo cancellation, noise suppression, auto gain) 
                                                          #   --tools: tool turns (+ --fresh: empty history each)
 .venv/bin/python scripts/load_test_ears.py --sessions 4  # needs run.sh up: N real-time WebSocket conversations;
                                                          #   hop lag, end of speech -> endpoint -> first audio
+                                                         #   (fixed utterance and reply: runs compare)
 .venv/bin/python scripts/validate_ears_batched.py        # GPU free: batched EARS == single-session reference
 .venv/bin/python scripts/validate_rnnt.py                # GPU free: graphed RNN-T == nemotron generate()
 .venv/bin/python scripts/validate_barge.py               # GPU free: a barge-in keeps the start of the utterance
@@ -150,8 +151,8 @@ onset ms, barge, backchannel, tool name). Voice reference clips and their transc
 - **Up to 4 conversations** per GPU (`server.max_sessions`); more visitors get a busy page. On a healthy 5090, 4
   conversations keep EARS real time (hop lag p50 ~90 / p90 ~200 ms); see `NOTES.md`.
 - `set_reminder` / `send_message` are **placeholders** — the model says they aren't connected yet.
-- The user waits **~1.0 s** from the end of their speech to the first reply audio (`load_test_ears.py`, 1–4
-  conversations), and ~775 ms of that is endpoint detection. Live threshold tuning should cut it (targets in
+- The user waits **~1.0 s** from the end of their speech to the first reply audio at 1 conversation and
+  **~1.25 s** at 4 (`load_test_ears.py`), and ~700–850 ms of that is endpoint detection. Live threshold tuning should cut it (targets in
   `NOTES.md` → Response gap). MOUTH's part is small: first audio ~265 ms after the endpoint for a plain or a tool
   turn (smoke test, cloned voice), ~410 ms p50 with 4 busy sessions.
 - Endpoint thresholds are not yet live-tuned (see Configure).

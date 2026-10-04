@@ -261,6 +261,18 @@ def test_backchannel_alongside_turn_still_runs():
     peer.close()
 
 
+# ---- S: TTS only, for test tools (load_test_ears.py's fixed utterance) --------------------------------------
+def test_say_is_tts_only():
+    s, peer, m = live_session(FakeLLM(), FakeTTS(n=3))
+    send_msg(peer, b"S", {"text": "Could you count to ten for me?"})
+    got = read_until(peer, lambda k, p: k == b"D")
+    assert sum(k == b"A" for k, _, _ in got) == 3
+    assert got[-1][1]["text"] == "Could you count to ten for me?" and not got[-1][1]["barged"]
+    assert m.llm.calls == [] and m.tts.requests == ["Could you count to ten for me?"]
+    assert s.history == []
+    peer.close()
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in list(globals().items()):
