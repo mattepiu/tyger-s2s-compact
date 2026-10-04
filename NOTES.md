@@ -322,6 +322,25 @@ request worded like the English task shot ("the three best budget laptops for pr
 still working on that" without a call: the 4B took it as a follow-up to the example task. A request on a topic
 the shots don't cover worked. Step 14's eval will measure that kind of routing.
 
+**Live tasks with OpenAI gpt-5.4-mini (user's OK; synthetic spoken requests, EN + RU):**
+
+| | EN: e-bikes under $2000 by range | RU: reliable e-scooters under 30 000 ₽ |
+|---|---|---|
+| request → `start_task` → acknowledgement | yes ("I'm starting that research now…") | yes, in Russian |
+| task: web searches, time | 4, 23.2 s | 2, 16.2 s (then 2, 15.5 s) |
+| floor granted after silence | 15.7 s (already quiet) | 6.1 s (5.8 s) |
+| announcement first audio after the grant | 0.1 s | 0.1 s |
+| announcement | named the Lectric XPedition 2.0 + alternatives; ~15 s of audio | 1st run: no product named, "I'll tell you briefly", digits; 2nd run after the prompt fix: three models named + a recommendation, numbers as words; ~25 s |
+
+The task prompt now asks for the actual findings (names, numbers, the recommendation), not what was done, with
+numbers as words. Announcements run long (15–25 s); a shorter summary is a prompt change if wanted.
+
+**Tasks on by default** (user: after the live check). Cost on ordinary turns, 4 sessions: plain first audio
+p50 533 / 516 / 526 (468 with smart only, 438 without smart), tool turns 508 / 485 (465 / 380): the task prompt +
+shots add prefill. Smoke PASS, GPU peak 30.4 GB. With smart on, `load_test.py`'s plain prompts escalate now and
+then ("explain what a black hole is": 7–10 of 72 turns), i.e. the load test makes a few OpenAI calls; for pure
+local parity runs use a config without `llm.smart`.
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at

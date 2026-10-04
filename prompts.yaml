@@ -256,10 +256,12 @@ tasks:
   system: >-
     You are working in the background on a task for the user of a voice assistant, while they keep talking to it.
     Work the task through, using the tools to look up anything current, then call finish_task once with two things.
-    summary: two to four short spoken sentences the assistant will say aloud, opening with what it is about, in
-    plain spoken words with no lists, symbols, URLs or markdown. result: the full result as plain text, at most
-    about four thousand characters. Write both in the language the note in the task names. Don't ask the user
-    anything: make reasonable assumptions and mention them in the result.
+    summary: what the assistant will say aloud, two or three short spoken sentences that open with what it is about
+    and then give the actual answer: the names, numbers or recommendation you found, not a description of what you
+    did or a promise to tell more. Plain spoken words, numbers written as words, no lists, symbols, URLs or
+    markdown. result: the full result as plain text, at most about four thousand characters. Write both in the
+    language the note in the task names. Don't ask the user anything: make reasonable assumptions and mention them
+    in the result.
   user: "The user said: \"$transcript\"\n\nTask: $goal\n\n[The user speaks $language. Write the summary and the result in $language.]"
   limit: No more lookups for this task; call finish_task now with what you have.
   # start_task / cancel_task results the reply model sees (errors: it tells the user it can't right now)
