@@ -27,7 +27,7 @@ a = ap.parse_args()
 ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
 words = lambda t: re.findall(r"[a-z']+", t.lower())
 cfg = load_config(); e = cfg["ears"]
-ckpt = weights.ensure_heads(cfg["models"]["heads_repo"], cfg["models"]["heads_file"])
+ckpt = weights.ensure_heads(cfg["ears"]["heads_repo"], cfg["ears"]["heads_file"])
 thr = dict(ep_thr=float(e["ep_thr"]), ep_deb=int(e["ep_deb"]), barge_thr=float(e["barge_thr"]),
            barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]),
            fallback_frames=int(e.get("fallback_sil_frames", 15)))

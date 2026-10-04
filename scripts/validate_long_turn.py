@@ -23,7 +23,7 @@ a = ap.parse_args()
 ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
 words = lambda t: re.findall(r"[a-z']+", t.lower())
 cfg = load_config(); e = cfg["ears"]
-ckpt = weights.ensure_heads(cfg["models"]["heads_repo"], cfg["models"]["heads_file"])
+ckpt = weights.ensure_heads(cfg["ears"]["heads_repo"], cfg["ears"]["heads_file"])
 svc = EarsService(EarsEngine(ckpt, slots=4), gather_s=0.0, expect_s=0.0, stats_every_s=1e9)
 
 

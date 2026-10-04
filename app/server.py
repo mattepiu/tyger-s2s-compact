@@ -305,7 +305,7 @@ async def _conversation(ws, ears):
 
 
 def build_service(cfg):
-    heads = weights.ensure_heads(cfg["models"]["heads_repo"], cfg["models"]["heads_file"])
+    heads = weights.ensure_heads(cfg["ears"]["heads_repo"], cfg["ears"]["heads_file"])
     e = cfg["ears"]
     n = int(cfg["server"].get("max_sessions", 4))
     log.info("loading EARS (arm C) for %d sessions, ep_thr=%s ep_deb=%s", n, e["ep_thr"], e["ep_deb"])

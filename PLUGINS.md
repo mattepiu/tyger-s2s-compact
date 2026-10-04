@@ -10,7 +10,7 @@
 |---|---|---|
 | LLM | `qwen3-4b-2507`, `qwen3.5-4b` | `openai` (any OpenAI-compatible chat endpoint), `anthropic` (the Claude Messages API, or a compatible endpoint via `base_url`) |
 | TTS | `voxcpm2` | `openai` (any OpenAI-compatible `/v1/audio/speech` endpoint) |
-| EARS | `nemotron-arm-c` (today's ASR + endpoint head) | — |
+| EARS | `nemotron-tyger-1.0` (today's ASR + endpoint head) | — |
 | Testing | `fake` for each kind: the fakes in `tests/fakes.py`, promoted | — |
 
 **Then, built on top of the plugins:**
@@ -127,7 +127,7 @@ REGISTRY = {
            "fake":          "app.plugins.llm.fake:FakeLLM"},
   "tts":  {"voxcpm2": "app.plugins.tts.voxcpm2:VoxCPM2", "openai": "app.plugins.tts.openai_compat:OpenAITTS",
            "fake": "app.plugins.tts.fake:FakeTTS"},
-  "ears": {"nemotron-arm-c": "app.plugins.ears.nemotron:NemotronArmC", "fake": "app.plugins.ears.fake:EnergyEars"},
+  "ears": {"nemotron-tyger-1.0": "app.plugins.ears.nemotron:NemotronTyger", "fake": "app.plugins.ears.fake:EnergyEars"},
 }
 ```
 
@@ -136,14 +136,14 @@ REGISTRY = {
 | Role | Typical plugin | Does |
 |---|---|---|
 | `reply` | local | ordinary turns and the tool phase-B answer; decides when to escalate |
-| `fast` | local; defaults to the `reply` instance | backchannels, the tool filler, still-looking lines: very low latency |
+| `filler` | local; defaults to the `reply` instance | backchannels, the tool lead-in, still-looking lines: very low latency |
 | `smart` | remote, optional | escalated turns (`ask_expert`) and background tasks only; see below |
 
 - **Without a `smart` block,** escalation and background tasks are off and their tools are never offered.
-- **Any role can use any plugin;** "typical" is only the default suggestion. In particular, `reply` (and `fast`) can
+- **Any role can use any plugin;** "typical" is only the default suggestion. In particular, `reply` (and `filler`) can
   be a cheap, fast remote model behind an OpenAI-compatible endpoint, e.g. Groq or Cerebras: no flag, just config.
   See "Remote `reply`" below.
-- **Running `reply` remote and `fast` local** also works: the same code with the opposite split, so the two can be
+- **Running `reply` remote and `filler` local** also works: the same code with the opposite split, so the two can be
   compared.
 - **Each role block is its own plugin instance.** Two blocks may use the same plugin with different endpoints, e.g.
   `reply` on Groq and `smart` on OpenAI, both `plugin: openai`. Give a block an optional `name:` (default: the
@@ -157,13 +157,13 @@ llm:
     max_model_len: 8192
     max_num_seqs: 8
     gpu_memory_utilization: 0.45
-  fast: reply                      # same instance (default); or a full plugin block
+  filler: reply                    # same instance (default); or a full plugin block
 tts:
   plugin: voxcpm2
   deploy_config: deploy/voxcpm2.yaml
   ref_max_s: 10.0
 ears:
-  plugin: nemotron-arm-c
+  plugin: nemotron-tyger-1.0
   # today's ears: thresholds etc. stay here unchanged
 ```
 
@@ -171,7 +171,7 @@ Local-first with a smart model (`config.smart.example.yaml`, the target setup):
 ```yaml
 llm:
   reply: {plugin: qwen3.5-4b, kv_cache_gib: 3.0, max_num_seqs: 8}
-  fast: reply
+  filler: reply
   smart: {plugin: anthropic, model: claude-opus-5-5, effort: low, max_tokens: 2048, api_key_env: ANTHROPIC_API_KEY}
 mouth:
   escalation: {enabled: true, context_turns: 4, max_steps: 3}
@@ -185,7 +185,7 @@ current ones from the provider's model list, and pick a model the provider docum
 llm:
   reply: {plugin: openai, name: groq, base_url: https://api.groq.com/openai/v1, model: <groq model id>,
           api_key_env: GROQ_API_KEY, max_tokens: 512, max_concurrency: 8}
-  fast:  {plugin: qwen3.5-4b, kv_cache_gib: 1.0, max_num_seqs: 8}   # or: fast: reply (then no local LLM at all)
+  filler: {plugin: qwen3.5-4b, kv_cache_gib: 1.0, max_num_seqs: 8}   # or: filler: reply (then no local LLM at all)
   smart: {plugin: anthropic, model: claude-opus-5-5, effort: low, max_tokens: 2048, api_key_env: ANTHROPIC_API_KEY}
 ```
 Cerebras is the same block with `base_url: https://api.cerebras.ai/v1` and `api_key_env: CEREBRAS_API_KEY`. Check
@@ -195,7 +195,7 @@ Hosted-reply example (`config.hosted.example.yaml`):
 ```yaml
 llm:
   reply: {plugin: anthropic, model: claude-opus-5-5, effort: low, max_tokens: 1024, api_key_env: ANTHROPIC_API_KEY}
-  fast:  {plugin: qwen3.5-4b, kv_cache_gib: 1.0, max_num_seqs: 8}
+  filler: {plugin: qwen3.5-4b, kv_cache_gib: 1.0, max_num_seqs: 8}
 tts:
   plugin: openai
   base_url: https://api.openai.com/v1
@@ -255,7 +255,7 @@ system:
     You are a helpful voice assistant ...
   voice_tools: |           # was TTS_TOOLS_SYS (no longer built by string concatenation in code)
     ...
-filler:
+tool_leadin:
   system: |                # was LEADIN_SYS
     ...
   shots:                   # was LEADIN_SHOTS: list of [user, assistant] pairs
@@ -353,7 +353,7 @@ Today's `VoxCPM2TTS`, unchanged in behaviour:
 
 `caps.cloning = True`. `list_voices` scans `voices/` (with optional transcripts), as `discover_voices` does.
 
-### `nemotron-arm-c`
+### `nemotron-tyger-1.0`
 Wraps `EarsEngine` + `EarsService` (`app/ears_core/batched.py`) behind `EarsPlugin`. `ears_core/` itself doesn't
 change. `server.py` then depends only on the interface; its state machine (speaking / halting / pending / reset)
 stays in `server.py`.
@@ -383,7 +383,7 @@ stays in `server.py`.
   - Provider switches that hide or limit reasoning go through `extra_body`, set per block in config. Don't
     hard-code them.
 - **Rate limits.** A voice turn can make several requests: the reply, a filler, still-looking lines, plus
-  backchannels if `fast` is also this plugin.
+  backchannels if `filler` is also this plugin.
   - A `max_concurrency` semaphore per instance keeps under the provider's limits.
   - A 429 fails fast, with the apology line; don't wait out `retry-after` mid-turn.
   - Log 429 counts in the stats line.
@@ -397,7 +397,7 @@ stays in `server.py`.
   routes well, not just the fastest.
 - **Every transcript now leaves the box,** not only escalated turns. The startup log must say which roles are
   remote, and the README's privacy note covers this case.
-- **GPU memory:** if no role uses a local LLM plugin (`fast: reply` with a remote `reply`), MOUTH never loads vLLM,
+- **GPU memory:** if no role uses a local LLM plugin (`filler: reply` with a remote `reply`), MOUTH never loads vLLM,
   which frees ~10–12 GB. Record what the box can do with that (e.g. more conversations, or a larger TTS budget);
   don't assume it.
 - **Latency:** measure the same numbers as for the local plugins, and compare against Qwen3.5-4B on the box:
@@ -406,7 +406,7 @@ stays in `server.py`.
   - end of speech → first audio;
   - all at 1 and 4 sessions.
 
-  Network round-trips hit backchannels and fillers hardest, so test `fast` both local and remote.
+  Network round-trips hit backchannels and fillers hardest, so test `filler` both local and remote.
 
 ### `anthropic` LLM (Claude Messages API)
 - **Client:** the official `anthropic` SDK's `AsyncAnthropic(api_key=..., base_url=...)`, using
@@ -421,7 +421,7 @@ stays in `server.py`.
   - Thinking blocks stream with empty text by default (`display: "omitted"`). The plugin ignores them for
     speech; they show up only as time before the first text.
 - **`max_tokens` covers thinking plus text.** Size it per role from config (e.g. 1024 for `reply`, 256 for
-  `fast`), not from MOUTH's `max_new` of 192 or 12. Keep replies short through the prompt.
+  `filler`), not from MOUTH's `max_new` of 192 or 12. Keep replies short through the prompt.
 - **Sampling:** don't send `temperature`, `top_p` or `top_k`; Opus 5.5 rejects them with a 400. Send them only
   if config sets them and the model accepts them.
 - **Conversion:**
@@ -492,7 +492,7 @@ stays in `server.py`.
 
 ## Smart escalation and background tasks
 
-Backchannels, fillers, and most conversational turns don't need a large model. The local model (`reply`, `fast`)
+Backchannels, fillers, and most conversational turns don't need a large model. The local model (`reply`, `filler`)
 handles them on the box, and the remote `smart` model is called only for turns that need it. That gives lower
 latency and cost on most turns, and only escalated content leaves the box.
 
@@ -530,7 +530,7 @@ code.
   ms), rather than at the bare tag. Both formats name the tool first: Hermes `{"name": "...`, and XML
   `<function=...>`.
 - So the filler can match the tool: "let me think about that" for `ask_expert`, "let me check" for lookups.
-- `fast` makes the filler, as today.
+- The `filler` role makes the lead-in, as today.
 
 **Running it:**
 1. MOUTH builds the smart model's request:
@@ -677,11 +677,11 @@ this possible, because EARS already knows when the user is silent.
 | 0 | Record the parity baseline on `voxcpm2` at the starting commit | numbers in NOTES.md |
 | 1 | `base.py`, registry, the new config shape and loader (rejects the old shape) | unit tests |
 | 1b | `prompts.yaml` + `app/prompts.py` loader; all prompts, f-string templates and tool descriptions move out of code | byte-identical test against the old constants and `TOOLS`; then delete the constants |
-| 2 | LLM: `vllm_base` plus the two Qwen plugins; MOUTH uses `reply` / `fast`; plugin-issued tool-call IDs | parity: smoke test, `load_test.py` (3 runs × `--turns 6`), `--tools --fresh` |
+| 2 | LLM: `vllm_base` plus the two Qwen plugins; MOUTH uses `reply` / `filler`; plugin-issued tool-call IDs | parity: smoke test, `load_test.py` (3 runs × `--turns 6`), `--tools --fresh` |
 | 3 | TTS: `voxcpm2` plugin; voice list through `list_voices`; resample wrapper | parity: smoke test, `load_test.py`, cloned-voice first audio |
-| 4 | EARS: `nemotron-arm-c` plugin; `server.py` on the interface | parity: `validate_ears_batched.py`, `load_test_ears.py` 1 and 4 |
+| 4 | EARS: `nemotron-tyger-1.0` plugin; `server.py` on the interface | parity: `validate_ears_batched.py`, `load_test_ears.py` 1 and 4 |
 | 5 | Fake plugins, `config.fake.yaml`, contract and conversion tests | the full stack runs with the fakes on CPU |
-| 6 | `openai` LLM | contract tests; with a key, against a fast provider (Groq or Cerebras, whichever key the user gives) as `reply`: time to first text, first audio, tool turn, barge abort, 1 and 4 sessions, `fast` local vs remote |
+| 6 | `openai` LLM | contract tests; with a key, against a fast provider (Groq or Cerebras, whichever key the user gives) as `reply`: time to first text, first audio, tool turn, barge abort, 1 and 4 sessions, `filler` local vs remote |
 | 7 | `anthropic` LLM | contract tests; with a key: same as 6, plus `cache_read_input_tokens`, history check (enforced account) |
 | 8 | `openai` TTS | contract tests; with a key: first audio for each chunk, abort, 4 sessions |
 | 9 | README "Plugins" section: configs, how to add a plugin, the privacy note for hosted plugins | — |

@@ -44,7 +44,7 @@ I-11 before exposing it beyond an SSH tunnel).
 Built on one **NVIDIA RTX 5090** (32 GB, Blackwell sm_120), CUDA-13 driver (≥ 590) for the cu130 torch wheels.
 
 GPU memory in use ≈ **28.5 GB of 32 GB** with everything loaded, warm, and under a 4-conversation load: VoxCPM2
-~9.8 GB (2 GiB pinned KV, `deploy/voxcpm2.yaml`), Qwen3-4B ~11.8 GB (3 GiB pinned KV, `llm.kv_cache_gib`),
+~9.8 GB (2 GiB pinned KV, `deploy/voxcpm2.yaml`), Qwen3-4B ~11.8 GB (3 GiB pinned KV, `llm.reply.kv_cache_gib`),
 EARS ~7 GB (measured with Qwen3-4B-Instruct-2507; Qwen3.5-4B adds ~0.5 GB at peak). Both engines pin their KV budgets, so the total is predictable.
 
 ## Setup

@@ -1,6 +1,7 @@
-# tyger v1 config. Model ids / HF paths, thresholds, voices, flags. Secrets are NOT here — they live in
+# tyger v1 config. Plugins, model options, thresholds, voices, flags. Secrets are NOT here — they live in
 # .env (TAVILY_API_KEY, HF_TOKEN). Thresholds are frozen into this file at milestone V2 (live tuning).
-# Relative paths are relative to the repo root.
+# Relative paths are relative to the repo root. The LLM, TTS and EARS models are plugins (app/plugins,
+# PLUGINS.md): each block names its plugin, and the rest of the block is that plugin's options.
 
 server:
   host: 0.0.0.0
@@ -9,12 +10,11 @@ server:
   mouth_port: 8770        # internal EARS<->MOUTH TCP (one connection per conversation)
   max_sessions: 4         # concurrent conversations; more visitors get the "busy" page
 
-models:                    # EARS models (the MOUTH's models are under llm: / tts:)
+ears:                      # turn-taking: nemotron ASR + the tyger 1.0 heads (exp-12 arm C endpoint rule +
+  plugin: nemotron-tyger-1.0   # barge/backchannel; live defaults, retuned live at V2)
   nemotron: nvidia/nemotron-3.5-asr-streaming-0.6b
   heads_repo: nineninesix/tyger-exp10-heads
   heads_file: exp12/ep_s0/ep_best.pt    # exp-12 arm C seed 0 (LoRA + state/hazard/yield/bc/ep heads)
-
-ears:                      # arm C endpoint rule + barge/backchannel (exp-12 live defaults; retuned live at V2)
   ep_thr: 0.9146           # p_end threshold (sel_dev tau) -- NOT yet retuned live (exp-11 found offline ~2x high)
   ep_deb: 2                # debounce frames (80 ms each)
   barge_thr: 0.5
@@ -28,17 +28,18 @@ ears:                      # arm C endpoint rule + barge/backchannel (exp-12 liv
   stats_s: 60              # log tick timing + encoder/head/ASR busy % this often
   cpu_threads: 4           # torch CPU threads (the default 48 mostly spin-wait: 14x the CPU, slower)
 
-llm:                       # responder, in-process vLLM AsyncLLM inside the MOUTH (app/llm.py)
-  model: Qwen/Qwen3.5-4B   # hybrid (24 linear + 8 full attention layers); was Qwen/Qwen3-4B-Instruct-2507: to roll
-                           # back, set that and drop enable_thinking / language_model_only
-  enable_thinking: false   # Qwen3.5 thinks by default (its prompt opens <think>): far too slow for a voice reply
-  language_model_only: true  # the checkpoint is multimodal: skip the vision tower (GPU memory)
-  gpu_memory_utilization: 0.45   # vLLM start-up free-memory check only; actual KV is pinned below
-  kv_cache_gib: 3.0              # fixed KV budget (~21k tokens: 4 sessions x turn + backchannel)
-  max_model_len: 8192
-  max_num_seqs: 8                # 4 sessions x (turn + backchannel) batched together
+llm:                       # MOUTH's LLM roles; each block is one plugin instance
+  reply:                   # ordinary turns and the tool phase-B answer
+    plugin: qwen3.5-4b     # in-process vLLM, text only, thinking off; previous responder: qwen3-4b-2507
+    gpu_memory_utilization: 0.45   # vLLM start-up free-memory check only; actual KV is pinned below
+    kv_cache_gib: 3.0              # fixed KV budget (Qwen3.5: ~69k tokens; 4 sessions x turn + backchannel)
+    max_model_len: 8192
+    max_num_seqs: 8                # 4 sessions x (turn + backchannel) batched together
+    temperature: 0.7
+  filler: reply            # backchannels, tool lead-ins, still-looking lines: the same instance
 
-tts:                       # VoxCPM2, in-process vLLM-Omni AsyncOmni inside the MOUTH (app/tts_voxcpm.py)
+tts:                       # VoxCPM2, in-process vLLM-Omni AsyncOmni inside the MOUTH
+  plugin: voxcpm2
   model: openbmb/VoxCPM2
   deploy_config: deploy/voxcpm2.yaml   # sized for up to 4 sessions (repo-relative)
   out_sr: 24000            # VoxCPM2 emits 48 kHz -> resampled to the 24 kHz wire / client / EARS 2nd ear
@@ -52,7 +53,6 @@ voices:
   default: ref             # active voice name (stem of the chosen wav); falls back to the first clip
 
 mouth:
-  temperature: 0.7                   # sampling temperature for the responder
   max_gen: 192
   history_turns: 8                   # ~last 8 turns kept in the responder
   bc_max_new: 12                     # token budget for a backchannel (kept short for low latency)

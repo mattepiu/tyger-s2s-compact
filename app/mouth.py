@@ -115,27 +115,37 @@ def _compact_result(r, cap=600):
     return txt if len(txt) <= cap else txt[:cap] + "…"
 
 
+# Until the LLM plugins land (PLUGINS.md step 2): each local plugin's model and engine/template switches.
+_LLM_PLUGIN_MODELS = {"qwen3.5-4b": ("Qwen/Qwen3.5-4B", {"enable_thinking": False, "language_model_only": True}),
+                      "qwen3-4b-2507": ("Qwen/Qwen3-4B-Instruct-2507", {})}
+
+
 class Mouth:
     """Shared by all sessions: the two engines and voice loading. Per-conversation state lives in Session."""
     def __init__(self, cfg):
-        m = cfg["mouth"]; lc = cfg["llm"]; t = cfg["tts"]
+        from app.config import llm_roles
+        roles = llm_roles(cfg)
+        if roles["filler"] is not roles["reply"] or "smart" in roles:
+            raise NotImplementedError("separate filler / smart LLM instances come with the LLM plugins")
+        m = cfg["mouth"]; lc = cfg["llm"]["reply"]; t = cfg["tts"]
+        model, switches = _LLM_PLUGIN_MODELS[lc["plugin"]]
         self.cfg = cfg
         self.max_gen = int(m.get("max_gen", 192))
         self.history_turns = int(m.get("history_turns", 8))
         self.bc_min_words = int(m.get("bc_min_words", 4))
         self.bc_max_new = int(m.get("bc_max_new", 12))
-        self.temperature = float(m.get("temperature", 0.7))
+        self.temperature = float(lc.get("temperature", 0.7))
         self.eloop = EngineLoop()
         # TTS first: its deploy config pins a small KV budget; the LLM's start-up check then sees what's left.
         log.info("loading TTS %s", t["model"])
         self.tts = VoxCPM2TTS(self.eloop, t["model"], deploy_config=repo_path(t.get("deploy_config")),
                               out_sr=t.get("out_sr", 24000), ref_max_s=t.get("ref_max_s", 10.0))
-        log.info("loading responder %s", lc["model"])
-        self.llm = LocalLLM(self.eloop, lc["model"], gpu_memory_utilization=lc.get("gpu_memory_utilization", 0.45),
+        log.info("loading responder %s (%s)", lc["plugin"], model)
+        self.llm = LocalLLM(self.eloop, model, gpu_memory_utilization=lc.get("gpu_memory_utilization", 0.45),
                             kv_cache_gib=lc.get("kv_cache_gib", 3.0), max_model_len=lc.get("max_model_len", 8192),
                             max_num_seqs=lc.get("max_num_seqs", 8), temperature=self.temperature,
-                            enable_thinking=lc.get("enable_thinking"),
-                            language_model_only=bool(lc.get("language_model_only", False)))
+                            enable_thinking=switches.get("enable_thinking"),
+                            language_model_only=bool(switches.get("language_model_only", False)))
         self.sr = self.tts.out_sr
         self._voices = {}                     # clip path -> (mtime, Voice): each clip is read once
         self._voice_lock = threading.Lock()
@@ -581,7 +591,7 @@ def main():
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind((host, port)); srv.listen(16)
     log.info("=== MOUTH ready (in-proc %s + %s, sr=%d) listening on %s:%d ===",
-             cfg["llm"]["model"], cfg["tts"]["model"], m.sr, host, port)
+             cfg["llm"]["reply"]["plugin"], cfg["tts"]["plugin"], m.sr, host, port)
     while True:                                   # one thread per EARS session; engines are shared
         conn, addr = srv.accept()
         conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
