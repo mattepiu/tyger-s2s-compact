@@ -198,7 +198,6 @@ class Mouth:
             log.warning("llm.smart is configured but mouth.escalation.enabled is false: it is never used")
         self.context_turns = int(esc.get("context_turns", 4))     # history turns sent along with an escalated turn
         self.max_steps = int(esc.get("max_steps", 3))             # the smart model's own tool rounds per turn
-        self.smart_max_new = int(esc.get("max_new", 384))
         self.cfg = cfg
         # prompts first: a bad prompts.yaml stops start-up before minutes of engine loading
         by_name = load_prompts(cfg, {name for name, _ in roles.values()})
@@ -488,7 +487,7 @@ class Session:
                                                        (ask.get("arguments") or {}).get("question"), others)
                     box["smart_t0"] = time.perf_counter()
                     box["smart"] = _Prefetch(lambda: m.llms["smart"].stream(
-                        box["smart_msgs"], tools=m.smart_tools, max_new=m.smart_max_new, stop_flag=stop_flag),
+                        box["smart_msgs"], tools=m.smart_tools, max_new=m.max_gen, stop_flag=stop_flag),
                         stop_flag)
             except Exception as e:
                 box["error"] = e
@@ -572,7 +571,7 @@ class Session:
                         else self._run_calls(box["calls"])
                     box["msgs"] = msgs + round_messages(text, box["calls"], box["native"], results)
                     box["next"] = _Prefetch(lambda: m.llms["smart"].stream(
-                        box["msgs"], tools=m.smart_tools, max_new=m.smart_max_new, stop_flag=stop_flag), stop_flag)
+                        box["msgs"], tools=m.smart_tools, max_new=m.max_gen, stop_flag=stop_flag), stop_flag)
                 except Exception as e:
                     box["error"] = e
                 finally:

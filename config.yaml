@@ -69,4 +69,4 @@ mouth:
   escalation:                        # used only with llm.smart
     context_turns: 4                 # recent turns sent along with an escalated question
     max_steps: 3                     # the smart model's own tool rounds per escalated turn
-    max_new: 384
+                                     # (its answer length: max_tokens in the llm.smart block)

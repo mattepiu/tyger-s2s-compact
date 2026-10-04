@@ -521,7 +521,7 @@ code.
   Without `smart` the prompt and tools are byte-identical to before.
 - `expert_leadin` / `expert_still` are the lead-in and still-looking lines for `ask_expert`; `tool_leadin` /
   `still_looking` stay for lookups.
-- Config: `mouth.escalation: {enabled: true, context_turns: 4, max_steps: 3, max_new: 384}` (all optional; on
+- Config: `mouth.escalation: {enabled: true, context_turns: 4, max_steps: 3}` (all optional; on
   whenever `llm.smart` is set). `mouth.tasks.enabled` stops start-up until steps 12–14 exist.
 
 **Running it:**

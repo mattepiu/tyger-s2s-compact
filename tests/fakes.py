@@ -23,7 +23,7 @@ class FakeMouth:
         self.prompts = {"reply": PROMPTS, "filler": PROMPTS}
         self.llms = {"reply": self.llm, "filler": self.llm}
         self.expert = smart is not None
-        self.context_turns, self.max_steps, self.smart_max_new = context_turns, max_steps, 384
+        self.context_turns, self.max_steps = context_turns, max_steps
         self.tools = build_tools(PROMPTS, expert=self.expert)
         self.smart_tools = build_tools(PROMPTS) if self.expert else None
         if smart is not None:

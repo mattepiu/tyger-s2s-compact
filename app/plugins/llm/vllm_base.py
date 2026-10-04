@@ -42,6 +42,8 @@ class VLLMChatPlugin:
         self.conf = conf; self.name = ctx.name; self.eloop = ctx.eloop
         self.model = conf.get("model") or self.default_model
         self.temperature = float(conf.get("temperature", 0.7))
+        self.max_tokens = conf.get("max_tokens")   # if set, every request gets it instead of MOUTH's max_new
+        # (backchannel / filler limits included): meant for a block that serves only `smart`, as in openai_compat
         args = AsyncEngineArgs(model=self.model, gpu_memory_utilization=float(conf.get("gpu_memory_utilization", 0.45)),
                                kv_cache_memory_bytes=int(float(conf.get("kv_cache_gib", 3.0)) * 2**30),
                                max_model_len=int(conf.get("max_model_len", 8192)),
@@ -78,7 +80,7 @@ class VLLMChatPlugin:
             prompt = self.tok.apply_chat_template(to_template_messages(messages), tools=tools or None,
                                                   tokenize=False, add_generation_prompt=True,
                                                   **self.template_kwargs())
-        sp = self.sampling(max_new)
+        sp = self.sampling(self.max_tokens or max_new)
         rid = f"llm-{uuid.uuid4().hex[:12]}"
 
         async def deltas():
