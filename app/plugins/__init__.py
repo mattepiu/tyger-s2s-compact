@@ -5,10 +5,13 @@ import importlib
 
 REGISTRY = {
     "llm": {"qwen3-4b-2507": "app.plugins.llm.qwen3_2507:Qwen3Instruct2507",
-            "qwen3.5-4b": "app.plugins.llm.qwen35:Qwen35"},
-    "tts": {"voxcpm2": "app.plugins.tts.voxcpm2:VoxCPM2"},
+            "qwen3.5-4b": "app.plugins.llm.qwen35:Qwen35",
+            "fake": "app.plugins.llm.fake:FakeLLM"},
+    "tts": {"voxcpm2": "app.plugins.tts.voxcpm2:VoxCPM2",
+            "fake": "app.plugins.tts.fake:FakeTTS"},
     # nemotron ASR encoder + the tyger 1.0 turn-taking heads (exp-12 arm C: endpoint / barge / backchannel)
-    "ears": {"nemotron-tyger-1.0": "app.plugins.ears.nemotron:NemotronTyger"},
+    "ears": {"nemotron-tyger-1.0": "app.plugins.ears.nemotron:NemotronTyger",
+             "fake": "app.plugins.ears.fake:EnergyEars"},
 }
 
 

@@ -102,6 +102,12 @@ hosted-only MOUTH must not.
   forced, but not absolutely under 4-way batching at temperature 0.7. The test flags it; compare runs without
   the warning, or take medians over 3.
 
+**Step 5 (fake plugins, `config.fake.yaml`, contract tests):** `CONFIG=config.fake.yaml ./run.sh` with
+`CUDA_VISIBLE_DEVICES=""` starts in ~1 s; `load_test_ears.py` through it at 4 conversations: 8/8 turns, every
+endpoint from the energy fake, hop lag ~1 ms, no vLLM in the log. `test_plugin_contract.py` passes for the fakes
+and, with `TYGER_CONTRACT_LOCAL=1` (GPU free), for qwen3.5-4b and qwen3-4b-2507 (both call get_weather for two
+cities, unique IDs, stop within one item), voxcpm2 and nemotron-tyger-1.0 (ENDPOINT on a LibriSpeech clip).
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at

@@ -119,8 +119,14 @@ the voice picker. Browser DSP (echo cancellation, noise suppression, auto gain) 
 
 ```bash
 .venv/bin/python tests/test_chunker.py          # text chunking (no GPU)
-.venv/bin/python tests/test_llm_parse.py        # tool-call text splitting (no GPU)
-.venv/bin/python tests/test_mouth_session.py    # MOUTH turns/barge/tools/backchannels on fake engines (no GPU)
+.venv/bin/python tests/test_llm_parse.py        # tool-call splitting, both call formats, <think> guard (no GPU)
+.venv/bin/python tests/test_mouth_session.py    # MOUTH turns/barge/tools/backchannels on the fake plugins (no GPU)
+.venv/bin/python tests/test_config.py           # plugin config shape; the old shape is rejected (no GPU)
+.venv/bin/python tests/test_prompts.py          # prompts.yaml loader + checks (no GPU)
+.venv/bin/python tests/test_plugins.py          # plugin classes import light; off-rate TTS resampled (no GPU)
+.venv/bin/python tests/test_plugin_contract.py  # plugin contract on the fakes; TYGER_CONTRACT_LOCAL=1 adds the real
+                                                #   local plugins (GPU free: stop run.sh first)
+CONFIG=config.fake.yaml ./run.sh                 # the whole stack on the fake plugins: no GPU, no downloads
 .venv/bin/python scripts/smoke_test.py          # needs run.sh up: MOUTH tool turns + barge-in + EARS speech → audio
 .venv/bin/python scripts/load_test.py --sessions 4       # needs run.sh up: concurrent MOUTH turns + backchannels
                                                          #   --tools: tool turns (+ --fresh: empty history each)

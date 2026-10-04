@@ -1,133 +1,16 @@
-"""Fake engines for driving MOUTH's Session without a GPU (tests only).
-
-FakeLLM / FakeTTS mimic the LLM / TTS plugins' stream (app/plugins): generators that poll stop_flag between
-items, as EngineLoop.iterate does. FakeMouth carries the attributes Session reads from Mouth. Test text is synthetic.
+"""Driving MOUTH's Session without a GPU (tests only). FakeLLM / FakeTTS are the `fake` plugins (app/plugins/*/
+fake.py); FakeMouth carries the attributes Session reads from Mouth. Test text is synthetic.
 """
 import os, sys, threading, time
-
-import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app import mouth as M  # noqa: E402
 from app.prompts import default_prompts  # noqa: E402
 from app.tools import build_tools  # noqa: E402
+from app.plugins.llm.fake import FakeLLM, wait_or_stop  # noqa: E402,F401
+from app.plugins.tts.fake import FakeTTS  # noqa: E402
 
 PROMPTS = default_prompts()     # the repo's prompts.yaml; FakeLLM routes requests by their system prompt
-
-
-def wait_or_stop(seconds, stop_flag, poll=0.002):
-    """Sleep `seconds`, returning early (True) if stop_flag() turns true, like the engine poll loop."""
-    end = time.perf_counter() + seconds
-    while time.perf_counter() < end:
-        if stop_flag and stop_flag():
-            return True
-        time.sleep(poll)
-    return bool(stop_flag and stop_flag())
-
-
-class FakeLLM:
-    """Routes by prompt: lead-in / backchannel / phase B (a tool message present) / main reply.
-    `reply` is the main reply's raw text (may contain a Hermes <tool_call>); each call is recorded."""
-    def __init__(self, reply="Sure, here is a reasonably long first sentence for you. And a second one.",
-                 phase_b="It is sunny and twenty degrees there today, a lovely day.",
-                 leadin="One sec, let me look that up.", ack="oh nice", step_s=0.002, chars=4):
-        self.reply, self.phase_b, self.leadin, self.ack = reply, phase_b, leadin, ack
-        self.step_s, self.chars = step_s, chars
-        self.calls = []                       # (kind, messages) per request
-        self.live = 0; self.aborted = 0; self.lock = threading.Lock()
-
-    def _kind(self, messages):
-        sys_txt = messages[0]["content"] if messages and messages[0]["role"] == "system" else ""
-        if sys_txt.startswith(PROMPTS.text("tool_leadin", "system")[:40]):
-            return "leadin"
-        if sys_txt.startswith(PROMPTS.text("backchannel", "system")[:40]):
-            return "bc"
-        if sys_txt.startswith(PROMPTS.text("still_looking", "system")[:40]):
-            return "still"
-        if messages[-1]["role"] == "tool":
-            return "phase_b"
-        return "reply"
-
-    def text_for(self, kind):
-        return {"leadin": self.leadin, "bc": self.ack, "phase_b": self.phase_b, "reply": self.reply,
-                "still": "Still looking, almost there."}[kind]
-
-    def stream(self, messages, tools=None, max_new=192, temperature=None, stop_flag=None):
-        from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id
-        kind = self._kind(messages)
-        self.calls.append((kind, [dict(m) for m in messages]))
-        raw_all = self.text_for(kind)
-        with self.lock:
-            self.live += 1
-        raw, said, saw_tool, started = "", 0, False, False
-        try:
-            for i in range(0, len(raw_all), self.chars):
-                if wait_or_stop(self.step_s, stop_flag):
-                    with self.lock:
-                        self.aborted += 1
-                    return
-                raw += raw_all[i:i + self.chars]
-                if saw_tool:
-                    continue
-                speak, saw_tool = split_speakable(raw)
-                if len(speak) > said:
-                    yield ("text", speak[said:]); said = len(speak)
-                if saw_tool and not started and getattr(self, "emit_tool_start", True):
-                    started = True
-                    yield ("tool_start", {"name": None})
-            if stop_flag and stop_flag():
-                return
-            if not saw_tool and len(raw) > said:
-                yield ("text", raw[said:])
-            if saw_tool:
-                calls = parse_calls(raw, "hermes_json")
-                yield ("tool_calls", [{"id": new_call_id(), **c} for c in calls], None)
-        finally:
-            with self.lock:
-                self.live -= 1
-
-
-class FakeTTS:
-    """Yields `n` chunks of `chunk_s` audio per request, `step_s` apart; records each request's text."""
-    remote = False
-
-    def __init__(self, out_sr=24000, n=5, chunk_s=0.08, step_s=0.002, onset_s=0.0):
-        from app.plugins.base import TTSCaps
-        self.out_sr, self.n, self.chunk_s, self.step_s, self.onset_s = out_sr, n, chunk_s, step_s, onset_s
-        self.requests = []; self.aborted = 0; self.live = 0; self.lock = threading.Lock()
-        self.caps = TTSCaps(cloning=False, max_batch=4)
-
-    @classmethod
-    def list_voices(cls, cfg=None):
-        return ["fake"], "fake"
-
-    def load_voice(self, name):
-        return None
-
-    def warmup(self, voice=None):
-        pass
-
-    def shutdown(self):
-        pass
-
-    def stream(self, text, voice=None, stop_flag=None):
-        self.requests.append(text)
-        with self.lock:
-            self.live += 1
-        try:
-            if wait_or_stop(self.onset_s, stop_flag):
-                with self.lock:
-                    self.aborted += 1
-                return
-            for _ in range(self.n):
-                if wait_or_stop(self.step_s, stop_flag):
-                    with self.lock:
-                        self.aborted += 1
-                    return
-                yield np.full(int(self.chunk_s * self.out_sr), 0.1, np.float32)
-        finally:
-            with self.lock:
-                self.live -= 1
 
 
 class FakeMouth:
