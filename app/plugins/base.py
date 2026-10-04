@@ -11,6 +11,8 @@ Neutral formats, owned by MOUTH:
       ("tool_start", {"name": str | None})          the model committed to a tool call (MOUTH starts the filler)
       ("tool_calls", [{"id", "name", "arguments"}], native)   once, at the end
       ("refusal", category | None)                  the model declined (hosted plugins only)
+    A failed request raises LLMError. A tool call whose arguments don't fit its schema carries "error": MOUTH
+    returns that as the tool's result and never runs it.
 
 Streams are plain generators that poll stop_flag between items; a plugin aborts its own request when it turns
 true. Constructors import their heavy dependencies (vllm, vllm_omni, SDKs) lazily, so a config that uses only
@@ -24,6 +26,13 @@ from typing import Any, Iterator, Protocol
 import numpy as np
 
 LLMEvent = tuple
+
+
+class LLMError(Exception):
+    """A request failed in a way MOUTH answers with a short spoken apology (hosted plugins: rate limit, timeout,
+    connection, HTTP error, too many requests in flight). `kind` is for logs; never the request or response."""
+    def __init__(self, kind: str):
+        super().__init__(kind); self.kind = kind
 
 
 @dataclass(frozen=True)

@@ -22,7 +22,8 @@ TEMPLATES = {
 # plain text, sent as written
 TEXTS = [("system", "voice_tools"), ("tool_leadin", "system"), ("still_looking", "system"),
          ("still_looking", "said_none"), ("backchannel", "system"), ("backchannel", "user_empty"),
-         ("markers", "interrupted"), ("markers", "empty_reply"), ("warmup", "user")]
+         ("markers", "interrupted"), ("markers", "empty_reply"), ("warmup", "user"),
+         ("spoken", "error"), ("spoken", "refusal")]
 SHOTS = ["tool_leadin", "still_looking", "backchannel"]
 
 

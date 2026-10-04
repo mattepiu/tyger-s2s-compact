@@ -37,6 +37,7 @@ from app.config import load_config, llm_roles
 from app.prompts import load_prompts
 from app.engines import EngineLoop
 from app.plugins import build_llms, build_tts
+from app.plugins.base import LLMError
 
 log = logging.getLogger("mouth")
 
@@ -260,13 +261,17 @@ class Session:
     # ---- speak an LLM text stream: a short first chunk (clause), then whole sentences ----
     def _speak_stream(self, events, voice, stop_flag):
         """Speak the text of an LLM event stream as it arrives. Yields MOUTH events; returns (text, calls, native,
-        started). Returns at "tool_start" (started=True) without consuming the rest: the call is still decoding,
-        and the caller finishes `events` itself. Text before the tag that didn't close a chunk is never spoken."""
+        started, refused). Returns at "tool_start" (started=True) without consuming the rest: the call is still
+        decoding, and the caller finishes `events` itself. Text before the tag that didn't close a chunk is never
+        spoken. A refusal (hosted models) returns refused=True with nothing more spoken."""
         content = ""; calls = None; native = None; done = 0
         for ev in events:
             kind, val = ev[0], ev[1]
             if kind == "tool_start":
-                return content, None, None, True
+                return content, None, None, True, False
+            if kind == "refusal":
+                log.info("reply refused (category=%s)", val)
+                return content, None, None, False, True
             if kind == "text":
                 content += val
                 yield ("text", content)
@@ -282,19 +287,40 @@ class Session:
             elif kind == "tool_calls":
                 calls, native = val, ev[2]
             if stop_flag():
-                return content, calls, native, False
+                return content, calls, native, False, False
         if not calls and not stop_flag():
             yield from self._say(content[done:], voice, stop_flag)
-        return content, calls, native, False
+        return content, calls, native, False, False
+
+    def _speak_line(self, key, transcript, stop_flag):
+        """End the turn with one of MOUTH's own lines (prompts.yaml `spoken`): the apology after a failed LLM
+        request, or the neutral line after a refusal. The user's turn stays in history."""
+        line = self.m.prompts["reply"].text("spoken", key)
+        yield ("text", line)
+        yield from self._say(line, self.voice, stop_flag)
+        if stop_flag():
+            self._remember_barged(transcript)
+        else:
+            self._remember(transcript, line)
+        yield ("done", line)
 
     # ---- a full turn (may call tools) ----
     def stream_turn(self, transcript, stop_flag):
+        try:
+            yield from self._turn(transcript, stop_flag)
+        except LLMError as e:                    # hosted LLM failed: say so briefly instead of going silent
+            log.warning("turn: LLM request failed (%s)", e.kind)
+            yield from self._speak_line("error", transcript, stop_flag)
+
+    def _turn(self, transcript, stop_flag):
         m = self.m; voice = self.voice                 # one voice per reply (a switch applies to the next one)
         self._said = []; self._audio_s = 0.0; self._play_end = time.perf_counter()
         msgs = [{"role": "system", "content": m.prompts["reply"].text("system", "voice_tools")}] + list(self.history) + \
                [{"role": "user", "content": transcript}]
         events = m.llms["reply"].stream(msgs, tools=m.tools, max_new=m.max_gen, stop_flag=stop_flag)
-        content, calls, native, started = yield from self._speak_stream(events, voice, stop_flag)
+        content, calls, native, started, refused = yield from self._speak_stream(events, voice, stop_flag)
+        if refused and not stop_flag():
+            yield from self._speak_line("refusal", transcript, stop_flag); return
         if stop_flag():
             self._remember_barged(transcript)
             yield ("done", content.strip()); return
@@ -306,7 +332,7 @@ class Session:
         # and runs the tools the moment it parses, while this one speaks a filler made alongside (vLLM batches the
         # two requests). If the tools are still out FILLER_GAP_S after the filler has played, one more short
         # "still looking" line, up to MAX_STILL. Everything stops on barge (stop_flag); tool threads are daemons.
-        box = {"calls": calls or [], "native": native, "results": []}; tools_done = threading.Event()
+        box = {"calls": calls or [], "native": native, "results": [], "error": None}; tools_done = threading.Event()
 
         def finish_call_and_run_tools():
             try:
@@ -318,8 +344,9 @@ class Session:
                 log.info("tool calls: %s", [c["name"] for c in box["calls"]])
                 results = [None] * len(box["calls"])
 
-                def _run(i, c):
-                    results[i] = execute_tool(c["name"], c.get("arguments", {}))
+                def _run(i, c):                     # a call the plugin flagged (bad arguments) is never run
+                    results[i] = {"error": c["error"]} if c.get("error") else \
+                        execute_tool(c["name"], c.get("arguments", {}))
                 workers = [threading.Thread(target=_run, args=(i, c), daemon=True)
                            for i, c in enumerate(box["calls"])]
                 for w in workers:
@@ -328,6 +355,7 @@ class Session:
                     w.join()
                 box["results"] = results
             except Exception as e:
+                box["error"] = e
                 log.warning("tool call error: %s", type(e).__name__)
             finally:
                 tools_done.set()
@@ -354,6 +382,8 @@ class Session:
         if stop_flag():
             self._remember_barged(transcript)
             yield ("done", lead); return
+        if isinstance(box["error"], LLMError):       # the call never finished decoding (hosted LLM failed)
+            raise box["error"]
         calls, results = box["calls"], box["results"]
         results = results if len(results) == len(calls) else [None] * len(calls)
         if not calls:                                       # a tag with no parseable call: nothing to answer from
@@ -371,8 +401,10 @@ class Session:
                                  for c, r in zip(calls, results)]
         kept = [asst] + [{"role": "tool", "tool_call_id": c["id"], "content": _compact_result(r)}
                          for c, r in zip(calls, results)]
-        full2, _, _, _ = yield from self._speak_stream(
+        full2, _, _, _, refused = yield from self._speak_stream(
             m.llms["reply"].stream(msgs2, max_new=m.max_gen, stop_flag=stop_flag), voice, stop_flag)
+        if refused and not stop_flag():
+            yield from self._speak_line("refusal", transcript, stop_flag); return
         reply = (lead + " " + full2).strip()
         if stop_flag():
             self._remember_barged(transcript, kept)
@@ -445,7 +477,10 @@ class Session:
                                  " (aborted: reply turn started)" if aborted else "")
             except Exception as e:
                 if not self.closed.is_set():
-                    log.exception("backchannel error: %s", type(e).__name__)
+                    if isinstance(e, LLMError):              # hosted LLM failed: no ack this time, no traceback
+                        log.warning("backchannel: LLM request failed (%s)", e.kind)
+                    else:
+                        log.exception("backchannel error: %s", type(e).__name__)
                     self.send(b"D", {"text": "", "bc": True, "error": type(e).__name__})
 
     def run(self):

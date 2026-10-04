@@ -274,6 +274,56 @@ def test_backchannel_alongside_turn_still_runs():
     peer.close()
 
 
+# ---- hosted LLM failures: a spoken apology / neutral line, never silence; bad tool arguments never run --------
+def spoken(evs):
+    return [v for k, v, _ in evs if k == "text"]
+
+
+def test_llm_error_speaks_apology_and_remembers():
+    for fail_after in (0, 3):                                      # before any text, and mid-reply
+        llm = FakeLLM(fail={"reply": "rate_limit"}, fail_after=fail_after)
+        s, m = make_session(llm, FakeTTS(n=2))
+        evs, _ = run_turn(s, "what's up?")
+        line = PROMPTS.text("spoken", "error")
+        assert spoken(evs)[-1] == line and evs[-1][:2] == ("done", line)
+        assert any(k == "audio" for k, _, _ in evs) and m.tts.requests[-1] == line
+        assert [h["role"] for h in s.history] == ["user", "assistant"] and s.history[1]["content"] == line
+
+
+def test_llm_error_while_tool_call_decodes():
+    llm = FakeLLM(reply=TOOL_REPLY, fail={"reply": "timeout"}, fail_after=4)   # dies after the tag, mid-call
+    s, m = make_session(llm, FakeTTS(n=2))
+    evs, _ = run_turn(s, "weather in Paris?")
+    assert evs[-1][:2] == ("done", PROMPTS.text("spoken", "error"))
+
+
+def test_refusal_speaks_neutral_line():
+    llm = FakeLLM(refuse=("reply",))
+    s, m = make_session(llm, FakeTTS(n=2))
+    evs, _ = run_turn(s, "something it won't do")
+    assert evs[-1][:2] == ("done", PROMPTS.text("spoken", "refusal"))
+    assert s.history[0]["content"] == "something it won't do"
+
+
+def test_flagged_tool_call_never_runs():
+    class Flagging(FakeLLM):
+        def stream(self, messages, **kw):
+            for ev in super().stream(messages, **kw):
+                if ev[0] == "tool_calls":
+                    ev = ("tool_calls", [{**c, "error": "invalid arguments for 'get_weather': missing location"}
+                                         for c in ev[1]], ev[2])
+                yield ev
+    ran = []
+    s, m = make_session(Flagging(reply=TOOL_REPLY), FakeTTS(n=2))
+    orig = M.execute_tool
+    M.execute_tool = lambda n, a: ran.append(n) or {"answer": "sunny"}
+    try:
+        run_turn(s, "weather?")
+    finally:
+        M.execute_tool = orig
+    assert ran == [] and "invalid arguments" in s.history[2]["content"]
+
+
 # ---- S: TTS only, for test tools (load_test_ears.py's fixed utterance) --------------------------------------
 def test_say_is_tts_only():
     s, peer, m = live_session(FakeLLM(), FakeTTS(n=3))

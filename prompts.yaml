@@ -1,6 +1,7 @@
-# Every piece of text MOUTH sends to an LLM (PLUGINS.md -> "Prompts in one file"). Read once at MOUTH start and
-# validated (app/prompts.py); restart MOUTH after editing. Per-instance overrides: prompts/<instance>.yaml, deep-
-# merged over this file for the requests that LLM instance serves (lists such as `shots` are replaced whole).
+# Every piece of text MOUTH sends to an LLM, and the two fixed lines it speaks itself (PLUGINS.md -> "Prompts in
+# one file"). Read once at MOUTH start and validated (app/prompts.py); restart MOUTH after editing. Per-instance
+# overrides: prompts/<instance>.yaml, deep-merged over this file for the requests that LLM instance serves (lists
+# such as `shots` are replaced whole).
 # Keys that take values (`user`, `user_short`, `no_repeat`) are templates: $name (string.Template), $$ for a literal
 # dollar sign; everything else is sent exactly as written. Committed: few-shot examples are synthetic, never user
 # data. Few-shot turns, not quoted examples in a system prompt: a 4B model copies quoted examples verbatim (it said
@@ -76,6 +77,10 @@ markers:
 # MOUTH's start-up request that pays the first tools-prompt prefill before serving
 warmup:
   user: Hi.
+# not prompts: the only fixed lines MOUTH speaks itself, when a hosted LLM request fails or the model declines
+spoken:
+  error: Sorry, I couldn't get an answer just now. Could you say that again?
+  refusal: Sorry, I can't help with that one.
 # tool and parameter descriptions; the schemas (names, types, required) stay in app/tools.py
 tools:
   get_weather:
