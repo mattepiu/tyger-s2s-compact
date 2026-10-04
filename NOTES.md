@@ -169,6 +169,28 @@ lead-ins fit ("That's a tough choice, let me weigh the options.", "Давайт�
 turns' first audio (the lead-in) 412–461 ms alone; 4 at once 653–716 ms vs 580–808 for 4 weather turns at once
 and 396–454 for plain ones. Barge-in during an escalated turn → D 6 ms. Routing on a real test set is step 11.
 
+**Step 11 (routing eval; gate NOT met yet).** `scripts/eval_escalation.py` sends each case of
+`scripts/escalation_set.yaml` exactly as MOUTH would with a `smart` configured (reply model only, no remote calls)
+at temperature 0.7, N samples each. 86 synthetic cases EN / RU / ES: 28 local, 18 tool, 30 expert, 10 multi-turn
+(follow-ups on an escalated topic, "check that again", thanks / topic change after an escalation); every third
+case of each route is held out. Missed = expert → local (target ≤ 10%), unneeded = local → expert (≤ 15%).
+
+| reply model, prompt | tune missed / unneeded | held-out missed / unneeded |
+|---|---|---|
+| qwen3.5-4b, step 10 prompt (×5 tune, ×8 held out) | 8.3% / 0% | **16.7%** / 1.2% |
+| qwen3.5-4b, v2: follow-up reminder in the ask_expert tool result (×8) | 5.2% / 0.6% | **15.6%** / 0% |
+| qwen3-4b-2507, v2 (×8) | 19.3% / 0% | 11.5% / 0% |
+
+Tried and dropped on the tune split: a stronger follow-up rule in the system prompt plus RU / ES follow-up shots
+(no better: 9.2%), and a "handing over costs little" nudge (worse: 7.8%). Differences of 1–3 points are a few
+samples. Lookups are never confused with escalation (tool ↔ expert ~0%), and no call failed to parse.
+
+The misses are systematic, not sampling noise. Qwen3.5-4B keeps RU / ES follow-ups on an escalated topic local (m04
+7/8, m05 8/8) and some RU / ES health / legal questions (e30 5/8). Qwen3-4B-2507 handles follow-ups but answers
+reasoning and code itself, every time (bat-and-ball, palindrome, sort without sort, TCP handshake, "recount
+carefully": 8/8). Both lean local: unneeded escalations stay at ~0%, so there's room to push toward escalating.
+The held-out split has now been looked at; further tuning needs fresh held-out cases.
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at

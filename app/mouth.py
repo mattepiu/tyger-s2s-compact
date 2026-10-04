@@ -92,23 +92,30 @@ def expert_result(p):
     return _compact_result({"result": p.text("escalation", "tool_result")})
 
 
-def reply_prefix(p, expert):
-    """The reply request before the conversation: the system prompt, and with escalation on, its few-shot turns
-    (prompts.yaml escalation.shots) as earlier turns in the neutral format. A fixed prefix, so it stays cached."""
-    if not expert:
-        return [{"role": "system", "content": p.text("system", "voice_tools")}]
-    msgs = [{"role": "system", "content": p.text("escalation", "system")}]
-    for i, t in enumerate(p.turns("escalation"), 1):
+def turns_messages(p, turns, id_prefix="shot"):
+    """Structured turns -> neutral messages: {user, reply} is answered locally; {user, expert, answer} is an
+    ask_expert call (with `expert` as its question, ID call_<id_prefix><n>), its tool result, then the answer.
+    Used for the escalation few-shot turns and for the history of eval_escalation.py cases."""
+    msgs = []
+    for i, t in enumerate(turns, 1):
         msgs.append({"role": "user", "content": t["user"]})
         if "reply" in t:
             msgs.append({"role": "assistant", "content": t["reply"]})
             continue
-        cid = f"call_shot{i:04d}"
+        cid = f"call_{id_prefix}{i:04d}"
         msgs += [{"role": "assistant", "content": None,
                   "tool_calls": [{"id": cid, "name": EXPERT, "arguments": {"question": t["expert"]}}]},
                  {"role": "tool", "tool_call_id": cid, "content": expert_result(p)},
                  {"role": "assistant", "content": t["answer"]}]
     return msgs
+
+
+def reply_prefix(p, expert):
+    """The reply request before the conversation: the system prompt, and with escalation on, its few-shot turns
+    (prompts.yaml escalation.shots) as earlier turns in the neutral format. A fixed prefix, so it stays cached."""
+    if not expert:
+        return [{"role": "system", "content": p.text("system", "voice_tools")}]
+    return [{"role": "system", "content": p.text("escalation", "system")}] + turns_messages(p, p.turns("escalation"))
 
 
 def smart_messages(p, turns, transcript, question, others=()):

@@ -1,0 +1,169 @@
+# Escalation routing test set (PLUGINS.md step 11), read by scripts/eval_escalation.py. Synthetic prompts only,
+# never user data. Each case is one user turn with the route the `reply` model should take:
+#   local  - chit-chat, simple facts, opinions, short how-tos: answered by the local model
+#   tool   - weather, time, prices, news, reminders, messages: a lookup / action tool (not ask_expert)
+#   expert - maths, code, health / money / legal advice, comparisons, planning, long explanations, "think
+#            carefully", unhappiness with an earlier answer, follow-ups on an escalated topic: ask_expert
+# (`background` cases come with background tasks, step 14.) `history` holds earlier turns in the form of
+# prompts.yaml escalation.shots: {user, reply} answered locally, or {user, expert, answer} escalated.
+# Held-out cases (not used for tuning the prompt): every third case of each route, in file order (the script
+# computes it). Don't reuse the few-shot topics of prompts.yaml here.
+version: 1
+cases:
+  # ---- local ----
+  - {id: l01, route: local, lang: en, user: "Hey, good morning! How's it going?"}
+  - {id: l02, route: local, lang: en, user: "What's your favorite color?"}
+  - {id: l03, route: local, lang: en, user: "How many legs does a spider have?"}
+  - {id: l04, route: local, lang: en, user: "What's the capital of Japan?"}
+  - {id: l05, route: local, lang: en, user: "Can you tell me a fun fact about penguins?"}
+  - {id: l06, route: local, lang: en, user: "How do I say good night in French?"}
+  - {id: l07, route: local, lang: en, user: "What's a good name for a black cat?"}
+  - {id: l08, route: local, lang: en, user: "Thanks, that was helpful."}
+  - {id: l09, route: local, lang: en, user: "How do you make a cup of tea?"}
+  - {id: l10, route: local, lang: en, user: "Do you think dogs or cats make better pets?"}
+  - {id: l11, route: local, lang: en, user: "What's twelve plus fifteen?"}
+  - {id: l12, route: local, lang: en, user: "Who wrote Romeo and Juliet?"}
+  - {id: l13, route: local, lang: en, user: "Tell me a riddle."}
+  - {id: l14, route: local, lang: en, user: "How long should I boil pasta?"}
+  - {id: l15, route: local, lang: ru, user: "Привет! Как настроение?"}
+  - {id: l16, route: local, lang: ru, user: "Сколько дней в високосном году?"}
+  - {id: l17, route: local, lang: ru, user: "Какая столица Италии?"}
+  - {id: l18, route: local, lang: ru, user: "Расскажи короткий анекдот."}
+  - {id: l19, route: local, lang: ru, user: "Как сварить гречку?"}
+  - {id: l20, route: local, lang: ru, user: "Что ты больше любишь, лето или зиму?"}
+  - {id: l21, route: local, lang: ru, user: "Спасибо, ты очень помог."}
+  - {id: l22, route: local, lang: es, user: "¡Hola! ¿Qué tal tu día?"}
+  - {id: l23, route: local, lang: es, user: "¿Cuál es la capital de Argentina?"}
+  - {id: l24, route: local, lang: es, user: "¿Cuántos continentes hay?"}
+  - {id: l25, route: local, lang: es, user: "Cuéntame un chiste corto."}
+  - {id: l26, route: local, lang: es, user: "¿Cómo se dice gato en inglés?"}
+  - {id: l27, route: local, lang: es, user: "¿Qué prefieres, la playa o la montaña?"}
+  - {id: l28, route: local, lang: es, user: "¿Cómo se prepara un café con leche?"}
+  # ---- tool ----
+  - {id: t01, route: tool, lang: en, user: "What's the weather like in Berlin right now?"}
+  - {id: t02, route: tool, lang: en, user: "What time is it in Sydney?"}
+  - {id: t03, route: tool, lang: en, user: "What's the price of bitcoin today?"}
+  - {id: t04, route: tool, lang: en, user: "Who won the Champions League match last night?"}
+  - {id: t05, route: tool, lang: en, user: "Any big news today?"}
+  - {id: t06, route: tool, lang: en, user: "Remind me to call my mom at six pm."}
+  - {id: t07, route: tool, lang: en, user: "Send a message to Alex saying I'm running late."}
+  - {id: t08, route: tool, lang: en, user: "Is it going to rain in Seattle today?"}
+  - {id: t09, route: tool, lang: en, user: "What's the current exchange rate from euros to dollars?"}
+  - {id: t10, route: tool, lang: en, user: "What's the score in the Lakers game right now?"}
+  - {id: t11, route: tool, lang: ru, user: "Какая сейчас погода в Новосибирске?"}
+  - {id: t12, route: tool, lang: ru, user: "Который час сейчас в Нью-Йорке?"}
+  - {id: t13, route: tool, lang: ru, user: "Какой сейчас курс доллара к рублю?"}
+  - {id: t14, route: tool, lang: ru, user: "Напомни мне завтра в девять утра про встречу."}
+  - {id: t15, route: tool, lang: es, user: "¿Qué tiempo hace ahora en Sevilla?"}
+  - {id: t16, route: tool, lang: es, user: "¿Qué hora es en Ciudad de México?"}
+  - {id: t17, route: tool, lang: es, user: "¿Cuáles son las noticias más importantes de hoy?"}
+  - {id: t18, route: tool, lang: es, user: "Mándale un mensaje a Lucía diciendo que llego en diez minutos."}
+  # ---- expert ----
+  - {id: e01, route: expert, lang: en, user: "If I take out a thirty year mortgage of four hundred thousand at six and a half percent, what's my monthly payment?"}
+  - {id: e02, route: expert, lang: en, user: "I've had chest tightness when I climb stairs for a week. Should I be worried?"}
+  - {id: e03, route: expert, lang: en, user: "Can you write me a Python function that checks whether a string is a palindrome, and explain it?"}
+  - {id: e04, route: expert, lang: en, user: "What's the difference between a Roth IRA and a traditional IRA, and which one makes more sense for me at thirty?"}
+  - {id: e05, route: expert, lang: en, user: "Plan a one week road trip through Scotland for me."}
+  - {id: e06, route: expert, lang: en, user: "Explain how mRNA vaccines work in detail."}
+  - {id: e07, route: expert, lang: en, user: "My landlord is keeping my whole deposit for normal wear and tear. What are my options?"}
+  - {id: e08, route: expert, lang: en, user: "Think carefully: a bat and a ball cost one dollar ten in total, and the bat costs a dollar more than the ball. How much is the ball?"}
+  - {id: e09, route: expert, lang: en, user: "Should I accept a job offer with higher pay but a much longer commute?"}
+  - {id: e10, route: expert, lang: en, user: "Compare electric cars and hybrids for someone who drives sixty miles a day."}
+  - {id: e11, route: expert, lang: en, user: "How does the TCP three way handshake work, and why is it needed?"}
+  - {id: e12, route: expert, lang: en, user: "What's the best way to pay down three credit cards with different interest rates?"}
+  - {id: e13, route: expert, lang: en, user: "Can you help me plan a study schedule to learn Spanish in six months?"}
+  - {id: e14, route: expert, lang: en, user: "Is it safe to take ibuprofen together with my blood pressure medication?"}
+  - {id: e15, route: expert, lang: en, user: "Why did the Western Roman Empire fall? Walk me through the main reasons."}
+  - {id: e16, route: expert, lang: ru, user: "Помоги рассчитать: если откладывать десять тысяч рублей в месяц под восемь процентов годовых, сколько будет через десять лет?"}
+  - {id: e17, route: expert, lang: ru, user: "Что лучше для первоклассника: обычная государственная школа или частная?"}
+  - {id: e18, route: expert, lang: ru, user: "У меня уже неделю держится температура тридцать семь и пять. Что это может быть?"}
+  - {id: e19, route: expert, lang: ru, user: "Объясни подробно, как работает блокчейн."}
+  - {id: e20, route: expert, lang: ru, user: "Составь мне план тренировок на месяц для подготовки к полумарафону."}
+  - {id: e21, route: expert, lang: ru, user: "Как правильно оформить договор аренды квартиры, чтобы меня не обманули?"}
+  - {id: e22, route: expert, lang: ru, user: "Подумай хорошенько: чему равна сумма всех чисел от одного до ста?"}
+  - {id: e23, route: expert, lang: es, user: "¿Cuánto pagaría al mes por un préstamo de veinte mil euros a cinco años al siete por ciento?"}
+  - {id: e24, route: expert, lang: es, user: "Mi hijo tiene fiebre alta y manchas en la piel desde ayer, ¿qué hago?"}
+  - {id: e25, route: expert, lang: es, user: "Explícame con detalle cómo funciona la inflación y por qué suben los precios."}
+  - {id: e26, route: expert, lang: es, user: "Organízame un viaje de cinco días por Andalucía."}
+  - {id: e27, route: expert, lang: es, user: "¿Me conviene más amortizar la hipoteca antes de tiempo o invertir en bolsa?"}
+  - {id: e28, route: expert, lang: es, user: "Escríbeme una función en JavaScript que ordene una lista de números sin usar sort."}
+  - {id: e29, route: expert, lang: es, user: "¿Qué diferencias hay entre ser autónomo y montar una sociedad limitada en España?"}
+  - {id: e30, route: expert, lang: es, user: "¿Qué derechos tiene un inquilino si el casero quiere echarlo antes de que acabe el contrato?"}
+  # ---- multi-turn ----
+  - id: m01
+    route: expert                # follow-up on an escalated topic
+    lang: en
+    history:
+      - user: How should I split my savings between stocks and bonds at forty?
+        expert: How should a 40-year-old split savings between stocks and bonds?
+        answer: A common starting point is about sixty to seventy percent stocks and the rest bonds, adjusted for how much risk you can stomach and when you'll need the money.
+    user: And what if I want to retire at fifty five instead?
+  - id: m02
+    route: expert                # unhappy with an earlier local answer
+    lang: en
+    history:
+      - user: How many bones are in the human body?
+        reply: There are about three hundred bones in the human body.
+    user: That doesn't sound right. Can you double check that carefully?
+  - id: m03
+    route: local                 # thanks after an escalated answer
+    lang: en
+    history:
+      - user: What would my monthly payment be on a two hundred thousand dollar loan over fifteen years at five percent?
+        expert: Monthly payment on a 200,000 dollar 15-year loan at 5 percent interest?
+        answer: It comes to about one thousand five hundred eighty dollars a month.
+    user: Great, thanks a lot!
+  - id: m04
+    route: expert
+    lang: ru
+    history:
+      - user: Что лучше купить для семьи с двумя детьми, кроссовер или минивэн?
+        expert: Что выбрать семье с двумя детьми, кроссовер или минивэн, и почему?
+        answer: Минивэн удобнее, если вы часто ездите всей семьёй далеко и с багажом. Кроссовер компактнее и лучше на плохих дорогах.
+    user: А если мы в основном ездим по городу?
+  - id: m05
+    route: expert
+    lang: es
+    history:
+      - user: ¿Cómo preparo una entrevista de trabajo para un puesto de ingeniero de software?
+        expert: ¿Cómo prepararse para una entrevista de trabajo de ingeniero de software?
+        answer: Repasa estructuras de datos y algoritmos, practica en voz alta resolviendo problemas, y prepara dos o tres proyectos tuyos para contarlos con detalle.
+    user: ¿Y qué preguntas técnicas suelen hacer?
+  - id: m06
+    route: local                 # topic change after an escalated answer
+    lang: en
+    history:
+      - user: Plan me a long weekend in Lisbon.
+        expert: A three-day long weekend itinerary for Lisbon.
+        answer: Spend day one in Alfama and Baixa, day two on a trip out to Sintra, and day three in Belém with its tower and the famous custard tarts.
+    user: By the way, do you have a name?
+  - id: m07
+    route: tool
+    lang: en
+    history:
+      - user: Hi there!
+        reply: Hi! What can I do for you?
+    user: What's the weather in Madrid right now?
+  - id: m08
+    route: expert                # the earlier local answer was wrong (17 x 23 = 391)
+    lang: ru
+    history:
+      - user: Сколько будет семнадцать умножить на двадцать три?
+        reply: Это будет триста семьдесят один.
+    user: Ты уверен? Пересчитай, пожалуйста, внимательно.
+  - id: m09
+    route: local
+    lang: es
+    history:
+      - user: ¿Qué seguro de salud me conviene si soy autónomo en España?
+        expert: ¿Qué seguro de salud conviene a un autónomo en España?
+        answer: Como autónomo ya tienes la sanidad pública; un seguro privado básico compensa sobre todo si quieres especialistas sin esperas.
+    user: Vale, muchas gracias.
+  - id: m10
+    route: expert
+    lang: en
+    history:
+      - user: Write me a SQL query that finds duplicate emails in a users table.
+        expert: A SQL query that finds duplicate email addresses in a users table.
+        answer: Group the users by email and keep the groups having a count above one, then select those emails.
+    user: Now how would I delete the duplicates but keep one of each?

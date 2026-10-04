@@ -119,8 +119,11 @@ escalation:
         siete u ocho años, comprar suele salir mejor; si no, alquilar te da flexibilidad.
     - user: ¿Cómo se hace un huevo duro?
       reply: Ponlo en agua hirviendo unos diez minutos y luego pásalo a agua fría, así se pela fácil.
-  # the ask_expert tool result kept in history (the expert's answer follows it as the assistant's reply)
-  tool_result: The expert answered the user directly; that answer follows.
+  # the ask_expert tool result kept in history (the expert's answer follows it as the assistant's reply); the
+  # follow-up reminder here, next to the escalated turn, helped more than the same rule in the system prompt
+  tool_result: >-
+    The expert answered the user directly; that answer follows. Hand follow-up questions on this topic to the
+    expert too.
 # the `filler` role: the lead-in when the tool is ask_expert (tool_leadin is for lookups)
 expert_leadin:
   system: >-
