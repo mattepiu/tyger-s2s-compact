@@ -94,8 +94,9 @@ def expert_result(p):
 
 def turns_messages(p, turns, id_prefix="shot"):
     """Structured turns -> neutral messages: {user, reply} is answered locally; {user, expert, answer} is an
-    ask_expert call (with `expert` as its question, ID call_<id_prefix><n>), its tool result, then the answer.
-    Used for the escalation few-shot turns and for the history of eval_escalation.py cases."""
+    ask_expert call (with `expert` as its question, ID call_<id_prefix><n>), its tool result, then the answer;
+    {user, call: {name, arguments}, result, answer} is any other tool call with its (compacted) result. Used for
+    the escalation few-shot turns and for the history of eval_escalation.py cases."""
     msgs = []
     for i, t in enumerate(turns, 1):
         msgs.append({"role": "user", "content": t["user"]})
@@ -103,19 +104,23 @@ def turns_messages(p, turns, id_prefix="shot"):
             msgs.append({"role": "assistant", "content": t["reply"]})
             continue
         cid = f"call_{id_prefix}{i:04d}"
-        msgs += [{"role": "assistant", "content": None,
-                  "tool_calls": [{"id": cid, "name": EXPERT, "arguments": {"question": t["expert"]}}]},
-                 {"role": "tool", "tool_call_id": cid, "content": expert_result(p)},
+        if "call" in t:
+            call, result = {"id": cid, **t["call"]}, _compact_result(t["result"])
+        else:
+            call, result = {"id": cid, "name": EXPERT, "arguments": {"question": t["expert"]}}, expert_result(p)
+        msgs += [{"role": "assistant", "content": None, "tool_calls": [call]},
+                 {"role": "tool", "tool_call_id": cid, "content": result},
                  {"role": "assistant", "content": t["answer"]}]
     return msgs
 
 
 def reply_prefix(p, expert):
-    """The reply request before the conversation: the system prompt, and with escalation on, its few-shot turns
-    (prompts.yaml escalation.shots) as earlier turns in the neutral format. A fixed prefix, so it stays cached."""
-    if not expert:
-        return [{"role": "system", "content": p.text("system", "voice_tools")}]
-    return [{"role": "system", "content": p.text("escalation", "system")}] + turns_messages(p, p.turns("escalation"))
+    """The reply request before the conversation: the system prompt, the few-shot turns (reply_shots: local answers
+    and lookups), and with escalation on, the hand-off turns (escalation.shots), as earlier turns in the neutral
+    format. A fixed prefix, so it stays cached."""
+    system = p.text("escalation", "system") if expert else p.text("system", "voice_tools")
+    msgs = [{"role": "system", "content": system}] + turns_messages(p, p.turns("reply_shots"), "rshot")
+    return msgs + (turns_messages(p, p.turns("escalation")) if expert else [])
 
 
 def smart_messages(p, turns, transcript, question, others=()):
@@ -130,15 +135,16 @@ def smart_messages(p, turns, transcript, question, others=()):
     return [{"role": "system", "content": p.text("smart", "system")}] + ctx + [{"role": "user", "content": user}]
 
 
-def round_messages(content, calls, native, results, compact=False):
+def round_messages(content, calls, native, results, compact=False, note=None):
     """One tool round in the neutral format: the assistant's calls (plugin-issued IDs; `native` passed through)
-    and a result per call, full or compacted for history."""
+    and a result per call, full or compacted for history. `note` (Prompts.result_note) is appended to each full
+    result: tool output is usually English, and a small model otherwise answers in its language."""
     asst = {"role": "assistant", "content": (content or "").strip() or None,
             "tool_calls": [{"id": c["id"], "name": c["name"], "arguments": c.get("arguments", {})} for c in calls]}
     if native is not None:
         asst["native"] = native
     res = (lambda r: _compact_result(r)) if compact else \
-        (lambda r: json.dumps(r if r is not None else {"error": "no result"}))
+        (lambda r: json.dumps(r if r is not None else {"error": "no result"}) + (f"\n\n{note}" if note else ""))
     return [asst] + [{"role": "tool", "tool_call_id": c["id"], "content": res(r)} for c, r in zip(calls, results)]
 
 
@@ -437,7 +443,8 @@ class Session:
         while not done() and not stop_flag():
             if n < MAX_STILL and time.perf_counter() >= self._play_end + FILLER_GAP_S:
                 n += 1
-                user = still_user(self.m.prompts["filler"], transcript, fillers, section)
+                user = still_user(self.m.prompts["filler"], transcript, fillers, section) + \
+                    self.m.prompts["filler"].filler_hint(transcript)
                 q = self._spawn(lambda user=user: self._filler(section, user, voice, stop_flag))
                 line = yield from self._relay(q, stop_flag)
                 if line:
@@ -508,7 +515,8 @@ class Session:
         fillers = []
         if not self._said:                     # the model's own words before the tag already did the job
             section = "expert_leadin" if to_expert else "tool_leadin"
-            user = m.prompts["filler"].fill(section, "user", transcript=transcript)
+            user = m.prompts["filler"].fill(section, "user", transcript=transcript) + \
+                m.prompts["filler"].filler_hint(transcript)
             q = self._spawn(lambda: self._filler(section, user, voice, stop_flag))
             line = yield from self._relay(q, stop_flag)
             if line:
@@ -532,7 +540,8 @@ class Session:
             full2, refused = yield from self._expert_answer(box["smart"], box["smart_msgs"], box["smart_t0"],
                                                             transcript, voice, stop_flag, fillers)
         else:
-            msgs2 = msgs + round_messages(content, calls, box["native"], results)
+            msgs2 = msgs + round_messages(content, calls, box["native"], results,
+                                          note=m.prompts["reply"].result_note(transcript))
             full2, _, _, _, refused = yield from self._speak_stream(
                 m.llms["reply"].stream(msgs2, max_new=m.max_gen, stop_flag=stop_flag), voice, stop_flag)
         if refused and not stop_flag():
@@ -576,7 +585,8 @@ class Session:
                     log.info("escalated turn: tool calls %s", [c["name"] for c in box["calls"]])
                     results = [{"error": m.prompts["smart"].text("smart", "limit")}] * len(box["calls"]) if limit \
                         else self._run_calls(box["calls"])
-                    box["msgs"] = msgs + round_messages(text, box["calls"], box["native"], results)
+                    box["msgs"] = msgs + round_messages(text, box["calls"], box["native"], results,
+                                                        note=m.prompts["smart"].result_note(transcript))
                     box["next"] = _Prefetch(lambda: m.llms["smart"].stream(
                         box["msgs"], tools=m.smart_tools, max_new=m.max_gen, stop_flag=stop_flag), stop_flag)
                 except Exception as e:

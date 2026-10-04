@@ -71,6 +71,10 @@ class VLLMChatPlugin:
         return SamplingParams(max_tokens=int(max_new), output_kind=RequestOutputKind.DELTA,
                               temperature=self.temperature)
 
+    def normalize_calls(self, text: str, names, final: bool = False) -> str:
+        """Text with the model's malformed calls rewritten into its tagged format (`names`: the offered tools)."""
+        return text
+
     def filter_text(self, raw: str, final: bool = False) -> str:
         """The model's raw text -> the part that may be spoken or parsed (e.g. without thinking). Mid-stream it
         may hold back a trailing partial tag; final=True (the stream ended) holds nothing back."""
@@ -91,21 +95,23 @@ class VLLMChatPlugin:
                     yield out.outputs[0].text
 
         raw, said, saw_tool, started = "", 0, False, None
+        names = [t["function"]["name"] for t in tools or []]
+        visible_now = lambda final=False: self.normalize_calls(self.filter_text(raw, final), names, final)  # noqa: E731
         for d in self.eloop.iterate(deltas, abort=lambda: self.engine.abort(rid), stop_flag=stop_flag):
             raw += d
             if started:
                 continue
             if not saw_tool:
-                speak, saw_tool = split_speakable(self.filter_text(raw), TAGS[self.tool_format])
+                speak, saw_tool = split_speakable(visible_now(), TAGS[self.tool_format])
                 if len(speak) > said:
                     yield ("text", speak[said:]); said = len(speak)
             if saw_tool:                  # the call's arguments are still decoding; the caller can start a filler
-                started = tool_start(self.filter_text(raw), TAGS[self.tool_format])
+                started = tool_start(visible_now(), TAGS[self.tool_format])
                 if started:
                     yield ("tool_start", started)
         if stop_flag and stop_flag():
             return
-        visible = self.filter_text(raw, final=True)
+        visible = visible_now(final=True)
         if not saw_tool and len(visible) > said:              # flush a held-back "<..." that wasn't a tag
             yield ("text", visible[said:])
         if saw_tool:

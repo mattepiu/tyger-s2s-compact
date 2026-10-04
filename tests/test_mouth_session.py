@@ -342,7 +342,9 @@ def test_no_expert_without_smart():
     s, m = make_session(FakeLLM())
     run_turn(s, "hello")
     msgs = s.m.llm.calls[0][1]
-    assert msgs[0]["content"] == PROMPTS.text("system", "voice_tools") and len(msgs) == 2
+    assert msgs[0]["content"] == PROMPTS.text("system", "voice_tools") and msgs[-1]["content"] == "hello"
+    assert msgs[:-1] == M.reply_prefix(PROMPTS, False)                # system + the lookup few-shot turns
+    assert not any(c["name"] == "ask_expert" for x in msgs if x.get("tool_calls") for c in x["tool_calls"])
     assert "ask_expert" not in [t["function"]["name"] for t in m.tools]
 
 
@@ -351,9 +353,10 @@ def test_expert_prompt_has_shots_and_tool():
     run_turn(s, "hello")
     msgs = s.m.llm.calls[0][1]
     assert msgs[0]["content"] == PROMPTS.text("escalation", "system")
-    asks = [c for x in msgs if x.get("tool_calls") for c in x["tool_calls"]]
-    assert asks and all(c["name"] == "ask_expert" for c in asks) and msgs[-1]["content"] == "hello"
-    assert len({c["id"] for c in asks}) == len(asks)
+    calls = [c for x in msgs if x.get("tool_calls") for c in x["tool_calls"]]
+    asks = [c for c in calls if c["name"] == "ask_expert"]
+    assert asks and len(asks) < len(calls) and msgs[-1]["content"] == "hello"   # lookup shots come first
+    assert len({c["id"] for c in calls}) == len(calls)
     assert [t["function"]["name"] for t in m.tools][-1] == "ask_expert"
     assert "ask_expert" not in [t["function"]["name"] for t in m.smart_tools]
     assert s.m.llms["smart"].calls == [], "a plain turn must not reach the smart model"

@@ -30,9 +30,10 @@ ears:                      # turn-taking: nemotron ASR + the tyger 1.0 heads (ex
 
 llm:                       # MOUTH's LLM roles; each block is one plugin instance
   reply:                   # ordinary turns and the tool phase-B answer
-    plugin: qwen3.5-4b     # in-process vLLM, text only, thinking off; previous responder: qwen3-4b-2507
-    gpu_memory_utilization: 0.45   # vLLM start-up free-memory check only; actual KV is pinned below
-    kv_cache_gib: 3.0              # fixed KV budget (Qwen3.5: ~69k tokens; 4 sessions x turn + backchannel)
+    plugin: gemma-4-e4b    # in-process vLLM, text only, thinking off (step 11: routes and calls tools far more
+    quantization: fp8      # reliably than Qwen3.5, NOTES). Rollback: plugin: qwen3.5-4b, no quantization, 0.45
+    gpu_memory_utilization: 0.5    # vLLM start-up free-memory check only; actual KV is pinned below
+    kv_cache_gib: 3.0              # fixed KV budget (4 sessions x turn + backchannel)
     max_model_len: 8192
     max_num_seqs: 8                # 4 sessions x (turn + backchannel) batched together
     temperature: 0.7

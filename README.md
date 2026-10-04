@@ -13,7 +13,7 @@ browser mic ──ws──▶ EARS    nemotron L15 → endpoint head: endpoint /
                      │                                    also serves the web app on :7860
                      ▼ tcp :8770
                     MOUTH   orchestrator + two in-process vLLM engines on one asyncio loop:
-                     │        • Qwen3.5-4B, text only, no thinking (vLLM AsyncLLM, tool calls)
+                     │        • Gemma 4 E4B FP8, text only, no thinking (vLLM AsyncLLM, tool calls)
                      │        • VoxCPM2 voice clone (vLLM-Omni AsyncOmni, 48 kHz → 24 kHz)
                      ▼ ws
 browser speaker ◀────┘      24 kHz audio, streamed as it decodes
@@ -43,9 +43,10 @@ I-11 before exposing it beyond an SSH tunnel).
 
 Built on one **NVIDIA RTX 5090** (32 GB, Blackwell sm_120), CUDA-13 driver (≥ 590) for the cu130 torch wheels.
 
-GPU memory in use ≈ **28.5 GB of 32 GB** with everything loaded, warm, and under a 4-conversation load: VoxCPM2
-~9.8 GB (2 GiB pinned KV, `deploy/voxcpm2.yaml`), Qwen3-4B ~11.8 GB (3 GiB pinned KV, `llm.reply.kv_cache_gib`),
-EARS ~7 GB (measured with Qwen3-4B-Instruct-2507; Qwen3.5-4B adds ~0.5 GB at peak). Both engines pin their KV budgets, so the total is predictable.
+GPU memory in use ≈ **30.0 GB of 32 GB** with everything loaded, warm, and under a 4-conversation load: VoxCPM2
+~9.8 GB (2 GiB pinned KV, `deploy/voxcpm2.yaml`), Gemma 4 E4B ~14.9 GB with FP8 weights (3 GiB pinned KV,
+`llm.reply.kv_cache_gib`; bf16 weights would not fit), EARS ~7 GB. Both engines pin their KV budgets, so the total
+is predictable. With the Qwen3.5-4B rollback the peak is ~27.7 GB.
 
 ## Setup
 
@@ -151,8 +152,9 @@ in `PLUGINS.md`). Each block names its `plugin:`; the rest of the block is that 
 
 | kind | plugin | runs | notes |
 |---|---|---|---|
-| LLM | `qwen3.5-4b` | local, vLLM in MOUTH | the default responder: thinking off, text only, XML tool calls |
-| LLM | `qwen3-4b-2507` | local, vLLM in MOUTH | the previous responder (Hermes JSON tool calls); rollback = one line |
+| LLM | `gemma-4-e4b` | local, vLLM in MOUTH | the default responder (`quantization: fp8`): thinking off, text only, Gemma tool-call tokens |
+| LLM | `qwen3.5-4b` | local, vLLM in MOUTH | the previous responder (XML tool calls); rollback = a few lines in `config.yaml` |
+| LLM | `qwen3-4b-2507` | local, vLLM in MOUTH | the one before (Hermes JSON tool calls) |
 | LLM | `openai` | **hosted** | any OpenAI-compatible chat endpoint (`base_url`: OpenAI, Groq, Cerebras, a vLLM server) |
 | LLM | `anthropic` | **hosted** | the Claude Messages API; default `claude-opus-5-5`, `effort: low`, server-side refusal fallback |
 | TTS | `voxcpm2` | local, vLLM-Omni in MOUTH | cloned voices from `voices/` |
@@ -187,7 +189,7 @@ Per-model prompt changes go in `prompts/<instance name>.yaml`, never in code.
 | component | model | licence |
 |---|---|---|
 | ASR encoder + turn-taking | `nvidia/nemotron-3.5-asr-streaming-0.6b` + endpoint head (private) | NVIDIA Open Model Licence / private head |
-| responder | `Qwen/Qwen3.5-4B` (was `Qwen/Qwen3-4B-Instruct-2507`) | Apache-2.0 |
+| responder | `google/gemma-4-E4B-it`, FP8 at load (was `Qwen/Qwen3.5-4B`, before that `Qwen/Qwen3-4B-Instruct-2507`) | Apache-2.0 |
 | TTS | `openbmb/VoxCPM2` | Apache-2.0 |
 | web tools | Tavily API | commercial API (your key) |
 

@@ -4,7 +4,7 @@ import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.plugins.llm._toolparse import split_speakable, parse_calls, strip_think, new_call_id, tool_start, \
-    NAME_WAIT, GEMMA_TAG  # noqa: E402
+    NAME_WAIT, GEMMA_TAG, gemma_normalize  # noqa: E402
 from app.plugins.llm.vllm_base import to_template_messages  # noqa: E402
 
 
@@ -106,6 +106,30 @@ def test_gemma_values_and_multiple():
            '<|tool_call>call:x{n:3,ok:true,s:<|"|>a, b<|"|>}<tool_call|>')
     assert parse_calls(raw, "gemma4") == [{"name": "ask_expert", "arguments": {"question": "Rent or buy: which, and why?"}},
                                           {"name": "x", "arguments": {"n": 3, "ok": True, "s": "a, b"}}]
+
+
+NAMES = ["get_weather", "set_reminder", "send_message", "web_search", "ask_expert"]
+
+
+def test_gemma_bare_call_is_a_call_never_spoken():
+    """Gemma sometimes drops the markers: `set_reminder{...}` as plain text. Parsed as a call, nothing spoken."""
+    for raw in ('set_reminder{text:<|"|>call my mom<|"|>,time:<|"|>6 pm<|"|>}<tool_call|>',
+                'call:set_reminder{text:<|"|>call my mom<|"|>,time:<|"|>6 pm<|"|>}'):
+        said = ""
+        for i in range(1, len(raw) + 1):
+            speak, saw = split_speakable(gemma_normalize(raw[:i], NAMES), GEMMA_TAG)
+            assert speak.startswith(said) and "{" not in speak; said = speak
+        assert said == "" and saw
+        assert parse_calls(gemma_normalize(raw, NAMES, final=True), "gemma4") == \
+            [{"name": "set_reminder", "arguments": {"text": "call my mom", "time": "6 pm"}}]
+    assert tool_start(gemma_normalize("send_message{", NAMES), GEMMA_TAG) == {"name": "send_message"}
+
+
+def test_gemma_normalize_leaves_speech_alone():
+    assert gemma_normalize("I'll get the weather for you.", NAMES, final=True) == "I'll get the weather for you."
+    assert gemma_normalize("Let me get", NAMES) == "Let me " and gemma_normalize("Let me get", NAMES, True) == "Let me get"
+    assert gemma_normalize(GEMMA, NAMES) == GEMMA                       # already tagged: unchanged
+    assert gemma_normalize("set_reminder{x}", []) == "set_reminder{x}"  # no tools offered: plain text
 
 
 # ---- <think> guard (qwen3.5-4b) ----------------------------------------------------------------------------

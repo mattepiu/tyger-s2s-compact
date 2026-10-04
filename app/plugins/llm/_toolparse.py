@@ -123,6 +123,25 @@ def _gemma_args(body: str) -> dict:
     return out
 
 
+def gemma_normalize(raw: str, names, final: bool = False) -> str:
+    """Gemma 4 sometimes writes a call without its markers: a bare `NAME{...}` or `call:NAME{...}` as plain text
+    (seen for set_reminder / send_message). For the offered tool `names`, rewrite those into the tagged form so
+    they split, name and parse like any call, and are never spoken. Mid-stream (not `final`), a trailing word that
+    could still become `NAME{` or `call:` is held back until it resolves."""
+    if not names:
+        return raw
+    alt = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+    out = re.sub(r"(?<![\w|>:])(?:call:)?(" + alt + r")\{", lambda m: GEMMA_TAG + "call:" + m.group(1) + "{", raw)
+    out = out.replace(GEMMA_TAG + "call:" + GEMMA_TAG + "call:", GEMMA_TAG + "call:")      # already tagged
+    out = re.sub(r"(" + re.escape(GEMMA_TAG) + r"call:)(?:" + re.escape(GEMMA_TAG) + r"call:)+", r"\1", out)
+    if final or GEMMA_TAG in out:
+        return out
+    m = re.search(r"(?:^|(?<=[\s.,!?;]))[\w:]+$", out)              # the trailing word, if it starts a call
+    if m and any((t + "{").startswith(m.group(0)) or ("call:" + t + "{").startswith(m.group(0)) for t in names):
+        return out[:m.start()]
+    return out
+
+
 def parse_calls(raw: str, fmt: str):
     """[{"name", "arguments"}] for each call block in raw. The Qwen formats are read as `fmt` first, then as the
     other; a block neither reads is dropped (logged by kind only, never its text)."""

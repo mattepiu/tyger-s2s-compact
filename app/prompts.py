@@ -22,6 +22,8 @@ TEMPLATES = {
     ("expert_still", "user"): {"transcript", "said"},
     ("smart", "user"): {"transcript", "question"},
     ("smart", "results"): {"results"},
+    ("language", "tool_note"): {"language"},
+    ("language", "filler"): {"language"},
 }
 # plain text, sent as written
 TEXTS = [("system", "voice_tools"), ("tool_leadin", "system"), ("still_looking", "system"),
@@ -29,7 +31,8 @@ TEXTS = [("system", "voice_tools"), ("tool_leadin", "system"), ("still_looking",
          ("markers", "interrupted"), ("markers", "empty_reply"), ("warmup", "user"),
          ("spoken", "error"), ("spoken", "refusal"),
          ("escalation", "system"), ("escalation", "tool_result"), ("expert_leadin", "system"),
-         ("expert_still", "system"), ("expert_still", "said_none"), ("smart", "system"), ("smart", "limit")]
+         ("expert_still", "system"), ("expert_still", "said_none"), ("smart", "system"), ("smart", "limit"),
+         ("language", "tool_note_any")]
 SHOTS = ["tool_leadin", "still_looking", "backchannel", "expert_leadin", "expert_still"]
 
 
@@ -92,6 +95,20 @@ class Prompts:
                  set(t) == {"user", "expert", "answer"} and isinstance(t["expert"], str) and isinstance(t["answer"], str))
                 for t in shots):
             self._fail("escalation.shots", "must be a list of {user, reply} or {user, expert, answer} turns (text)")
+        from app.tools import TOOL_SCHEMAS as _TS
+        names = {t["function"]["name"] for t in _TS}
+        ts = self.d.get("reply_shots")
+        if not isinstance(ts, list) or not all(
+                isinstance(t, dict) and isinstance(t.get("user"), str) and (
+                    set(t) == {"user", "reply"} and isinstance(t["reply"], str) or
+                    set(t) == {"user", "call", "result", "answer"} and isinstance(t["answer"], str)
+                    and isinstance(t["call"], dict) and t["call"].get("name") in names
+                    and isinstance(t["call"].get("arguments"), dict)) for t in ts):
+            self._fail("reply_shots", "must be a list of {user, reply} or {user, call: {name, arguments}, result, "
+                                      "answer} turns (calls to tools of app/tools.py)")
+        langs = self._get("language", "names")
+        if not isinstance(langs, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in langs.items()):
+            self._fail("language.names", "must map language codes to names (text)")
         tools = self.d.get("tools")
         if not isinstance(tools, dict):
             self._fail("tools", "is missing")
@@ -120,9 +137,25 @@ class Prompts:
             raise PromptError(f"`{section}.{key}` takes {sorted(want)}, got {sorted(values)}")
         return Template(self.d[section][key]).substitute(values)
 
+    def language_name(self, transcript):
+        from app.lang import guess_language
+        return self.d["language"]["names"].get(guess_language(transcript) or "")
+
+    def result_note(self, transcript) -> str:
+        """The note appended to tool results: names the reply language when app/lang.py can tell it."""
+        name = self.language_name(transcript)
+        return self.fill("language", "tool_note", language=name) if name else self.text("language", "tool_note_any")
+
+    def filler_hint(self, transcript) -> str:
+        """Appended to lead-in / still-looking requests: the language to say it in, or "" if unknown."""
+        name = self.language_name(transcript)
+        return self.fill("language", "filler", language=name) if name else ""
+
     def turns(self, section) -> list[dict]:
-        """Structured few-shot turns (escalation.shots): dicts with user + reply, or user + expert + answer."""
-        return [dict(t) for t in self.d[section]["shots"]]
+        """Structured few-shot turns: reply_shots (user + reply, or user + call + result + answer) or
+        escalation.shots (user + expert + answer, or user + reply)."""
+        node = self.d[section]
+        return [dict(t) for t in (node if isinstance(node, list) else node["shots"])]
 
     def tool_text(self) -> dict:
         return self.d["tools"]

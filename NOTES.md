@@ -207,6 +207,60 @@ yet). Reply quality issues the routing eval doesn't catch: Gemma answered 2 of 5
 English (Qwen: 0), and once spoke its tool use aloud ("I'll use the ask_expert tool for this because…") before
 the call. Facts looked better (Volga vs Qwen's Danube for Europe's longest river).
 
+**Responder switched to Gemma 4 E4B FP8 (user's call: "robust tool calling is crucial").** The eval grew first:
+30 `fresh` cases (12 tool, incl. a lookup follow-up after a weather turn; never tuned on), and scoring of what
+would be spoken: wrong language (app/lang.py guess), narration of tools / markup, and the answer after a stub tool
+result (phase B). `--no-expert` measures the production prompt (no `smart` configured). What it found and fixed:
+
+1. **Bare calls.** Gemma sometimes writes a call without its special tokens: `set_reminder{text:<|"|>…}` as
+   plain text. Our parser missed it (counted "local") and MOUTH would have spoken the markup. Fix in the plugin:
+   for the offered tools, `NAME{` / `call:NAME{` count as a call (`_toolparse.gemma_normalize`), and a trailing
+   word that could become one is held back while streaming. Prompt wording that names the tools ("call
+   set_reminder…") made bare calls far more frequent; the prompts don't name them.
+2. **Answer language after a tool result.** Tool output is English (Tavily, the stub notes): 72 / 248 (29%)
+   Russian / Spanish answers came out in English. A generic language rule in the system prompt changed nothing;
+   a generic note on the result 72 → 62. Naming the language works: MOUTH appends "[Answer the user in Russian,
+   even if this result is in another language.]" (`prompts.yaml` `language`, guessed from the transcript) to each
+   tool result it sends for the answer, and the same hint to lead-in / still-looking requests (one lead-in had
+   come out in English for a Spanish request). Plus lookup few-shot turns (below): 0 / 303 wrong.
+3. **Few-shot turns for both modes** (`reply_shots`): local answers mixed with lookups (RU weather, ES time, EN
+   reminder, RU message; English results, answers in the user's language). Lookups only made it web-search simple
+   facts (17% of local cases); mixing in local answers fixed that. The old RU shot "how do you say thanks in
+   Spanish" taught "спасибо → Spanish"; replaced. Without the shots, Gemma asked clarifying questions instead of
+   calling (who is Maria? what time zone?) and declined forecasts (`get_weather` said "current weather" only:
+   now "current weather or the forecast").
+4. Prompt rules (both modes): never talk about tools / the expert, call reminder / message tools with the details
+   given, reply in the language of the user's latest message.
+
+Final, Gemma FP8, 8 samples per case (116 cases with a smart model, 70 without; tune / held-out / fresh alike):
+
+| | no smart (production) | with smart |
+|---|---|---|
+| lookups and actions called (tool → tool) | 247 / 248 | 248 / 248 |
+| local answered locally | 312 / 312 | 312 / 312 (1 sample escalated) |
+| missed escalations | — | 1.4% (target ≤ 10%) |
+| speech in the wrong language / narration | 2 / 1 of 313 | 8 / 0 of 317 |
+| answer after a tool result in the wrong language | 0 / 247 | 2 / 248 |
+
+Left: "Спасибо, ты очень помог" is sometimes answered "De nada" (Gemma quirk, in every variant); Spanish opinion
+questions now and then answered in English (escalation mode).
+
+Full stack (config.yaml: `gemma-4-e4b`, `quantization: fp8`, `gpu_memory_utilization: 0.5`, KV 3 GiB):
+
+| | Qwen3.5-4B (step 10) | Gemma 4 E4B FP8 (final prompts) |
+|---|---|---|
+| smoke plain / weather / reminder / backchannel | 233 / 335 / 449 / 205 ms | 225 / 271 / 325 / 190 ms, PASS |
+| `load_test.py` turn first-audio p50, 3 runs | 537 / 476 / 464 (median 476) | 460 / 438 / 426 (median 438) |
+| backchannel first-audio p50 | 402–651 | 383–495 |
+| `--tools --fresh` first-audio p50 (median); dead air p50 | 533; 1014–1090 | 439 / 443 / 432 (439); 785–809 |
+| `load_test_ears.py` end of speech → first audio p50, 1 / 4 conv | 970 / 1260 | 940 / 1183, 1203 |
+| GPU peak | 27.7 GB | 30.0 GB of 32.6 (idle 30.3 before the KV warm-up settles) |
+
+Plain replies got shorter (load_test wall 25 s → 12 s for the same turns): the shots model short spoken answers.
+No tool-call parse failures (86 + 94 calls in the stack logs), no errors. Live check (11 synthetic prompts, EN /
+RU / ES): every action and lookup called, every lead-in and answer in the user's language, except the "De nada".
+Rollback: `plugin: qwen3.5-4b`, drop `quantization`, `gpu_memory_utilization: 0.45`.
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at

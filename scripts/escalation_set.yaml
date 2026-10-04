@@ -7,7 +7,8 @@
 # (`background` cases come with background tasks, step 14.) `history` holds earlier turns in the form of
 # prompts.yaml escalation.shots: {user, reply} answered locally, or {user, expert, answer} escalated.
 # Held-out cases (not used for tuning the prompt): every third case of each route, in file order (the script
-# computes it). Don't reuse the few-shot topics of prompts.yaml here.
+# computes it), and the `fresh` cases at the end. History turns may also be lookups: {user, call: {name,
+# arguments}, result, answer}. Don't reuse the few-shot topics of prompts.yaml here.
 version: 1
 cases:
   # ---- local ----
@@ -167,3 +168,67 @@ cases:
         expert: A SQL query that finds duplicate email addresses in a users table.
         answer: Group the users by email and keep the groups having a count above one, then select those emails.
     user: Now how would I delete the duplicates but keep one of each?
+  # ---- fresh (added 2026-10-04 after the held-out split had been looked at; never used for tuning) ----
+  - {id: f01, route: tool, lang: en, split: fresh, user: "Can you check the weather in Toronto for tomorrow morning?"}
+  - {id: f02, route: tool, lang: en, split: fresh, user: "What time is it in London right now?"}
+  - {id: f03, route: tool, lang: en, split: fresh, user: "Search the web for the Louvre's opening hours today."}
+  - {id: f04, route: tool, lang: en, split: fresh, user: "Set a reminder to water the plants on Sunday at ten."}
+  - {id: f05, route: tool, lang: en, split: fresh, user: "Text Maria that dinner is at eight."}
+  - {id: f06, route: tool, lang: ru, split: fresh, user: "Сколько сейчас стоит биткоин?"}
+  - {id: f07, route: tool, lang: ru, split: fresh, user: "Какие главные новости сегодня?"}
+  - {id: f08, route: tool, lang: ru, split: fresh, user: "Отправь сообщение Олегу, что я опоздаю на пятнадцать минут."}
+  - {id: f09, route: tool, lang: es, split: fresh, user: "¿Va a llover mañana en Barcelona?"}
+  - {id: f10, route: tool, lang: es, split: fresh, user: "Recuérdame comprar pan a las siete de la tarde."}
+  - {id: f11, route: tool, lang: es, split: fresh, user: "¿A cuánto está el euro frente al dólar hoy?"}
+  - id: f12
+    route: tool                  # a lookup follow-up must look up again, not answer from the earlier result (I-12)
+    lang: en
+    split: fresh
+    history:
+      - user: What's the weather in Paris?
+        call: {name: get_weather, arguments: {location: Paris}}
+        result: {location: Paris, answer: "Sunny, 22 C"}
+        answer: It's sunny and about twenty two degrees in Paris.
+    user: And in Rome?
+  - {id: f13, route: local, lang: en, split: fresh, user: "What's the opposite of hot?"}
+  - {id: f14, route: local, lang: en, split: fresh, user: "Give me a word that rhymes with cat."}
+  - {id: f15, route: local, lang: en, split: fresh, user: "Good night, talk to you tomorrow!"}
+  - {id: f16, route: local, lang: ru, split: fresh, user: "Сколько будет семь плюс восемь?"}
+  - {id: f17, route: local, lang: ru, split: fresh, user: "Расскажи, какие бывают породы кошек, пару штук."}
+  - {id: f18, route: local, lang: es, split: fresh, user: "¿Me recomiendas un nombre para un perro pequeño?"}
+  - {id: f19, route: local, lang: es, split: fresh, user: "¿Qué día viene después del lunes?"}
+  - id: f20
+    route: local
+    lang: ru
+    split: fresh
+    history:
+      - user: Какая погода в Казани?
+        call: {name: get_weather, arguments: {location: Казань}}
+        result: {location: Казань, answer: "Облачно, 5 C"}
+        answer: В Казани облачно, около пяти градусов.
+    user: Спасибо!
+  - {id: f21, route: expert, lang: en, split: fresh, user: "Is it better to lease or buy a car if I drive fifteen thousand miles a year?"}
+  - {id: f22, route: expert, lang: en, split: fresh, user: "Write a regular expression that matches an email address and explain each part."}
+  - {id: f23, route: expert, lang: en, split: fresh, user: "My doctor prescribed antibiotics but I feel better after two days. Can I stop taking them?"}
+  - {id: f24, route: expert, lang: en, split: fresh, user: "Explain the difference between a recession and a depression, with examples."}
+  - {id: f25, route: expert, lang: ru, split: fresh, user: "Как мне распределить бюджет на ремонт квартиры в пятьсот тысяч рублей?"}
+  - {id: f26, route: expert, lang: ru, split: fresh, user: "Можно ли уволиться во время больничного и чем это грозит?"}
+  - {id: f27, route: expert, lang: es, split: fresh, user: "¿Cómo calculo cuánto tengo que ahorrar para jubilarme a los sesenta?"}
+  - {id: f28, route: expert, lang: es, split: fresh, user: "Planifícame una semana de comidas saludables con poco presupuesto."}
+  - id: f29
+    route: expert
+    lang: en
+    split: fresh
+    history:
+      - user: Should I keep my emergency fund in a high yield savings account or in treasury bills?
+        expert: High-yield savings account or treasury bills for an emergency fund?
+        answer: A high yield savings account is simpler and you can reach the money any day; treasury bills can pay a bit more but tie it up for weeks.
+    user: What about inflation, does that change your answer?
+  - id: f30
+    route: expert
+    lang: es
+    split: fresh
+    history:
+      - user: ¿Cuántos huesos tiene un bebé al nacer?
+        reply: Un bebé nace con unos doscientos seis huesos.
+    user: Eso no me suena bien, ¿puedes comprobarlo con calma?
