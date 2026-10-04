@@ -50,6 +50,25 @@ parity checks: compare p50s over 3 runs at 4 conversations, and single runs at 1
 Detection is ~160 ms slower at 4 conversations than at 1 (p50 ~850 vs 685 ms), more than the hop lag difference
 (~30 ms at p50) explains; not yet looked into (L-02 measures there next).
 
+### Plugin refactor: parity baseline (PLUGINS.md step 0)
+Branch `voxcpm2` at `a7f4cf8`, this box, config as committed (Qwen3.5-4B, VoxCPM2, cloned voice `en`). Every
+plugin step on branch `plugins` is compared against these:
+
+| test | metric | baseline |
+|---|---|---|
+| unit tests | `test_chunker`, `test_llm_parse`, `test_mouth_session` | all pass |
+| `smoke_test.py` | plain / weather tool / reminder / backchannel first-audio | 243 / 351 / 429 / 194 ms, PASS |
+| `load_test.py --sessions 4 --turns 6` | turn first-audio p50 (3 runs) | 514 / 482 / 481 ms (median 482) |
+| | backchannel first-audio p50 | 530 / 421 / 495 ms |
+| | GPU peak | 27 692–27 696 MiB |
+| `load_test.py --sessions 4 --turns 6 --tools --fresh` | first-audio p50 / max, dead air p50 / max | 454 / 582, 1011 / 1343 ms |
+| `load_test_ears.py --sessions 1` (2 runs) | end of speech → endpoint / → first audio p50 | 686, 684 / 970, 966 ms |
+| `load_test_ears.py --sessions 4` (3 runs) | end of speech → endpoint / → first audio p50; hop lag p90 | 838–885 / 1250–1268 ms; 214–224 ms |
+| `validate_ears_batched.py` | events / transcripts vs reference; max head diff | all match; 0.0077 |
+| | tick ms p50 / p90, 1 and 4 sessions | 44 / 68, 71 / 166 |
+| `validate_rnnt.py` | padded batch vs alone | 40/40 identical |
+| `bench_tts_voice.py` | cloned voice (speaker cache) generate → first audio p50 | 89 ms (zero-shot 89, clip every request 115) |
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at
