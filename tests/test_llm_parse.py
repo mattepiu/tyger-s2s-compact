@@ -4,7 +4,7 @@ import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.plugins.llm._toolparse import split_speakable, parse_calls, strip_think, new_call_id, tool_start, \
-    NAME_WAIT, GEMMA_TAG, gemma_normalize  # noqa: E402
+    NAME_WAIT, GEMMA_TAG, gemma_normalize, names_tool  # noqa: E402
 from app.plugins.llm.vllm_base import to_template_messages  # noqa: E402
 
 
@@ -171,6 +171,13 @@ def test_tool_start_waits_for_the_whole_name():
         assert at < len(raw) - 20, "named well before the call finished decoding"
     assert tool_start('Okay. <tool_call>\n{"name": "get_wea') is None
     assert tool_start("no call here") is None
+
+
+def test_name_wait_only_with_ask_expert():
+    from app.prompts import default_prompts
+    from app.tools import build_tools
+    p = default_prompts()
+    assert not names_tool(build_tools(p)) and names_tool(build_tools(p, expert=True)) and not names_tool(None)
 
 
 def test_tool_start_gives_up_on_a_garbled_call():

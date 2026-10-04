@@ -38,11 +38,13 @@ llm:                       # MOUTH's LLM roles; each block is one plugin instanc
     max_num_seqs: 8                # 4 sessions x (turn + backchannel) batched together
     temperature: 0.7
   filler: reply            # backchannels, tool lead-ins, still-looking lines: the same instance
-  # smart:                 # optional: answers turns the reply model escalates (ask_expert). HOSTED: escalated
-  #   plugin: anthropic    # turns and their mouth.escalation.context_turns of transcript leave the box
-  #   model: claude-opus-5-5
-  #   effort: low
-  #   max_tokens: 2048
+  smart:                   # optional: answers turns the reply model escalates (ask_expert). HOSTED: escalated
+    plugin: openai         # turns and their mouth.escalation.context_turns of transcript go to OpenAI
+    model: gpt-5.4-mini    # step 11 probe: first text p50 ~0.5 s, total ~1.1 s (gpt-5.5: ~1.0 s / 2.7 s)
+    max_tokens: 1024       # sent as max_completion_tokens (gpt-5*)
+    extra_body: {reasoning_effort: none}   # on Chat Completions gpt-5.x takes function tools only without reasoning
+    api_key_env: OPENAI_API_KEY
+  # smart: {plugin: anthropic, model: claude-opus-5-5, effort: low, max_tokens: 2048}   # once there's a key
 
 tts:                       # VoxCPM2, in-process vLLM-Omni AsyncOmni inside the MOUTH
   plugin: voxcpm2

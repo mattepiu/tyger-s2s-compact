@@ -3,8 +3,9 @@ Qwen plugins, which override only the hooks: default_model, engine_kwargs, templ
 sampling, filter_text.
 
 stream(messages, tools=...) yields ("text", delta) for speakable text as it decodes; ("tool_start", {"name": ...})
-once a <tool_call> tag has appeared and the tool's name has decoded after it (a few tokens; the arguments are still
-decoding), so MOUTH can pick a filler that fits the tool; then at most one ("tool_calls", [{"id", "name",
+once a <tool_call> tag has appeared: with ask_expert offered, only after the tool's name has decoded (a few tokens;
+the arguments are still decoding) so MOUTH can pick a lead-in that fits the tool, otherwise at the bare tag
+({"name": None}); then at most one ("tool_calls", [{"id", "name",
 "arguments"}], None) at the end. Text from the first <tool_call> on is
 never yielded as speech (a trailing partial "<tool_c" is held back until it resolves). The KV budget is pinned
 (kv_cache_gib), so GPU memory doesn't depend on what else is loaded.
@@ -12,7 +13,7 @@ never yielded as speech (a trailing partial "<tool_c" is held back until it reso
 from __future__ import annotations
 import asyncio, threading, uuid, logging
 
-from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id, tool_start, TAGS
+from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id, tool_start, TAGS, names_tool
 
 log = logging.getLogger("llm")
 
@@ -96,6 +97,7 @@ class VLLMChatPlugin:
 
         raw, said, saw_tool, started = "", 0, False, None
         names = [t["function"]["name"] for t in tools or []]
+        wait_name = names_tool(tools)
         visible_now = lambda final=False: self.normalize_calls(self.filter_text(raw, final), names, final)  # noqa: E731
         for d in self.eloop.iterate(deltas, abort=lambda: self.engine.abort(rid), stop_flag=stop_flag):
             raw += d
@@ -106,7 +108,7 @@ class VLLMChatPlugin:
                 if len(speak) > said:
                     yield ("text", speak[said:]); said = len(speak)
             if saw_tool:                  # the call's arguments are still decoding; the caller can start a filler
-                started = tool_start(visible_now(), TAGS[self.tool_format])
+                started = tool_start(visible_now(), TAGS[self.tool_format]) if wait_name else {"name": None}
                 if started:
                     yield ("tool_start", started)
         if stop_flag and stop_flag():

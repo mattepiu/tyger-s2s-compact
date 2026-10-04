@@ -13,6 +13,8 @@ bodies are never logged; keep OPENAI_LOG unset (the SDK's debug logging prints b
     waits for the written name, as in the local plugins.
   * Tool-call IDs are this plugin's own (call_<8 hex>), unique for the session whatever the server sends. A call
     whose arguments don't parse or lack a required key is returned with "error" set: MOUTH never runs it.
+  * Reasoning models (gpt-5*, o-series): max_completion_tokens instead of max_tokens (guessed from the model name,
+    `token_param` overrides); `reasoning_effort` / `verbosity` go in `extra_body`. Their thinking is never read.
   * Fails fast (a voice turn can't wait): max_retries 1, short timeouts, a 429 is not waited out. Every failure is
     an LLMError, and MOUTH speaks a short apology. `max_concurrency` bounds requests in flight per instance.
   * Abort: when stop_flag turns true the stream is closed (tokens already generated are still billed).
@@ -154,6 +156,10 @@ class OpenAICompatLLM:
         if (os.environ.get("OPENAI_LOG") or "").lower() == "debug":
             raise RuntimeError("OPENAI_LOG=debug would log request bodies (transcripts): unset it")
         self.max_tokens = conf.get("max_tokens")
+        # OpenAI's reasoning models (gpt-5*, o-series) take max_completion_tokens (thinking + text) and reject
+        # max_tokens; other endpoints (Groq, Cerebras, vLLM) take max_tokens. `token_param` overrides the guess.
+        self.token_param = conf.get("token_param") or (
+            "max_completion_tokens" if str(self.model).startswith(("gpt-5", "o1", "o3", "o4")) else "max_tokens")
         self.temperature = conf.get("temperature")             # sent only if set
         self.extra_body = conf.get("extra_body") or None
         self.think_guard = bool(conf.get("strip_think", True))
@@ -184,7 +190,7 @@ class OpenAICompatLLM:
 
     def stream(self, messages, tools=None, max_new=192, stop_flag=None):
         kw = dict(model=self.model, messages=to_openai_messages(messages), stream=True,
-                  max_tokens=int(self.max_tokens or max_new))
+                  **{self.token_param: int(self.max_tokens or max_new)})
         if tools:
             kw["tools"] = tools
         if self.temperature is not None:

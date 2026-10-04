@@ -261,6 +261,32 @@ No tool-call parse failures (86 + 94 calls in the stack logs), no errors. Live c
 RU / ES): every action and lookup called, every lead-in and answer in the user's language, except the "De nada".
 Rollback: `plugin: qwen3.5-4b`, drop `quantization`, `gpu_memory_utilization: 0.45`.
 
+**`smart` = OpenAI gpt-5.4-mini (user's call; live probe with the user's OK, synthetic prompts only).** The exact
+escalated-turn request (`smart_messages`, lookup tools) on 8 hard prompts EN / RU / ES, one needing the weather:
+
+| | gpt-5.5 | gpt-5.4-mini | gpt-4.1 |
+|---|---|---|---|
+| first text p50 (max) | 981 ms (6.8 s) | 507 ms (3.7 s) | 510 ms (3.7 s) |
+| total p50 | 2.7 s | 1.1 s | 1.2 s |
+| right language / markdown / used the weather tool | 8/8, 0/8, yes | 8/8, 0/8, yes | 8/8, 0/8, yes |
+| words p50 | 79 | 68 | 66 |
+
+On Chat Completions, gpt-5.x takes function tools only with `reasoning_effort: none` (400 otherwise: "use
+/v1/responses"), so all ran without thinking; thinking + tools would need a Responses API plugin. The plugin now
+sends `max_completion_tokens` for gpt-5* / o-series (`token_param` overrides). gpt-5.4-mini: as fast as gpt-4.1,
+newer, says numbers as words.
+
+Live, Gemma `reply` + gpt-5.4-mini `smart` (5 synthetic hard prompts through MOUTH): lead-in first audio 363–374
+ms; expert answer first text 0.86–1.14 s and first audio 1.03–1.33 s after the turn started, i.e. while the
+lead-in (~2 s) is still playing: no dead air. Smart first event 530–710 ms after its request. Barge-in during the
+answer → D 6 ms. The bike-in-Berlin question went to `get_weather` locally (answer 3.7 s, a still line covering
+Tavily).
+
+`tool_start` waits for the tool's name only when ask_expert is offered (`_toolparse.names_tool`), as asked.
+Tool-turn first audio p50: no smart 395 / 367 / 380 (was 439 with the name wait); with smart on 469 / 462 (the
+longer escalation prompt + the name). Plain turns with smart on 468 / 513 / 467 (438 without): the hand-off shots
+add prefill. Smoke PASS both ways; GPU peak 30.4 GB.
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at

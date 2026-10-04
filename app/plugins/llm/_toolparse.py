@@ -184,6 +184,12 @@ def tool_start(raw: str, tag: str = TAG):
     return {"name": None} if len(body) >= NAME_WAIT else None
 
 
+def names_tool(tools) -> bool:
+    """Whether tool_start should wait for the tool's name: only when MOUTH picks the lead-in by it, i.e. when
+    ask_expert is offered. Otherwise tool_start comes at the bare tag, a few tokens sooner."""
+    return any(t["function"]["name"] == "ask_expert" for t in tools or [])
+
+
 def new_call_id() -> str:
     """A tool-call ID unique for the session (the neutral format; Claude needs unique, matching IDs)."""
     return f"call_{uuid.uuid4().hex[:8]}"

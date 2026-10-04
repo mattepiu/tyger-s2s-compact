@@ -23,6 +23,7 @@ LOCAL = os.environ.get("TYGER_CONTRACT_LOCAL") == "1"
 CFG = load_config()
 P = default_prompts()
 TOOLS = build_tools(P)
+TOOLS_EXPERT = build_tools(P, expert=True)
 MARKUP = ("<tool_call>", "</tool_call>", "<function=", "<think>", "</think>")
 
 
@@ -84,9 +85,14 @@ def llm_suite(llm, plain=True, tool_turn=True):
             check_llm_events(evs)
             calls = evs[-1][1] if evs and evs[-1][0] == "tool_calls" else []
             assert calls and calls[0]["name"] == "get_weather", f"no weather call for {city}"
-            assert evs[[e[0] for e in evs].index("tool_start")][1]["name"] == "get_weather", "tool_start unnamed"
+            assert evs[[e[0] for e in evs].index("tool_start")][1]["name"] in (None, "get_weather")
             ids |= {c["id"] for c in calls}
         assert len(ids) == 2, "tool-call IDs repeat across requests"
+        q = [{"role": "system", "content": P.text("system", "voice_tools")},     # ask_expert offered: named
+             {"role": "user", "content": "What's the weather in Oslo right now?"}]
+        evs = list(llm.stream(q, tools=TOOLS_EXPERT, max_new=96))
+        check_llm_events(evs)
+        assert ("tool_start", {"name": "get_weather"}) in evs, "tool_start unnamed with ask_expert offered"
 
 
 def test_llm_fake():

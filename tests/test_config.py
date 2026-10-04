@@ -34,7 +34,7 @@ def test_old_shape_rejected_with_new_keys():
 
 
 def test_filler_defaults_to_reply_instance():
-    cfg = copy.deepcopy(BASE); cfg["llm"].pop("filler", None)
+    cfg = copy.deepcopy(BASE); cfg["llm"].pop("filler", None); cfg["llm"].pop("smart", None)
     roles = llm_roles(validate_config(cfg))
     assert roles["filler"] is roles["reply"] and "smart" not in roles
     assert roles["reply"][0] == cfg["llm"]["reply"]["plugin"]

@@ -12,7 +12,7 @@ from __future__ import annotations
 import threading, time
 
 from app.plugins.base import LLMError
-from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id, tool_start
+from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id, tool_start, names_tool
 
 KINDS = ("reply", "phase_b", "leadin", "still", "ack", "expert_leadin", "expert_still", "smart", "smart_b")
 DEFAULTS = {"reply": "Sure, here is a reasonably long first sentence for you. And a second one.",
@@ -94,7 +94,7 @@ class FakeLLM:
                     if len(speak) > said:
                         yield ("text", speak[said:]); said = len(speak)
                 if saw_tool and getattr(self, "emit_tool_start", True):
-                    started = tool_start(raw)
+                    started = tool_start(raw) if names_tool(tools) else {"name": None}
                     if started:
                         yield ("tool_start", started)
             if stop_flag and stop_flag():

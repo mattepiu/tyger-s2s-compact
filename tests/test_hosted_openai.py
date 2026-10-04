@@ -152,6 +152,12 @@ def test_plugin_streams_and_sends_options():
     stub_create(p2, lambda: StubStream([chunk("ok")]), sent2)
     list(p2.stream([{"role": "user", "content": "hi"}], max_new=12))
     assert "temperature" not in sent2[0] and sent2[0]["max_tokens"] == 12 and "tools" not in sent2[0]
+    p3 = make_plugin(model="gpt-5.4-mini", max_tokens=900, extra_body={"reasoning_effort": "low"})
+    sent3 = []
+    stub_create(p3, lambda: StubStream([chunk("ok")]), sent3)
+    list(p3.stream([{"role": "user", "content": "hi"}], max_new=12))
+    assert sent3[0]["max_completion_tokens"] == 900 and "max_tokens" not in sent3[0]
+    assert sent3[0]["extra_body"] == {"reasoning_effort": "low"}
 
 
 def test_plugin_stop_closes_stream():
