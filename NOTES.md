@@ -341,6 +341,42 @@ shots add prefill. Smoke PASS, GPU peak 30.4 GB. With smart on, `load_test.py`'s
 then ("explain what a black hole is": 7–10 of 72 turns), i.e. the load test makes a few OpenAI calls; for pure
 local parity runs use a config without `llm.smart`.
 
+**Step 14 (background cases in the routing eval; README section).** `eval_escalation.py` has a fourth route,
+`background` (`start_task`; `cancel_task` counts as a tool). Its mode follows config.yaml (tasks on), with
+`--no-tasks` / `--no-expert`. Cases may carry `also` (planning: either expert or background is right) and a
+`status` note, built as MOUTH builds it (`mouth.with_status`). New: 18 single-turn background requests (EN / RU / ES:
+research and get back, compare many options, multi-day plans, long drafts) and 6 multi-turn ones: status questions
+with a running or finished task, a cancel, an unrelated question meanwhile, a second research request. 140 cases
+in all. Gemma 4 E4B FP8, 8 samples:
+
+| run | right (incl. `also`) | missed (exp / bg → local) | unneeded | bg → expert (not allowed) | after-tool wrong language |
+|---|---|---|---|---|---|
+| first | 98.7% | 1.3% | 0% | 8 | 3 / 417 |
+| + language named after the status note | 98.3% | 1.5% | 0% | 8 | 0 / 419 |
+| + status / cancel shots, cancel_task description | 98.2% | 0.6% | 0% | 17 | 3 / 407 |
+| + language from earlier turns for short utterances (final) | 98.3% | 0.4% | 0% | 17 | 0 / 407 |
+
+Held-out 96.1%, fresh 100%. Found and fixed on the way:
+- **The status note pulled replies into English.** A Russian "how's it going?" was answered in English (the note is
+  English). The user's language is now named right after it.
+- **A status question cancelled the task.** "Ну как там с тарифами?" called `cancel_task` 2 / 16 times, made up a
+  `get_task_status` tool once, and escalated once. Fixed with task shots for a status question answered locally
+  (EN, RU) and an explicit "drop it" → cancel_task (ES), plus a cancel_task description that rules out progress
+  questions: now 16 / 16 local.
+- **Short utterances lost the language.** "Actually, never mind, drop that one" was too short to guess, and the
+  cancel was acknowledged in Russian. MOUTH now guesses from the user's last few turns too when the utterance can't
+  tell (`app/lang.language_text`), for every language hint.
+
+Left:
+- "Research … and tell me later" in RU / ES sometimes goes to the expert, answered now, not as a task (b09 6/8,
+  b10 8/8). Both reach the smart model, but the answer is quicker and shallower. The status / cancel shots made
+  this more common (8 → 17 samples), a trade for the safe status answers.
+- The "De nada" quirk; Spanish opinion questions now and then answered in English.
+- The narration flags on b04 are false positives ("those tools" = project-management tools).
+
+The eval stubs every tool, so it needs no Tavily or OpenAI key. Tavily is disabled for now (user, 2026-10-04): live
+lookups and task searches return the error result until it is back.
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at

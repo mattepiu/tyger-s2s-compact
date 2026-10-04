@@ -24,6 +24,7 @@ TEMPLATES = {
     ("smart", "results"): {"results"},
     ("language", "tool_note"): {"language"},
     ("language", "filler"): {"language"},
+    ("language", "status_note"): {"language"},
     ("tasks", "user"): {"goal", "language", "transcript"},
     ("tasks", "status_block"): {"tasks"},
     ("tasks", "status_running"): {"id", "goal", "seconds"},
@@ -123,12 +124,13 @@ class Prompts:
         from app.tools import START, CANCEL
         ts = self._get("tasks", "shots")
         if not isinstance(ts, list) or not all(
-                isinstance(t, dict) and set(t) == {"user", "call", "result", "answer"} and isinstance(t["user"], str)
-                and isinstance(t["answer"], str) and isinstance(t["call"], dict)
-                and t["call"].get("name") in (START, CANCEL) and isinstance(t["call"].get("arguments"), dict)
-                for t in ts):
-            self._fail("tasks.shots", "must be a list of {user, call: {name: start_task|cancel_task, arguments}, "
-                                      "result, answer} turns")
+                isinstance(t, dict) and isinstance(t.get("user"), str) and (
+                    set(t) == {"user", "reply"} and isinstance(t["reply"], str) or
+                    set(t) == {"user", "call", "result", "answer"} and isinstance(t["answer"], str)
+                    and isinstance(t["call"], dict) and t["call"].get("name") in (START, CANCEL)
+                    and isinstance(t["call"].get("arguments"), dict)) for t in ts):
+            self._fail("tasks.shots", "must be a list of {user, reply} or {user, call: {name: start_task|cancel_task, "
+                                      "arguments}, result, answer} turns")
         langs = self._get("language", "names")
         if not isinstance(langs, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in langs.items()):
             self._fail("language.names", "must map language codes to names (text)")

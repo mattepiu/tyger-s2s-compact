@@ -25,3 +25,11 @@ def guess_language(text: str) -> str | None:
     if max(es, en) < 2 or es == en:
         return None
     return "es" if es > en else "en"
+
+
+def language_text(transcript: str, earlier=()) -> str:
+    """The text to guess the user's language from: their words, or, when those are too short to tell ("drop that
+    one", "thanks!"), together with their last few earlier messages (`earlier`, oldest first)."""
+    if guess_language(transcript):
+        return transcript
+    return " ".join(list(earlier)[-3:] + [transcript])

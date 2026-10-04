@@ -38,6 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 from app.wire import send_msg, recv_msg
 from app.tools import build_tools, execute_tool, EXPERT, START, CANCEL
 from app.tasks import TaskRunner, TaskSlots
+from app.lang import language_text
 from app.chunker import next_chunk, say_clean
 from app.config import load_config, llm_roles
 from app.prompts import load_prompts
@@ -125,6 +126,17 @@ def reply_prefix(p, expert, tasks=False):
     msgs = [{"role": "system", "content": system}] + turns_messages(p, p.turns("reply_shots"), "rshot")
     msgs += turns_messages(p, p.turns("escalation")) if expert else []
     return msgs + (turns_messages(p, p.turns("tasks"), "tshot") if tasks else [])
+
+
+def with_status(p, status, transcript, lang_text=None):
+    """The user's message as the reply model gets it while background tasks exist: the status note (+ the user's
+    language named, guessed from `lang_text` (default: their words), as the note is English: step 14 eval), then
+    their words."""
+    if not status:
+        return transcript
+    name = p.language_name(lang_text or transcript)
+    lang = " " + p.fill("language", "status_note", language=name) if name else ""
+    return f"{status}{lang}\n\n{transcript}"
 
 
 def plain_context(turns):
@@ -445,7 +457,7 @@ class Session:
             elif expert and c["name"] == EXPERT:
                 results[i] = {"result": p.text("escalation", "tool_result")}
             elif self.tasks is not None and c["name"] == START:
-                results[i] = self.tasks.start(args.get("goal"), transcript)
+                results[i] = self.tasks.start(args.get("goal"), transcript, self._lang)
             elif self.tasks is not None and c["name"] == CANCEL:
                 try:
                     results[i] = self.tasks.cancel(int(args.get("task_id")))
@@ -468,7 +480,7 @@ class Session:
             if n < MAX_STILL and time.perf_counter() >= self._play_end + FILLER_GAP_S:
                 n += 1
                 user = still_user(self.m.prompts["filler"], transcript, fillers, section) + \
-                    self.m.prompts["filler"].filler_hint(transcript)
+                    self.m.prompts["filler"].filler_hint(self._lang)
                 q = self._spawn(lambda user=user: self._filler(section, user, voice, stop_flag))
                 line = yield from self._relay(q, stop_flag)
                 if line:
@@ -484,12 +496,17 @@ class Session:
             log.warning("turn: LLM request failed (%s)", e.kind)
             yield from self._speak_line("error", transcript, stop_flag)
 
+    def _user_words(self):
+        """The user's earlier messages in history (MOUTH's bracketed notes left out), oldest first."""
+        return [x["content"] for x in self.history if x["role"] == "user" and not x["content"].startswith("[")]
+
     def _turn(self, transcript, stop_flag):
         m = self.m; voice = self.voice                 # one voice per reply (a switch applies to the next one)
+        self._lang = language_text(transcript, self._user_words())   # what the language hints are guessed from
         self._said = []; self._audio_s = 0.0; self._play_end = time.perf_counter()
         status = self.tasks.status_block() if self.tasks is not None else ""   # tasks: a note on this message only
         msgs = reply_prefix(m.prompts["reply"], m.expert, m.tasks_on) + list(self.history) + \
-            [{"role": "user", "content": f"{status}\n\n{transcript}" if status else transcript}]
+            [{"role": "user", "content": with_status(m.prompts["reply"], status, transcript, self._lang)}]
         events = m.llms["reply"].stream(msgs, tools=m.tools, max_new=m.max_gen, stop_flag=stop_flag)
         content, calls, native, started, refused = yield from self._speak_stream(events, voice, stop_flag)
         if refused and not stop_flag():
@@ -546,7 +563,7 @@ class Session:
         if not self._said:                     # the model's own words before the tag already did the job
             section = "expert_leadin" if to_expert else "tool_leadin"
             user = m.prompts["filler"].fill(section, "user", transcript=transcript) + \
-                m.prompts["filler"].filler_hint(transcript)
+                m.prompts["filler"].filler_hint(self._lang)
             q = self._spawn(lambda: self._filler(section, user, voice, stop_flag))
             line = yield from self._relay(q, stop_flag)
             if line:
@@ -571,7 +588,7 @@ class Session:
                                                             transcript, voice, stop_flag, fillers)
         else:
             msgs2 = msgs + round_messages(content, calls, box["native"], results,
-                                          note=m.prompts["reply"].result_note(transcript))
+                                          note=m.prompts["reply"].result_note(self._lang))
             full2, _, _, _, refused = yield from self._speak_stream(
                 m.llms["reply"].stream(msgs2, max_new=m.max_gen, stop_flag=stop_flag), voice, stop_flag)
         if refused and not stop_flag():
@@ -616,7 +633,7 @@ class Session:
                     results = [{"error": m.prompts["smart"].text("smart", "limit")}] * len(box["calls"]) if limit \
                         else self._run_calls(box["calls"])
                     box["msgs"] = msgs + round_messages(text, box["calls"], box["native"], results,
-                                                        note=m.prompts["smart"].result_note(transcript))
+                                                        note=m.prompts["smart"].result_note(self._lang))
                     box["next"] = _Prefetch(lambda: m.llms["smart"].stream(
                         box["msgs"], tools=m.smart_tools, max_new=m.max_gen, stop_flag=stop_flag), stop_flag)
                 except Exception as e:
@@ -660,7 +677,7 @@ class Session:
                           result=_compact_result(task.result or task.summary or ""))
         else:
             fp = m.prompts["filler"]
-            user = fp.fill("task_failed", "user", goal=task.goal) + fp.filler_hint(task.transcript)
+            user = fp.fill("task_failed", "user", goal=task.goal) + fp.filler_hint(task.lang_text)
             line = _text(m.llms["filler"].stream(_with_shots(fp.text("task_failed", "system"),
                                                              fp.shots("task_failed"), user),
                                                  max_new=40, stop_flag=stop_flag)).strip()

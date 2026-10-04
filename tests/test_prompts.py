@@ -66,6 +66,10 @@ def test_language_named_in_notes():
         ["ru", "es", "es", "en", None, None]
     assert "Russian" in P.result_note("Какая погода в Казани?") and P.filler_hint("Какая погода в Казани?")
     assert P.result_note("Hmm") == P.text("language", "tool_note_any") and P.filler_hint("Hmm") == ""
+    from app.lang import language_text
+    assert language_text("Actually, never mind, drop that one.", ["Сравни тарифы операторов, пожалуйста"]) \
+        .endswith("drop that one.") and guess_language(language_text("Ok, drop it.", ["Сравни тарифы, пожалуйста"])) == "ru"
+    assert language_text("What time is it in Tokyo?", ["Привет"]) == "What time is it in Tokyo?"
 
 
 def test_reply_shots_checked():

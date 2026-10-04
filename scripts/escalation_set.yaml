@@ -4,8 +4,11 @@
 #   tool   - weather, time, prices, news, reminders, messages: a lookup / action tool (not ask_expert)
 #   expert - maths, code, health / money / legal advice, comparisons, planning, long explanations, "think
 #            carefully", unhappiness with an earlier answer, follow-ups on an escalated topic: ask_expert
-# (`background` cases come with background tasks, step 14.) `history` holds earlier turns in the form of
-# prompts.yaml escalation.shots: {user, reply} answered locally, or {user, expert, answer} escalated.
+#   background - research, compare many options, plan a multi-day trip, draft something long: start_task (only
+#            evaluated with tasks on); a status question answers locally from the note, "drop it" is a tool
+# `also`: routes that count as right too (planning can be answered now or researched). `history` holds earlier
+# turns in the form of prompts.yaml escalation.shots: {user, reply} answered locally, or {user, expert, answer}
+# escalated; `status` is the background-task note MOUTH puts in front of the user's message.
 # Held-out cases (not used for tuning the prompt): every third case of each route, in file order (the script
 # computes it), and the `fresh` cases at the end. History turns may also be lookups: {user, call: {name,
 # arguments}, result, answer}. Don't reuse the few-shot topics of prompts.yaml here.
@@ -64,7 +67,7 @@ cases:
   - {id: e02, route: expert, lang: en, user: "I've had chest tightness when I climb stairs for a week. Should I be worried?"}
   - {id: e03, route: expert, lang: en, user: "Can you write me a Python function that checks whether a string is a palindrome, and explain it?"}
   - {id: e04, route: expert, lang: en, user: "What's the difference between a Roth IRA and a traditional IRA, and which one makes more sense for me at thirty?"}
-  - {id: e05, route: expert, lang: en, user: "Plan a one week road trip through Scotland for me."}
+  - {id: e05, route: expert, also: [background], lang: en, user: "Plan a one week road trip through Scotland for me."}
   - {id: e06, route: expert, lang: en, user: "Explain how mRNA vaccines work in detail."}
   - {id: e07, route: expert, lang: en, user: "My landlord is keeping my whole deposit for normal wear and tear. What are my options?"}
   - {id: e08, route: expert, lang: en, user: "Think carefully: a bat and a ball cost one dollar ten in total, and the bat costs a dollar more than the ball. How much is the ball?"}
@@ -72,20 +75,20 @@ cases:
   - {id: e10, route: expert, lang: en, user: "Compare electric cars and hybrids for someone who drives sixty miles a day."}
   - {id: e11, route: expert, lang: en, user: "How does the TCP three way handshake work, and why is it needed?"}
   - {id: e12, route: expert, lang: en, user: "What's the best way to pay down three credit cards with different interest rates?"}
-  - {id: e13, route: expert, lang: en, user: "Can you help me plan a study schedule to learn Spanish in six months?"}
+  - {id: e13, route: expert, also: [background], lang: en, user: "Can you help me plan a study schedule to learn Spanish in six months?"}
   - {id: e14, route: expert, lang: en, user: "Is it safe to take ibuprofen together with my blood pressure medication?"}
   - {id: e15, route: expert, lang: en, user: "Why did the Western Roman Empire fall? Walk me through the main reasons."}
   - {id: e16, route: expert, lang: ru, user: "Помоги рассчитать: если откладывать десять тысяч рублей в месяц под восемь процентов годовых, сколько будет через десять лет?"}
   - {id: e17, route: expert, lang: ru, user: "Что лучше для первоклассника: обычная государственная школа или частная?"}
   - {id: e18, route: expert, lang: ru, user: "У меня уже неделю держится температура тридцать семь и пять. Что это может быть?"}
   - {id: e19, route: expert, lang: ru, user: "Объясни подробно, как работает блокчейн."}
-  - {id: e20, route: expert, lang: ru, user: "Составь мне план тренировок на месяц для подготовки к полумарафону."}
+  - {id: e20, route: expert, also: [background], lang: ru, user: "Составь мне план тренировок на месяц для подготовки к полумарафону."}
   - {id: e21, route: expert, lang: ru, user: "Как правильно оформить договор аренды квартиры, чтобы меня не обманули?"}
   - {id: e22, route: expert, lang: ru, user: "Подумай хорошенько: чему равна сумма всех чисел от одного до ста?"}
   - {id: e23, route: expert, lang: es, user: "¿Cuánto pagaría al mes por un préstamo de veinte mil euros a cinco años al siete por ciento?"}
   - {id: e24, route: expert, lang: es, user: "Mi hijo tiene fiebre alta y manchas en la piel desde ayer, ¿qué hago?"}
   - {id: e25, route: expert, lang: es, user: "Explícame con detalle cómo funciona la inflación y por qué suben los precios."}
-  - {id: e26, route: expert, lang: es, user: "Organízame un viaje de cinco días por Andalucía."}
+  - {id: e26, route: expert, also: [background], lang: es, user: "Organízame un viaje de cinco días por Andalucía."}
   - {id: e27, route: expert, lang: es, user: "¿Me conviene más amortizar la hipoteca antes de tiempo o invertir en bolsa?"}
   - {id: e28, route: expert, lang: es, user: "Escríbeme una función en JavaScript que ordene una lista de números sin usar sort."}
   - {id: e29, route: expert, lang: es, user: "¿Qué diferencias hay entre ser autónomo y montar una sociedad limitada en España?"}
@@ -214,7 +217,7 @@ cases:
   - {id: f25, route: expert, lang: ru, split: fresh, user: "Как мне распределить бюджет на ремонт квартиры в пятьсот тысяч рублей?"}
   - {id: f26, route: expert, lang: ru, split: fresh, user: "Можно ли уволиться во время больничного и чем это грозит?"}
   - {id: f27, route: expert, lang: es, split: fresh, user: "¿Cómo calculo cuánto tengo que ahorrar para jubilarme a los sesenta?"}
-  - {id: f28, route: expert, lang: es, split: fresh, user: "Planifícame una semana de comidas saludables con poco presupuesto."}
+  - {id: f28, route: expert, also: [background], lang: es, split: fresh, user: "Planifícame una semana de comidas saludables con poco presupuesto."}
   - id: f29
     route: expert
     lang: en
@@ -232,3 +235,82 @@ cases:
       - user: ¿Cuántos huesos tiene un bebé al nacer?
         reply: Un bebé nace con unos doscientos seis huesos.
     user: Eso no me suena bien, ¿puedes comprobarlo con calma?
+  # ---- background (step 14) ----
+  - {id: b01, route: background, lang: en, user: "Can you research the best noise-cancelling headphones under three hundred dollars and get back to me?"}
+  - {id: b02, route: background, lang: en, user: "Look into which cities in Portugal are best for remote workers and let me know what you find."}
+  - {id: b03, route: background, also: [expert], lang: en, user: "Plan a two week trip through Japan for me, with a day by day itinerary."}
+  - {id: b04, route: background, lang: en, user: "Could you compare the top five project management tools for a small team and tell me later which one fits?"}
+  - {id: b05, route: background, also: [expert], lang: en, user: "Draft a detailed cover letter for a junior data analyst job, I'd like to hear it when it's ready."}
+  - {id: b06, route: background, lang: en, user: "Find out which electric cars have the lowest running costs over five years and report back."}
+  - {id: b07, route: background, lang: en, user: "Research the pros and cons of the main online coding bootcamps and get back to me."}
+  - {id: b08, route: background, also: [expert], lang: en, user: "Put together a full week of vegetarian dinners with a shopping list."}
+  - {id: b09, route: background, lang: ru, user: "Изучи, какие онлайн-курсы английского лучше всего подходят для взрослых, и потом расскажи."}
+  - {id: b10, route: background, lang: ru, user: "Сравни тарифы мобильных операторов с безлимитным интернетом и скажи, какой выгоднее."}
+  - {id: b11, route: background, also: [expert], lang: ru, user: "Составь подробный план поездки по Золотому кольцу на неделю."}
+  - {id: b12, route: background, lang: ru, user: "Найди, какие роботы-пылесосы лучше всего справляются с шерстью животных, и вернись с ответом."}
+  - {id: b13, route: background, also: [expert], lang: ru, user: "Подготовь подробный план подготовки к собеседованию на позицию проджект-менеджера."}
+  - {id: b14, route: background, lang: es, user: "Investiga qué bicicletas eléctricas plegables tienen mejor autonomía y luego me cuentas."}
+  - {id: b15, route: background, lang: es, user: "Compara los principales bancos online de España por comisiones y avísame qué encuentras."}
+  - {id: b16, route: background, also: [expert], lang: es, user: "Prepárame un itinerario detallado de diez días por México."}
+  - {id: b17, route: background, lang: es, user: "Busca qué cursos de fotografía online valen la pena y dime cuál recomiendas cuando lo tengas."}
+  - {id: b18, route: background, also: [expert], lang: es, user: "Redacta un plan de negocio completo para una pequeña cafetería y avísame cuando esté listo."}
+  - id: b19
+    route: local                 # a status question: answered from the note, no new task
+    lang: en
+    history:
+      - user: Can you compare noise-cancelling headphones under three hundred dollars and get back to me?
+        call: {name: start_task, arguments: {goal: Compare noise-cancelling headphones under 300 dollars}}
+        result: {task_id: 1, status: started}
+        answer: Sure, I'll look into that and get back to you.
+    status: '[Background tasks you started for the user: #1 "Compare noise-cancelling headphones under 300 dollars": still working on it, 40 seconds so far]'
+    user: How's that going?
+  - id: b20
+    route: tool                  # cancel_task
+    lang: en
+    history:
+      - user: Can you compare noise-cancelling headphones under three hundred dollars and get back to me?
+        call: {name: start_task, arguments: {goal: Compare noise-cancelling headphones under 300 dollars}}
+        result: {task_id: 1, status: started}
+        answer: Sure, I'll look into that and get back to you.
+    status: '[Background tasks you started for the user: #1 "Compare noise-cancelling headphones under 300 dollars": still working on it, 40 seconds so far]'
+    user: Actually, never mind, drop that one.
+  - id: b21
+    route: local
+    lang: ru
+    history:
+      - user: Сравни тарифы мобильных операторов и скажи, какой выгоднее.
+        call: {name: start_task, arguments: {goal: Сравнить тарифы мобильных операторов и выбрать самый выгодный}}
+        result: {task_id: 1, status: started}
+        answer: Хорошо, займусь этим и расскажу, когда будет готово.
+    status: '[Background tasks you started for the user: #1 "Сравнить тарифы мобильных операторов и выбрать самый выгодный": still working on it, 25 seconds so far]'
+    user: Ну как там с тарифами?
+  - id: b22
+    route: local                 # the finished task's result is in the note
+    lang: es
+    history:
+      - user: Compara los bancos online de España por comisiones y avísame.
+        call: {name: start_task, arguments: {goal: Comparar bancos online de España por comisiones}}
+        result: {task_id: 1, status: started}
+        answer: Vale, lo investigo y te cuento.
+    status: '[Background tasks you started for the user: #1 "Comparar bancos online de España por comisiones": done, not told to the user yet. What it found: Sobre los bancos online: los que no cobran comisiones de mantenimiento son Openbank, ING y MyInvestor; para operar en el extranjero, el más barato es Openbank.]'
+    user: ¿Y qué encontraste?
+  - id: b23
+    route: local                 # an unrelated easy question while a task runs
+    lang: en
+    history:
+      - user: Can you compare noise-cancelling headphones under three hundred dollars and get back to me?
+        call: {name: start_task, arguments: {goal: Compare noise-cancelling headphones under 300 dollars}}
+        result: {task_id: 1, status: started}
+        answer: Sure, I'll look into that and get back to you.
+    status: '[Background tasks you started for the user: #1 "Compare noise-cancelling headphones under 300 dollars": still working on it, 40 seconds so far]'
+    user: Meanwhile, what's the capital of Canada?
+  - id: b24
+    route: background            # a second, different research request (max_concurrent is MOUTH's business)
+    lang: en
+    history:
+      - user: Can you compare noise-cancelling headphones under three hundred dollars and get back to me?
+        call: {name: start_task, arguments: {goal: Compare noise-cancelling headphones under 300 dollars}}
+        result: {task_id: 1, status: started}
+        answer: Sure, I'll look into that and get back to you.
+    status: '[Background tasks you started for the user: #1 "Compare noise-cancelling headphones under 300 dollars": still working on it, 40 seconds so far]'
+    user: Also, could you research good budget microphones for podcasting and get back to me on that too?

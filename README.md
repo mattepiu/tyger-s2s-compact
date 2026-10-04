@@ -127,6 +127,8 @@ the voice picker. Browser DSP (echo cancellation, noise suppression, auto gain) 
 .venv/bin/python tests/test_plugins.py          # plugin classes import light; off-rate TTS resampled (no GPU)
 .venv/bin/python tests/test_plugin_contract.py  # plugin contract on the fakes; TYGER_CONTRACT_LOCAL=1 adds the real
                                                 #   local plugins (GPU free: stop run.sh first)
+.venv/bin/python tests/test_tasks.py            # background tasks + their announcement on a fake smart model (no GPU)
+.venv/bin/python tests/test_ears_floor.py       # EARS floor requests: server.py's state machine, fake EARS (no GPU)
 CONFIG=config.fake.yaml ./run.sh                 # the whole stack on the fake plugins: no GPU, no downloads
 .venv/bin/python scripts/smoke_test.py          # needs run.sh up: MOUTH tool turns + barge-in + EARS speech → audio
 .venv/bin/python scripts/load_test.py --sessions 4       # needs run.sh up: concurrent MOUTH turns + backchannels
@@ -139,6 +141,8 @@ CONFIG=config.fake.yaml ./run.sh                 # the whole stack on the fake p
 .venv/bin/python scripts/validate_barge.py               # GPU free: a barge-in keeps the start of the utterance
 .venv/bin/python scripts/validate_long_turn.py           # GPU free: > 20 s turns transcribed whole
 .venv/bin/python scripts/bench_tts_voice.py              # GPU free: cloned-voice TTS first-audio per request
+.venv/bin/python scripts/eval_escalation.py --samples 8  # GPU free: routing (local / tool / expert / background) and
+                                                         #   reply language on 140 synthetic cases; local model only
 scripts/stop.sh                                          # stop run.sh (and any stage worker it leaves behind)
 ```
 
@@ -184,6 +188,37 @@ neutral line (both in `prompts.yaml` → `spoken`).
 import), one line in `REGISTRY` (`app/plugins/__init__.py`), and a run in `tests/test_plugin_contract.py`.
 Per-model prompt changes go in `prompts/<instance name>.yaml`, never in code.
 
+## Escalation and background tasks
+
+With an `llm.smart` block, the local `reply` model can hand work to a bigger hosted model. It decides itself, by
+calling a tool, so easy turns pay nothing extra:
+
+- **`ask_expert`** for a question that needs care now: maths, code, health / money / legal advice, comparisons,
+  planning, long explanations, or "think carefully". The lead-in fits ("let me think about that"), the smart
+  request starts the moment the call is read, and its answer streams straight to the voice (live: answer audio at
+  ~1.0–1.3 s, under the lead-in). Follow-ups on the same topic go to it too.
+- **`start_task`** for work that takes minutes: research, comparing many options, a multi-day plan, a long draft.
+  The local model says it'll look into it and the conversation carries on. The task runs on the smart model in the
+  background (its own web searches, `mouth.tasks.max_steps` rounds, `max_wall_s`). When it finishes, EARS gives it
+  the floor once the user has been quiet for `announce_after_silence_ms`, and it speaks a short summary; the user
+  can barge in as usual. "How's it going?" is answered locally from a status note; "drop it" cancels it.
+
+```yaml
+llm:
+  smart: {plugin: openai, model: gpt-5.4-mini, max_tokens: 1024, extra_body: {reasoning_effort: none},
+          api_key_env: OPENAI_API_KEY}
+mouth:
+  escalation: {context_turns: 4, max_steps: 3}
+  tasks: {enabled: true, max_concurrent: 1, max_per_session: 5, max_global: 4, max_wall_s: 300, max_steps: 8,
+          announce_after_silence_ms: 1200}
+```
+
+Routing is measured by `scripts/eval_escalation.py` (local model only, no cost): with Gemma 4 E4B, 98% of 140
+synthetic EN / RU / ES cases × 8 samples go the right way, 0.4% of hard questions are answered locally, no easy
+one is escalated (`NOTES.md` → steps 11 and 14). Cost on ordinary turns: the longer prompt adds ~30 ms (expert) and
+~90 ms (expert + tasks) to first audio. Without `llm.smart` neither tool is offered and the prompt is the plain one.
+Tasks need a web-search key (`TAVILY_API_KEY`) to find anything current; without it their searches fail.
+
 ## Models & licences
 
 | component | model | licence |
@@ -200,7 +235,9 @@ onset ms, barge, backchannel, tool name). Voice reference clips and their transc
 
 **Hosted plugins send text off the box**, and only because the config names one: a hosted `reply` gets every
 turn's transcript, the conversation history and tool results; a hosted `filler` gets the user's question (tool
-lead-ins) and the running ASR partial (backchannels). Audio and voice clips are never sent. The startup log names
+lead-ins) and the running ASR partial (backchannels). A `smart` model gets only escalated turns and background
+tasks: the user's words, the question or goal, and the last `context_turns` turns as plain text (tool results
+left out), plus its own tool results. Audio and voice clips are never sent. The startup log names
 the remote roles; request and response bodies are never logged, and MOUTH refuses to start with the SDKs' debug
 logging on (`OPENAI_LOG` / `ANTHROPIC_LOG` = `debug`). Run hosted plugins only with the provider terms you accept
 for that data.

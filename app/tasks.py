@@ -39,9 +39,10 @@ class TaskSlots:
 
 
 class Task:
-    def __init__(self, tid, goal, transcript=""):
+    def __init__(self, tid, goal, transcript="", lang_text=None):
         self.id = tid; self.goal = goal; self.t0 = time.monotonic(); self.t_end = None
-        self.transcript = transcript    # the words that started it (the language to announce in)
+        self.transcript = transcript    # the words that started it
+        self.lang_text = lang_text or transcript   # what its language is guessed from (app/lang.language_text)
         self.status = "running"         # running / done / failed / cancelled
         self.announced = "no"           # no / yes / partial (step 13)
         self.summary = self.result = None
@@ -63,7 +64,7 @@ class TaskRunner:
         self.tasks: list[Task] = []; self.lock = threading.Lock(); self.closed = False
 
     # ---- the reply model's tools ----
-    def start(self, goal, transcript=""):
+    def start(self, goal, transcript="", lang_text=None):
         """start_task: the tool result for the reply model ({task_id, status} or {error})."""
         p = self.m.prompts["reply"]
         goal = (goal or "").strip() or (transcript or "").strip()
@@ -78,10 +79,10 @@ class TaskRunner:
             if not self.m.task_slots.take():
                 log.info("task refused: global cap (%d) reached", self.m.task_slots.n)
                 return {"error": p.text("tasks", "cap_global")}
-            task = Task(len(self.tasks) + 1, goal, transcript)
+            task = Task(len(self.tasks) + 1, goal, transcript, lang_text)
             self.tasks.append(task)
         log.info("task #%d started (this conversation: %d running)", task.id, running + 1)
-        threading.Thread(target=self._run, args=(task, transcript, list(self.context())), daemon=True).start()
+        threading.Thread(target=self._run, args=(task, list(self.context())), daemon=True).start()
         return {"task_id": task.id, "status": "started"}
 
     def cancel(self, task_id):
@@ -134,20 +135,20 @@ class TaskRunner:
             return next((t for t in self.tasks if t.id == task_id), None)
 
     # ---- the agentic loop, on its own thread ----
-    def _messages(self, task, transcript, turns):
+    def _messages(self, task, turns):
         from app.mouth import plain_context
         p = self.m.prompts["smart"]
-        user = p.fill("tasks", "user", goal=task.goal, transcript=transcript or task.goal,
-                      language=p.language_or_unknown(transcript))
+        user = p.fill("tasks", "user", goal=task.goal, transcript=task.transcript or task.goal,
+                      language=p.language_or_unknown(task.lang_text))
         return [{"role": "system", "content": p.text("tasks", "system")}] + plain_context(turns) + \
             [{"role": "user", "content": user}]
 
-    def _run(self, task, transcript, turns):
+    def _run(self, task, turns):
         from app import mouth as M
         m = self.m; smart = m.llms["smart"]; p = m.prompts["smart"]
         deadline = task.t0 + self.max_wall_s
         stop = lambda: task.stop.is_set() or time.monotonic() > deadline   # noqa: E731
-        msgs = self._messages(task, transcript, turns)
+        msgs = self._messages(task, turns)
         try:
             for rnd in range(self.max_steps + 2):
                 text, calls, native = "", [], None
@@ -180,7 +181,7 @@ class TaskRunner:
                            {"error": c["error"]} if c.get("error") else
                            M.execute_tool(c["name"], c.get("arguments", {})) for c in calls]
                 msgs = msgs + M.round_messages(text, calls, native, results,
-                                               note=None if limit else p.result_note(transcript))
+                                               note=None if limit else p.result_note(task.lang_text))
             return self._end(task, "failed", why="max_steps")
         except LLMError as e:
             return self._end(task, "failed", why=e.kind)

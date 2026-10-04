@@ -205,6 +205,7 @@ language:
   tool_note_any: "[Answer the user in the language they spoke to you, even if this result is in another language.]"
   filler: " Say it in $language."
   unknown: the same language they spoke in      # $language in tasks.user when it can't tell
+  status_note: "[Answer the user in $language, even though this note is in English.]"   # after the task status note
 # background tasks (PLUGINS.md steps 12-14; only with llm.smart and mouth.tasks.enabled)
 tasks:
   # the `reply` role's system prompt with tasks on (replaces escalation.system): the same text plus when to
@@ -237,7 +238,8 @@ tasks:
     need care but can be answered right away. If the user's message starts with a note in brackets about background
     tasks, use it to answer how they are going and what they found; if the user drops one, call cancel_task with its
     number. Never start a second task for the same request.
-  # few-shot turns after escalation.shots: a start_task call, its result, the acknowledgement
+  # few-shot turns after escalation.shots: start_task calls, their result, the acknowledgement; status questions
+  # (the user's message carries MOUTH's status note) answered locally; an explicit "drop it" -> cancel_task
   shots:
     - user: Can you find the three best-rated budget laptops for programming and get back to me?
       call: {name: start_task, arguments: {goal: Find the three best-rated budget laptops for programming, under about 800 dollars, and compare them.}}
@@ -251,6 +253,15 @@ tasks:
       call: {name: start_task, arguments: {goal: Buscar gimnasios con piscina en el centro de Valencia y compararlos por precio y horario.}}
       result: {task_id: 3, status: started}
       answer: Vale, lo investigo y te cuento cuando lo tenga.
+    # a status question is answered from the note (never cancel_task); only an explicit "drop it" cancels
+    - user: "[Background tasks you started for the user: #1 \"Find the three best-rated budget laptops for programming, under about 800 dollars, and compare them.\": still working on it, 35 seconds so far] [Answer the user in English, even though this note is in English.]\n\nAny news on that?"
+      reply: Not yet, I'm still comparing them. I'll tell you as soon as it's ready.
+    - user: "[Background tasks you started for the user: #2 \"Составить спокойный маршрут на три дня по Грузии, без спешки.\": still working on it, 20 seconds so far] [Answer the user in Russian, even though this note is in English.]\n\nНу что, как продвигается?"
+      reply: Ещё работаю над маршрутом, расскажу, как только он будет готов.
+    - user: "[Background tasks you started for the user: #3 \"Buscar gimnasios con piscina en el centro de Valencia y compararlos por precio y horario.\": still working on it, 15 seconds so far] [Answer the user in Spanish, even though this note is in English.]\n\nDéjalo, ya no me hace falta."
+      call: {name: cancel_task, arguments: {task_id: 3}}
+      result: {task_id: 3, status: cancelled}
+      answer: Vale, lo dejo.
   # the smart model running a task: its system prompt, the task (goal + the language to write in), and the note
   # its tool calls get once max_steps tool rounds are used up
   system: >-
@@ -344,7 +355,9 @@ tools:
     params:
       goal: The task written out in full so it stands on its own, with every detail the user gave.
   cancel_task:
-    description: Cancel a background task the user no longer wants.
+    description: >-
+      Cancel a background task, only when the user explicitly says to stop, cancel or drop it. Never for a question
+      about how a task is going: answer that from the note about background tasks.
     params:
       task_id: The task's number.
   finish_task:             # only for the smart model running a task
