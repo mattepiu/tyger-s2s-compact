@@ -9,7 +9,7 @@
 | Kind | Local | Hosted |
 |---|---|---|
 | LLM | `qwen3-4b-2507`, `qwen3.5-4b` | `openai` (any OpenAI-compatible chat endpoint), `anthropic` (the Claude Messages API, or a compatible endpoint via `base_url`) |
-| TTS | `voxcpm2` | `openai` (any OpenAI-compatible `/v1/audio/speech` endpoint) |
+| TTS | `voxcpm2` | — (an `openai` TTS was built and measured in step 8, then removed: see below) |
 | EARS | `nemotron-tyger-1.0` (today's ASR + endpoint head) | — |
 | Testing | `fake` for each kind: the fakes in `tests/fakes.py`, promoted | — |
 
@@ -125,7 +125,7 @@ REGISTRY = {
            "openai":        "app.plugins.llm.openai_compat:OpenAICompatLLM",
            "anthropic":     "app.plugins.llm.anthropic:AnthropicLLM",
            "fake":          "app.plugins.llm.fake:FakeLLM"},
-  "tts":  {"voxcpm2": "app.plugins.tts.voxcpm2:VoxCPM2", "openai": "app.plugins.tts.openai_compat:OpenAITTS",
+  "tts":  {"voxcpm2": "app.plugins.tts.voxcpm2:VoxCPM2",
            "fake": "app.plugins.tts.fake:FakeTTS"},
   "ears": {"nemotron-tyger-1.0": "app.plugins.ears.nemotron:NemotronTyger", "fake": "app.plugins.ears.fake:EnergyEars"},
 }
@@ -197,13 +197,7 @@ llm:
   reply: {plugin: anthropic, model: claude-opus-5-5, effort: low, max_tokens: 1024, api_key_env: ANTHROPIC_API_KEY}
   filler: {plugin: qwen3.5-4b, kv_cache_gib: 1.0, max_num_seqs: 8}
 tts:
-  plugin: openai
-  base_url: https://api.openai.com/v1
-  model: gpt-4o-mini-tts
-  voices: [alloy, verse]
-  default_voice: alloy
-  sample_rate: 24000
-  api_key_env: OPENAI_API_KEY
+  plugin: voxcpm2
 ```
 
 **Config migration:**
@@ -463,25 +457,12 @@ stays in `server.py`.
   - `max_retries` 1 and short timeouts, as for `openai`.
   - On an error, MOUTH speaks a short apology line.
 
-### `openai` TTS (OpenAI-compatible `/v1/audio/speech`)
-- **Request:** `AsyncOpenAI(base_url, api_key)` with `audio.speech.with_streaming_response.create(model, voice,
-  input, response_format="pcm")`. `instructions` and `speed` are optional pass-throughs.
-- **Audio:**
-  - The body is read as it streams.
-  - The PCM is 16-bit signed little-endian mono: OpenAI sends 24 kHz; other servers use `sample_rate` from
-    config.
-  - Convert int16 to float32 and carry an odd trailing byte over to the next chunk.
-  - Resample to the 24 kHz wire if `sample_rate` differs.
-- **Voices:** preset names from config. `caps.cloning = False`, and **never upload `voices/` clips.** Endpoints
-  that accept a reference clip are out of scope; supporting one would need an explicit opt-in, since the clip is
-  personal data.
-- **One HTTP request per text chunk,** as with VoxCPM2. Use one client per plugin instance so connections are
-  reused.
-  - Measure first audio for each chunk.
-  - If request overhead dominates, raise the chunker's first-chunk minimum for hosted TTS through a plugin hint
-    (`min_first_chars`). Leave the chunking rules themselves alone.
-- **Abort:** close the response on `stop_flag`.
-- **Concurrency:** `max_concurrency` (default 4) is a semaphore, to stay under the provider's rate limits.
+### `openai` TTS: removed (2026-10-04, user's call)
+Built in step 8 (one streamed `/v1/audio/speech` request per text chunk, PCM, preset voices only) and measured live
+with OpenAI `gpt-4o-mini-tts` next to the local Qwen3.5-4B. Turn first audio 680–837 ms p50 at 4 sessions (max
+2.3 s), end of speech → first audio 1.8–2.2 s p50 (VoxCPM2: 1.0–1.3 s), and dead air between chunks up to 5 s,
+since every chunk pays a request's time to first audio. Too slow for a voice reply, so the plugin was reverted;
+NOTES.md has the numbers. The wire-rate wrapper (`AtWireRate`) stays for any future TTS that isn't 24 kHz.
 
 ### `fake` plugins
 - **LLM and TTS:** today's `FakeLLM` / `FakeTTS` from `tests/fakes.py`, registered as plugins.
@@ -683,7 +664,7 @@ this possible, because EARS already knows when the user is silent.
 | 5 | Fake plugins, `config.fake.yaml`, contract and conversion tests | the full stack runs with the fakes on CPU |
 | 6 | `openai` LLM | contract tests; with a key, against a fast provider (Groq or Cerebras, whichever key the user gives) as `reply`: time to first text, first audio, tool turn, barge abort, 1 and 4 sessions, `filler` local vs remote |
 | 7 | `anthropic` LLM | contract tests; with a key: same as 6, plus `cache_read_input_tokens`, history check (enforced account) |
-| 8 | `openai` TTS | contract tests; with a key: first audio for each chunk, abort, 4 sessions |
+| 8 | ~~`openai` TTS~~ (built, measured, removed: too slow) | — |
 | 9 | README "Plugins" section: configs, how to add a plugin, the privacy note for hosted plugins | — |
 | 10 | `smart` role + `ask_expert` tool; local plugins emit `tool_start` with the tool name; fillers that fit the tool | GPU-free tests with a fake `smart`; local-only turns at parity with step 9 |
 | 11 | `scripts/eval_escalation.py` + prompt / few-shot tuning | missed escalations ≤ 10%, unneeded ≤ 15% on held-out prompts, for the chosen `reply` model; remote latency measured (with user OK) |

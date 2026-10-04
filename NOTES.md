@@ -132,6 +132,19 @@ parity comparisons. `smoke_test.py`'s EARS part now speaks a fixed sentence thro
 reply's TTS audio, which with a slow first audio let the rest of a multi-sentence "user" utterance barge in
 before any reply audio arrived.
 
+**Step 8 (`openai` TTS, live against OpenAI `gpt-4o-mini-tts`, voice alloy, LLM local Qwen3.5-4B; user's OK).**
+Smoke PASS, barge → D 5 ms, no request errors, GPU peak 18.4 GB (no VoxCPM2). But:
+
+| | VoxCPM2 (local) | openai TTS |
+|---|---|---|
+| smoke plain / weather / reminder / backchannel first-audio | 240 / 305 / 419 / 198 ms | 1868 / 1703 / 2265 / 803 ms |
+| `load_test.py` 4 sessions turn first-audio p50 / max | 457–502 / ~900 ms | 837 / 2309, 680 / 1344 ms |
+| longest dead air (between chunks) max | 0 ms | 1669, 1572 ms; tool turns 5058 ms |
+| `load_test_ears.py` end of speech → first audio p50, 1 / 4 conv | 970 / 1260 ms | 2173 / 1830 ms |
+
+Each text chunk is one request, and each pays the hosted time to first audio, so short chunks finish playing
+before the next one starts. The user removed the plugin (reverted); VoxCPM2 is the only TTS.
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at

@@ -37,7 +37,7 @@ from app.config import load_config, llm_roles
 from app.prompts import load_prompts
 from app.engines import EngineLoop
 from app.plugins import build_llms, build_tts
-from app.plugins.base import LLMError, TTSError
+from app.plugins.base import LLMError
 
 log = logging.getLogger("mouth")
 
@@ -453,8 +453,8 @@ class Session:
                         self.send(b"D", {"text": val, "barged": self.turn_stop.is_set()})
             except Exception as e:
                 if not self.closed.is_set():
-                    if isinstance(e, (LLMError, TTSError)):   # a hosted request failed: no traceback
-                        log.warning("turn: %s (%s)", type(e).__name__, e.kind)
+                    if isinstance(e, LLMError):           # a hosted request failed past the turn's own handling
+                        log.warning("turn: LLM request failed (%s)", e.kind)
                     else:
                         log.exception("turn error: %s", type(e).__name__)
                     self.send(b"D", {"text": "", "error": type(e).__name__})
@@ -480,8 +480,8 @@ class Session:
                                  " (aborted: reply turn started)" if aborted else "")
             except Exception as e:
                 if not self.closed.is_set():
-                    if isinstance(e, (LLMError, TTSError)):  # hosted request failed: no ack this time, no traceback
-                        log.warning("backchannel: %s (%s)", type(e).__name__, e.kind)
+                    if isinstance(e, LLMError):              # hosted LLM failed: no ack this time, no traceback
+                        log.warning("backchannel: LLM request failed (%s)", e.kind)
                     else:
                         log.exception("backchannel error: %s", type(e).__name__)
                     self.send(b"D", {"text": "", "bc": True, "error": type(e).__name__})

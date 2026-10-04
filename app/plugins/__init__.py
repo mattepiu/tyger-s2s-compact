@@ -10,7 +10,6 @@ REGISTRY = {
             "anthropic": "app.plugins.llm.anthropic:AnthropicLLM",         # hosted: transcripts leave the box
             "fake": "app.plugins.llm.fake:FakeLLM"},
     "tts": {"voxcpm2": "app.plugins.tts.voxcpm2:VoxCPM2",
-            "openai": "app.plugins.tts.openai_compat:OpenAITTS",            # hosted: reply text leaves the box
             "fake": "app.plugins.tts.fake:FakeTTS"},
     # nemotron ASR encoder + the tyger 1.0 turn-taking heads (exp-12 arm C: endpoint / barge / backchannel)
     "ears": {"nemotron-tyger-1.0": "app.plugins.ears.nemotron:NemotronTyger",
