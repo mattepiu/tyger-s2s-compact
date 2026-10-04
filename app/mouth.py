@@ -23,7 +23,8 @@ Architecture:
   * Backchannels are always contextual LLM acks off the ASR partial: a reaction to the content, or a neutral
     hum when the partial is too short (< mouth.bc_min_words) to react to. No canned/pre-rendered acks.
 EARS<->MOUTH wire: T/C/B/V in; X/A/D out, plus K = backchannel audio (kept apart from reply audio A, since the
-two can now be generated at the same time). S in = speak this text, TTS only (no LLM, no history): EARS never
+two can now be generated at the same time). Background tasks (step 13): F out = a finished task asks for the floor;
+G in = EARS granted it, and the announcement runs as a turn (A audio, then D with "proactive": task id). S in = speak this text, TTS only (no LLM, no history): EARS never
 sends it; test tools use it for a fixed utterance (load_test_ears.py). Audio is 24 kHz float32. No audio or
 transcript is written to disk or logs; only timings and event types.
 
@@ -523,6 +524,11 @@ class Session:
                     recent = self.turns[-m.context_turns:] if m.context_turns > 0 else []
                     box["smart_msgs"] = smart_messages(m.prompts["smart"], recent, transcript,
                                                        (ask.get("arguments") or {}).get("question"), others)
+                    done = self.tasks.done_results() if self.tasks is not None else []
+                    if done:                                # deeper follow-ups on a task get its full result
+                        box["smart_msgs"][-1]["content"] += m.prompts["smart"].fill(
+                            "tasks", "expert_context",
+                            results="; ".join(f'#{t.id} "{t.goal}": {r}' for t, r in done))
                     box["smart_t0"] = time.perf_counter()
                     box["smart"] = _Prefetch(lambda: m.llms["smart"].stream(
                         box["smart_msgs"], tools=m.smart_tools, max_new=m.max_gen, stop_flag=stop_flag),
@@ -634,8 +640,40 @@ class Session:
         return self.turns[-m.context_turns:] if m.context_turns > 0 else []
 
     def _task_done(self, task):
-        """A task finished or failed; the status note tells the reply model on the next turn (step 13 will ask
-        EARS for the floor and announce it)."""
+        """A task finished or failed (from its thread): ask EARS for the floor. EARS answers G when the user is
+        silent, and the announcement runs as a turn (stream_announce). Until then the status note says it's done."""
+        log.info("task #%d %s: asking for the floor", task.id, task.status)
+        self.send(b"F", {"task": task.id})
+
+    def stream_announce(self, task_id, stop_flag):
+        """Speak a finished task's summary (or, if it failed, one sentence saying so) as a reply turn, chunked like
+        one. History keeps a note with the compacted result, then what was heard; a barge marks the task as
+        announced partially, so the reply model can repeat it when asked."""
+        m = self.m; p = m.prompts["reply"]
+        task = self.tasks.get(task_id) if self.tasks is not None else None
+        if task is None or task.status not in ("done", "failed") or task.announced == "yes":
+            yield ("done", ""); return                     # cancelled meanwhile, or already told
+        self._said = []; self._audio_s = 0.0; self._play_end = time.perf_counter()
+        if task.status == "done":
+            line = task.summary or task.result or ""
+            note = p.fill("tasks", "result_note", id=task.id, goal=task.goal,
+                          result=_compact_result(task.result or task.summary or ""))
+        else:
+            fp = m.prompts["filler"]
+            user = fp.fill("task_failed", "user", goal=task.goal) + fp.filler_hint(task.transcript)
+            line = _text(m.llms["filler"].stream(_with_shots(fp.text("task_failed", "system"),
+                                                             fp.shots("task_failed"), user),
+                                                 max_new=40, stop_flag=stop_flag)).strip()
+            note = p.fill("tasks", "failed_note", id=task.id, goal=task.goal)
+        text, _, _, _, _ = yield from self._speak_stream(iter([("text", line)]), self.voice, stop_flag)
+        barged = stop_flag()
+        task.announced = "partial" if barged else "yes"
+        log.info("task #%d announced%s", task.id, " partially (barged)" if barged else "")
+        if barged:
+            self._remember_barged(note)
+        else:
+            self._remember(note, line)
+        yield ("done", line)
 
     # ---- say (S): TTS of a given text only; no LLM, not remembered ----
     def stream_say(self, text, stop_flag):
@@ -663,7 +701,13 @@ class Session:
             self.turn_stop.clear(); self.barge_played_s = None
             stop = lambda: self.turn_stop.is_set() or self.closed.is_set()   # noqa: E731
             t0 = time.perf_counter(); t_txt = t_aud = None
-            gen = self.stream_say(turn["say"], stop) if "say" in turn else self.stream_turn(turn["transcript"], stop)
+            if "say" in turn:
+                gen = self.stream_say(turn["say"], stop)
+            elif "announce" in turn:
+                gen = self.stream_announce(turn["announce"], stop)
+            else:
+                gen = self.stream_turn(turn["transcript"], stop)
+            extra = {"proactive": turn["announce"]} if "announce" in turn else {}
             try:
                 for kind, val in gen:
                     if kind == "text":
@@ -675,14 +719,14 @@ class Session:
                             log.info("onset: first-text %.0fms first-audio %.0fms", (t_txt or 0) * 1e3, t_aud * 1e3)
                         self.send(b"A", val.tobytes())
                     elif kind == "done":
-                        self.send(b"D", {"text": val, "barged": self.turn_stop.is_set()})
+                        self.send(b"D", {"text": val, "barged": self.turn_stop.is_set(), **extra})
             except Exception as e:
                 if not self.closed.is_set():
                     if isinstance(e, LLMError):           # a hosted request failed past the turn's own handling
                         log.warning("turn: LLM request failed (%s)", e.kind)
                     else:
                         log.exception("turn error: %s", type(e).__name__)
-                    self.send(b"D", {"text": "", "error": type(e).__name__})
+                    self.send(b"D", {"text": "", "error": type(e).__name__, **extra})
 
     def _bc_worker(self):
         while (item := self.bc_q.get()) is not None:
@@ -727,6 +771,8 @@ class Session:
                 if kind == b"T":
                     self.turn_seq += 1                      # stops a backchannel still being made
                     self.turn_q.put(json.loads(payload))
+                elif kind == b"G":                          # EARS gave a finished task the floor
+                    self.turn_q.put({"announce": json.loads(payload).get("task")})
                 elif kind == b"S":                          # test tools only: speak a fixed text
                     self.turn_q.put({"say": json.loads(payload).get("text", "")})
                 elif kind == b"C":

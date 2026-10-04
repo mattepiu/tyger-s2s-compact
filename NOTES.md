@@ -303,6 +303,25 @@ add prefill. Smoke PASS both ways; GPU peak 30.4 GB.
 Live with tasks off (the default until step 13): smoke PASS, turn p50 477 / 470 ms (unchanged). Also fixed: a
 connection reset from EARS ended `Session.run` with a traceback instead of a clean close.
 
+**Step 13 (floor request `F` / grant `G`, the announcement, `task_done` to the browser).** GPU-free:
+- `tests/test_ears_floor.py` (6): `server.py`'s state machine on the fake EARS plugin, a fake browser WebSocket
+  and a fake MOUTH over TCP. Covers: the grant only after `announce_after_silence_ms`; a user turn winning (T
+  before G); silence not counted while the agent speaks; a backchannel holding the grant; barge-in during the
+  announcement; two requests taking turns. Two deliberate bugs were checked to make tests fail: the grant with no
+  silence, and silence counted during the agent's speech. The second needed a feed that reports `idle` frames
+  while the agent speaks: the fake and the real plugin report `SPEAK` then.
+- `tests/test_tasks.py` (+5, 18 in all): F → G → summary spoken, D `proactive`, history note + summary,
+  "told to the user" in the status note; barge → announced partially; a failed task → one sentence from the
+  filler role in the user's language; G for a cancelled / unknown task → empty D; an escalation after a task gets
+  its full result.
+
+Live, real EARS + Gemma + VoxCPM2, **fake** `smart` (finishes in 4.6 s), synthetic speech: the request →
+`start_task` → acknowledgement; the task finished while the acknowledgement was still playing; EARS granted the
+floor after it played out + 1.28 s of silence; the announcement's first audio came 0.1 s after the grant. A
+request worded like the English task shot ("the three best budget laptops for programming") was answered "I'm
+still working on that" without a call: the 4B took it as a follow-up to the example task. A request on a topic
+the shots don't cover worked. Step 14's eval will measure that kind of routing.
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at

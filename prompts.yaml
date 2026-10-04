@@ -276,6 +276,22 @@ tasks:
   status_partial: '#$id "$goal": done, but the user heard only part of it. What it found: $summary'
   status_failed: '#$id "$goal": could not be finished'
   status_cancelled: '#$id "$goal": cancelled'
+  # step 13: what history keeps before an announcement (the user role, like the status note), and what an
+  # escalation gets about tasks done earlier ($results: one per task, the full result)
+  result_note: '[Background task #$id "$goal" is done. What it found: $result]'
+  failed_note: '[Background task #$id "$goal" could not be finished.]'
+  expert_context: "\n\n[Results of background tasks done earlier in this conversation: $results]"
+# the `filler` role: the one sentence spoken when a background task failed or timed out (step 13)
+task_failed:
+  system: >-
+    You are a voice assistant. A background task you were doing for the user could not be finished. Tell them so in
+    ONE short, natural spoken sentence that names what it was about. Do NOT make up results, do NOT mention tools.
+    Use the language you are asked to. Plain spoken words only.
+  shots:
+    - ["The task was: \"Find the three best-rated budget laptops for programming.\" Say it in English.", "Sorry, I couldn't finish looking into those budget laptops."]
+    - ["The task was: \"Составить маршрут на три дня по Грузии.\" Say it in Russian.", "Не получилось довести до конца маршрут по Грузии, извините."]
+    - ["The task was: \"Buscar gimnasios con piscina en Valencia.\" Say it in Spanish.", "Lo siento, no pude terminar la búsqueda de gimnasios en Valencia."]
+  user: 'The task was: "$goal".'
 # text MOUTH writes into history: the end of a barged reply (TTS_TOOLS_SYS explains the dash), and the
 # assistant turn of a reply that produced no text
 markers:

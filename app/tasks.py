@@ -39,8 +39,9 @@ class TaskSlots:
 
 
 class Task:
-    def __init__(self, tid, goal):
+    def __init__(self, tid, goal, transcript=""):
         self.id = tid; self.goal = goal; self.t0 = time.monotonic(); self.t_end = None
+        self.transcript = transcript    # the words that started it (the language to announce in)
         self.status = "running"         # running / done / failed / cancelled
         self.announced = "no"           # no / yes / partial (step 13)
         self.summary = self.result = None
@@ -77,7 +78,7 @@ class TaskRunner:
             if not self.m.task_slots.take():
                 log.info("task refused: global cap (%d) reached", self.m.task_slots.n)
                 return {"error": p.text("tasks", "cap_global")}
-            task = Task(len(self.tasks) + 1, goal)
+            task = Task(len(self.tasks) + 1, goal, transcript)
             self.tasks.append(task)
         log.info("task #%d started (this conversation: %d running)", task.id, running + 1)
         threading.Thread(target=self._run, args=(task, transcript, list(self.context())), daemon=True).start()
@@ -122,6 +123,11 @@ class TaskRunner:
             else:
                 lines.append(p.fill("tasks", f"status_{t.status}", id=t.id, goal=t.goal))
         return p.fill("tasks", "status_block", tasks="; ".join(lines))
+
+    def done_results(self, n=2):
+        """The full results of the last `n` finished tasks, for an escalation's context: [(task, result)]."""
+        with self.lock:
+            return [(t, t.result) for t in self.tasks if t.status == "done" and t.result][-n:]
 
     def get(self, task_id):
         with self.lock:

@@ -646,6 +646,16 @@ this possible, because EARS already knows when the user is silent.
 - The reply prompt with tasks on is `tasks.reply_system` (the escalation prompt plus when to start / cancel a task)
   and `tasks.shots` (start_task in EN / RU / ES) after the hand-off shots. `mouth.tasks.enabled` needs `llm.smart`.
 
+**Built (step 13):**
+- MOUTH sends `F` from the task's thread when it finishes or fails; `G` queues the announcement on the turn
+  worker (so it never overlaps a reply). A finished task speaks its summary, chunked like a reply; a failed one
+  speaks one sentence from the `filler` role (`task_failed`, in the language of the words that started it).
+- History: a user-role note (`tasks.result_note`: the compacted result, or `failed_note`), then what was heard.
+  An escalation later gets the full results of the last two finished tasks (`tasks.expert_context`).
+- EARS (`server.py`): a queue of requests; the grant needs no speaking / halting / held turn / backchannel and
+  `announce_after_silence_ms` of consecutive `idle` frames counted only while the agent is quiet too. A grant
+  for a task cancelled meanwhile gets an empty `D` back.
+
 **Tests:**
 - **GPU-free:** a fake `smart` plugin with scripted tool rounds and delays, and the fake EARS. Cover:
   - start → continue chatting → done → `F` → wait for silence → `G` → announce;

@@ -162,7 +162,7 @@ async function start(){
   running=true; $('start').disabled=true; $('stop').disabled=false;
 }
 
-let nextPlay=0, replyDiv=null, active=[];
+let nextPlay=0, replyDiv=null, active=[], taskTag='';
 function playChunk(ab){ if(!ctx)return; const f32=new Float32Array(ab);
   const b=ctx.createBuffer(1,f32.length,24000); b.getChannelData(0).set(f32);
   const s=ctx.createBufferSource(); s.buffer=b; s.connect(ctx.destination);
@@ -171,7 +171,7 @@ function playChunk(ab){ if(!ctx)return; const f32=new Float32Array(ab);
 function stopPlayback(){ active.forEach(s=>{try{s.stop();}catch(e){}}); active=[]; nextPlay=0; }
 function showReply(txt){ const box=$('turns'); const e=box.querySelector('.empty'); if(e)e.remove();
   if(!replyDiv){ replyDiv=document.createElement('div'); replyDiv.className='turn asst'; box.prepend(replyDiv); }
-  replyDiv.innerHTML=`<div class="meta">tyger</div><div class="txt">${escapeHtml(txt)}</div>`; }
+  replyDiv.innerHTML=`<div class="meta">tyger${taskTag}</div><div class="txt">${escapeHtml(txt)}</div>`; }
 function onEvent(ev){
   const m=JSON.parse(ev.data);
   if(m.type==='busy'){ setStatus('busy — someone else is talking; try again shortly',false); return; }
@@ -190,7 +190,8 @@ function onEvent(ev){
   else if(m.type==='threshold'){ setThresholdUI(m.attr,m.value); if(m.attr==='ep_deb'&&$('v_ep_deb')) $('v_ep_deb').textContent=m.value; }
   else if(m.type==='endpoint'){ stopPlayback(); replyDiv=null; }  // never let a new reply overlap an old one
   else if(m.type==='reply'){ setState('SPEAK'); showReply(m.text); }
-  else if(m.type==='turn_done'){ setState('idle'); replyDiv=null; }
+  else if(m.type==='turn_done'){ setState('idle'); replyDiv=null; taskTag=''; }
+  else if(m.type==='task_done'){ replyDiv=null; taskTag=` · task #${m.task} done`; }  // a background task speaks up
   else if(m.type==='barge'){ stopPlayback(); flashBarge(); setState('LISTENING'); }
   else if(m.type==='voice'){ /* confirmed */ }
 }

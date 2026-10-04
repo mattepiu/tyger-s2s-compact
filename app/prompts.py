@@ -32,6 +32,10 @@ TEMPLATES = {
     ("tasks", "status_partial"): {"id", "goal", "summary"},
     ("tasks", "status_failed"): {"id", "goal"},
     ("tasks", "status_cancelled"): {"id", "goal"},
+    ("tasks", "result_note"): {"id", "goal", "result"},
+    ("tasks", "failed_note"): {"id", "goal"},
+    ("tasks", "expert_context"): {"results"},
+    ("task_failed", "user"): {"goal"},
 }
 # plain text, sent as written
 TEXTS = [("system", "voice_tools"), ("tool_leadin", "system"), ("still_looking", "system"),
@@ -42,8 +46,8 @@ TEXTS = [("system", "voice_tools"), ("tool_leadin", "system"), ("still_looking",
          ("expert_still", "system"), ("expert_still", "said_none"), ("smart", "system"), ("smart", "limit"),
          ("language", "tool_note_any"), ("language", "unknown"), ("tasks", "reply_system"), ("tasks", "system"),
          ("tasks", "limit"), ("tasks", "cap_concurrent"), ("tasks", "cap_session"), ("tasks", "cap_global"),
-         ("tasks", "unknown_task")]
-SHOTS = ["tool_leadin", "still_looking", "backchannel", "expert_leadin", "expert_still"]
+         ("tasks", "unknown_task"), ("task_failed", "system")]
+SHOTS = ["tool_leadin", "still_looking", "backchannel", "expert_leadin", "expert_still", "task_failed"]
 
 
 class PromptError(ValueError):

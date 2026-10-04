@@ -1,8 +1,14 @@
 """EARS process + web app: the turn-taking plugin (ears.plugin; nemotron-tyger-1.0 = nemotron L15 + the tyger 1.0
 heads, app/plugins/ears/nemotron.py) behind the EarsPlugin interface, serving the mic page + WebSocket on one port
 and wiring each conversation to the MOUTH over its own TCP connection. This file owns the conversation state
-machine (speaking / halting / pending / reset); the plugin owns the model. Adapted from
+machine (speaking / halting / pending / reset / the floor queue); the plugin owns the model. Adapted from
 codebase/exp-12/server/ears_server.py (copy, not import).
+
+Taking the floor (PLUGINS.md step 13): when a background task finishes, MOUTH asks for the floor (F {"task": id}).
+EARS grants it (G {"task": id}) only when the agent isn't speaking or halting, no user turn is held, no backchannel
+is playing, and the user has been idle for mouth.tasks.announce_after_silence_ms (consecutive `idle` frames). A
+user endpoint always wins: it starts a reply turn first and the request waits. On grant EARS enters speaking mode
+exactly as for a reply (barge-in and the 2nd ear work as usual) and tells the browser ({"type": "task_done"}).
 
 Multi-session: up to server.max_sessions WebSocket conversations at once. Each conversation is a plugin session;
 nemotron-tyger-1.0 runs one batched GPU step per 320 ms hop for every session with a hop ready. Visitors beyond
@@ -14,7 +20,8 @@ source, onset ms, barge, bc).
 Run: HF_HOME=/workspace/.hf_home .venv/bin/python -m app.server
 """
 from __future__ import annotations
-import os, sys, json, time, asyncio, logging
+import os, sys, json, math, time, asyncio, logging
+from collections import deque
 from pathlib import Path
 import numpy as np
 from aiohttp import web, WSMsgType
@@ -28,6 +35,7 @@ log = logging.getLogger("ears")
 HERE = Path(__file__).resolve().parent
 STATIC = HERE.parent / "static"
 PLAYBACK_MARGIN_S = 0.25                        # slack for network + client scheduling on top of play_until
+FRAME_MS = 80                                   # one FRAME event per 80 ms of user audio
 
 EARS = None                                     # the EARS plugin (app/plugins/base.py EarsPlugin)
 CFG = None
@@ -95,7 +103,10 @@ async def _conversation(ws, ears):
     st = {"speaking": False, "reset": False, "halting": False, "pending": None,
           "bc_active": False, "agent_buf": np.zeros(0, np.float32),
           "turn_t0": None, "await_onset": False, "barge_t0": None, "bc_t0": None,
-          "play_until": 0.0, "sent_s": 0.0, "mouth_done": False, "done_task": None}
+          "play_until": 0.0, "sent_s": 0.0, "mouth_done": False, "done_task": None,
+          "floor_q": deque(), "idle_frames": 0}         # task ids waiting for the floor; user silence so far
+    floor_frames = math.ceil(float((CFG.get("mouth") or {}).get("tasks", {}).get("announce_after_silence_ms", 1200))
+                             / FRAME_MS)
     try:
         m_reader, m_writer = await asyncio.open_connection(mp["mouth_host"], int(mp["mouth_port"]))
         have_mouth = True
@@ -111,10 +122,24 @@ async def _conversation(ws, ears):
                                        "endpoint": "ep", "fallback_frames": th["fallback_frames"]}})
     log.info("conversation start (active=%d)", EARS.active())
 
-    async def send_turn(transcript):
+    def start_speaking():
         st["speaking"] = True; st["turn_t0"] = time.perf_counter(); st["await_onset"] = True
         st["mouth_done"] = False; st["play_until"] = 0.0; st["sent_s"] = 0.0
+
+    async def send_turn(transcript):
+        start_speaking()
         await async_send_msg(m_writer, b"T", {"transcript": transcript})
+
+    async def maybe_grant_floor():
+        """A finished task's announcement gets the floor only when nobody else has it (module docstring)."""
+        if not st["floor_q"] or st["speaking"] or st["halting"] or st["pending"] is not None or st["bc_active"] \
+                or st["idle_frames"] < floor_frames:
+            return
+        tid = st["floor_q"].popleft()
+        start_speaking()
+        log.info("floor granted to task #%s after %d ms of silence", tid, st["idle_frames"] * FRAME_MS)
+        await async_send_msg(m_writer, b"G", {"task": tid})
+        await ws.send_json({"type": "task_done", "task": tid})
 
     async def finish_turn(barged):
         """The reply is over (played out, or barged): back to listening; send a held turn if any. A barge already
@@ -167,6 +192,11 @@ async def _conversation(ws, ears):
                         st["play_until"] = max(st["play_until"], now + 0.04) + len(a24) / 24000
                         st["sent_s"] += len(a24) / 24000
                         st["agent_buf"] = np.concatenate([st["agent_buf"], ds24to16(a24)])
+                elif kind == b"F":                        # a finished task asks for the floor
+                    tid = json.loads(payload).get("task")
+                    if tid not in st["floor_q"]:
+                        st["floor_q"].append(tid)
+                    log.info("floor requested by task #%s (%d waiting)", tid, len(st["floor_q"]))
                 elif kind == b"X":
                     d = json.loads(payload)
                     await ws.send_json({"type": "backchannel" if d.get("bc") else "reply", "text": d["text"]})
@@ -189,6 +219,8 @@ async def _conversation(ws, ears):
         yp = bcp = pe = 0.0; last = None
         for e in evs:
             if e["kind"] == "FRAME":
+                quiet = e.get("state") == "idle" and not st["speaking"] and not st["halting"]   # both silent
+                st["idle_frames"] = st["idle_frames"] + 1 if quiet else 0
                 yp = max(yp, e.get("yield_prob", 0.0) or 0.0)
                 bcp = max(bcp, e.get("bc_prob", 0.0) or 0.0)
                 pe = max(pe, e.get("p_end", 0.0) or 0.0); last = e
@@ -224,6 +256,8 @@ async def _conversation(ws, ears):
                 elif have_mouth:            # + how much of the reply had played, so MOUTH remembers what was heard
                     played = st["sent_s"] - max(0.0, st["play_until"] - time.perf_counter())
                     await async_send_msg(m_writer, b"B", {"played_s": round(max(0.0, played), 2)})
+        if have_mouth:
+            await maybe_grant_floor()                     # after this hop's events: an endpoint wins
         if last is not None:
             await ws.send_json({"type": "state", "state": last["state"], "yield": yp,
                                 "bc": bcp, "hazard": last.get("hazard", 0.0), "p_end": round(pe, 3)})

@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fakes import FakeLLM, FakeTTS, FakeMouth, PROMPTS, make_session, run_turn  # noqa: E402
 from app import mouth as M  # noqa: E402
 from app.tasks import TaskSlots  # noqa: E402
-from app.wire import send_msg  # noqa: E402
+from app.wire import send_msg, recv_msg  # noqa: E402
 
 GOAL = "Compare three budget laptops for programming"
 START = '<tool_call>\n{"name": "start_task", "arguments": {"goal": "%s"}}\n</tool_call>' % GOAL
@@ -206,6 +206,111 @@ def test_logs_carry_no_task_content():
     assert "task #1 started" in text and "task #1 done" in text
     for secret in (GOAL, "budget laptops please", done[0].summary, done[0].result):
         assert secret not in text, secret
+
+
+# ---- step 13: F (floor request) -> G (grant) -> the announcement as a turn ------------------------------------
+def live(reply=START, smart=None, tasks=None, tts=None):
+    llm = FakeLLM(reply=reply, phase_b="Sure, I'll look into it.")
+    m = FakeMouth(llm, tts or FakeTTS(n=2), smart=smart or FakeLLM(), tasks={**TASKS, **(tasks or {})})
+    a, b = socket.socketpair()
+    s = M.Session(m, a)
+    threading.Thread(target=s.run, daemon=True).start()
+    b.settimeout(5)
+    return s, b, m, llm
+
+
+def frames(peer, until):
+    """Read (kind, payload) frames until until(kind, payload); JSON payloads decoded."""
+    got = []
+    while True:
+        k, p = recv_msg(peer)
+        if k is None:
+            return got
+        p = json.loads(p) if k in (b"X", b"D", b"F") else p
+        got.append((k, p))
+        if until(k, p):
+            return got
+
+
+def start_and_wait_floor(s, peer):
+    send_msg(peer, b"T", {"transcript": "research budget laptops and get back to me"})
+    seen = {}                                 # the acknowledgement's D and the floor request F, in either order
+
+    def both(k, p):
+        if k in (b"D", b"F"):
+            seen[k] = p
+        return b"D" in seen and b"F" in seen
+    frames(peer, both)
+    return seen[b"F"]
+
+
+def test_announce_after_grant():
+    s, peer, m, llm = live()
+    assert start_and_wait_floor(s, peer) == {"task": 1}
+    send_msg(peer, b"G", {"task": 1})
+    got = frames(peer, lambda k, p: k == b"D")
+    d = got[-1][1]
+    assert d["proactive"] == 1 and not d["barged"] and d["text"].startswith("About your task")
+    assert any(k == b"A" for k, _ in got) and any(k == b"X" for k, _ in got)
+    note, said = s.history[-2], s.history[-1]
+    assert note["role"] == "user" and note["content"].startswith("[Background task #1") and "full result" in note["content"]
+    assert said == {"role": "assistant", "content": d["text"]} and s.tasks.get(1).announced == "yes"
+    assert "told to the user" in s.tasks.status_block()
+    peer.close()
+
+
+def test_barge_during_announcement_marks_partial():
+    s, peer, m, llm = live(tts=FakeTTS(n=20, step_s=0.02))
+    start_and_wait_floor(s, peer)
+    send_msg(peer, b"G", {"task": 1})
+    frames(peer, lambda k, p: k == b"A")
+    send_msg(peer, b"B", {"played_s": 0.1})
+    d = frames(peer, lambda k, p: k == b"D")[-1][1]
+    assert d["barged"] and d["proactive"] == 1
+    assert s.tasks.get(1).announced == "partial" and "heard only part" in s.tasks.status_block()
+    assert s.history[-1]["content"].endswith(PROMPTS.text("markers", "interrupted"))
+    peer.close()
+
+
+def test_failed_task_announced_in_one_sentence():
+    s, peer, m, llm = live(smart=FakeLLM(step_s=0.05, chars=2), tasks={"max_wall_s": 0.3})
+    start_and_wait_floor(s, peer)
+    send_msg(peer, b"G", {"task": 1})
+    d = frames(peer, lambda k, p: k == b"D")[-1][1]
+    assert d["text"] == llm.task_failed and d["proactive"] == 1
+    req = [c[1] for c in llm.calls if c[0] == "task_failed"][-1]
+    assert GOAL in req[-1]["content"] and req[-1]["content"].endswith("Say it in English.")
+    assert s.history[-2]["content"] == PROMPTS.fill("tasks", "failed_note", id=1, goal=GOAL)
+    peer.close()
+
+
+def test_grant_for_a_task_that_no_longer_needs_it():
+    s, peer, m, llm = live(smart=FakeLLM(step_s=0.05, chars=2))
+    send_msg(peer, b"T", {"transcript": "research budget laptops"})
+    frames(peer, lambda k, p: k == b"D")
+    s.tasks.cancel(1)
+    send_msg(peer, b"G", {"task": 1})                                 # e.g. granted just as it was cancelled
+    d = frames(peer, lambda k, p: k == b"D")[-1][1]
+    assert d == {"text": "", "barged": False, "proactive": 1}
+    send_msg(peer, b"G", {"task": 9})
+    assert frames(peer, lambda k, p: k == b"D")[-1][1]["text"] == ""
+    peer.close()
+
+
+def test_escalation_gets_the_full_result():
+    smart = FakeLLM()
+    s, peer, m, llm = live(smart=smart)
+    start_and_wait_floor(s, peer)
+    send_msg(peer, b"G", {"task": 1})
+    frames(peer, lambda k, p: k == b"D")
+    llm.text["reply"] = ('<tool_call>\n{"name": "ask_expert", "arguments": {"question": "Compare the top two laptops '
+                         'in detail."}}\n</tool_call>')
+    send_msg(peer, b"T", {"transcript": "compare the top two in detail"})
+    frames(peer, lambda k, p: k == b"D")
+    req = [c[1] for c in smart.calls if c[0] == "smart"][-1]
+    assert "The full result of the task, in plain text." in req[-1]["content"]
+    assert any("[Background task #1" in x["content"] for x in req if x["role"] == "user")   # the note, as context
+    peer.close()
 
 
 if __name__ == "__main__":
