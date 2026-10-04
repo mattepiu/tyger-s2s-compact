@@ -191,6 +191,22 @@ reasoning and code itself, every time (bat-and-ball, palindrome, sort without so
 carefully": 8/8). Both lean local: unneeded escalations stay at ~0%, so there's room to push toward escalating.
 The held-out split has now been looked at; further tuning needs fresh held-out cases.
 
+**Gemma 4 E4B as `reply` (user's suggestion; plugin `gemma-4-e4b`, `google/gemma-4-E4B-it`, text only, thinking
+off, same eval settings and prompt).** Routing: **0% missed, 0% unneeded** on all 86 cases × 8 (tune and held
+out alike); the only misroute is "send a message to Alex" answered locally 3/8. Same with FP8 weights
+(`quantization: fp8`, now passed through to vLLM).
+
+| (GPU free, 3 GiB KV) | Qwen3.5-4B | Gemma E4B bf16 | Gemma E4B FP8 |
+|---|---|---|---|
+| weights / GPU used after load | — / 12.3 GiB | 14.2 / 18.5 GiB | 10.5 / 14.9 GiB |
+| first text p50 (5–11 plain prompts, alone) | 76 ms | 80 ms | 72 ms |
+| tool_start (weather / ask_expert) | 110–123 ms | 118–122 ms | 100 ms |
+
+bf16 doesn't fit next to VoxCPM2 + EARS on the 5090 (~34 GB); FP8 would be ~30 GB of 32 (not tried in the stack
+yet). Reply quality issues the routing eval doesn't catch: Gemma answered 2 of 5 Russian questions in Spanish /
+English (Qwen: 0), and once spoke its tool use aloud ("I'll use the ask_expert tool for this because…") before
+the call. Facts looked better (Volga vs Qwen's Danube for Europe's longest river).
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at

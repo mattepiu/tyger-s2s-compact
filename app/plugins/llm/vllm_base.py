@@ -12,7 +12,7 @@ never yielded as speech (a trailing partial "<tool_c" is held back until it reso
 from __future__ import annotations
 import asyncio, threading, uuid, logging
 
-from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id, tool_start
+from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id, tool_start, TAGS
 
 log = logging.getLogger("llm")
 
@@ -47,7 +47,9 @@ class VLLMChatPlugin:
         args = AsyncEngineArgs(model=self.model, gpu_memory_utilization=float(conf.get("gpu_memory_utilization", 0.45)),
                                kv_cache_memory_bytes=int(float(conf.get("kv_cache_gib", 3.0)) * 2**30),
                                max_model_len=int(conf.get("max_model_len", 8192)),
-                               max_num_seqs=int(conf.get("max_num_seqs", 8)), **self.engine_kwargs())
+                               max_num_seqs=int(conf.get("max_num_seqs", 8)),
+                               **({"quantization": conf["quantization"]} if conf.get("quantization") else {}),
+                               **self.engine_kwargs())
 
         async def make():                                     # construct on the loop that will drive it
             eng = AsyncLLM.from_engine_args(args)
@@ -94,11 +96,11 @@ class VLLMChatPlugin:
             if started:
                 continue
             if not saw_tool:
-                speak, saw_tool = split_speakable(self.filter_text(raw))
+                speak, saw_tool = split_speakable(self.filter_text(raw), TAGS[self.tool_format])
                 if len(speak) > said:
                     yield ("text", speak[said:]); said = len(speak)
             if saw_tool:                  # the call's arguments are still decoding; the caller can start a filler
-                started = tool_start(self.filter_text(raw))
+                started = tool_start(self.filter_text(raw), TAGS[self.tool_format])
                 if started:
                     yield ("tool_start", started)
         if stop_flag and stop_flag():

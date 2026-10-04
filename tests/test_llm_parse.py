@@ -4,7 +4,7 @@ import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.plugins.llm._toolparse import split_speakable, parse_calls, strip_think, new_call_id, tool_start, \
-    NAME_WAIT  # noqa: E402
+    NAME_WAIT, GEMMA_TAG  # noqa: E402
 from app.plugins.llm.vllm_base import to_template_messages  # noqa: E402
 
 
@@ -79,6 +79,33 @@ def test_xml_values_and_multiple():
 def test_other_format_still_parses():
     assert parse_calls(HERMES, "qwen_xml") == parse_calls(HERMES, "hermes_json")
     assert parse_calls(XML, "hermes_json") == parse_calls(XML, "qwen_xml")
+
+
+# ---- Gemma 4 (gemma-4-e4b): special-token tags, <|"|>-quoted strings --------------------------------------
+GEMMA = 'Sure.<|tool_call>call:get_weather{location:<|"|>San Francisco, CA<|"|>,unit:<|"|>celsius<|"|>}<tool_call|>'
+
+
+def test_gemma_parsed_named_never_spoken():
+    assert parse_calls(GEMMA, "gemma4") == \
+        [{"name": "get_weather", "arguments": {"location": "San Francisco, CA", "unit": "celsius"}}]
+    for step in (1, 3):
+        said, saw = "", False
+        for i in range(step, len(GEMMA) + step, step):
+            speak, saw = split_speakable(GEMMA[:i], GEMMA_TAG)
+            assert speak.startswith(said) and "<|" not in speak; said = speak
+        assert said == "Sure." and saw
+    got, i = None, 0
+    while not got:
+        i += 1; got = tool_start(GEMMA[:i], GEMMA_TAG)
+    assert got == {"name": "get_weather"} and i < len(GEMMA) - 30
+    assert tool_start(GEMMA, "<tool_call>") is None                  # Qwen's tag is not Gemma's
+
+
+def test_gemma_values_and_multiple():
+    raw = ('<|tool_call>call:ask_expert{question:<|"|>Rent or buy: which, and why?<|"|>}<tool_call|>'
+           '<|tool_call>call:x{n:3,ok:true,s:<|"|>a, b<|"|>}<tool_call|>')
+    assert parse_calls(raw, "gemma4") == [{"name": "ask_expert", "arguments": {"question": "Rent or buy: which, and why?"}},
+                                          {"name": "x", "arguments": {"n": 3, "ok": True, "s": "a, b"}}]
 
 
 # ---- <think> guard (qwen3.5-4b) ----------------------------------------------------------------------------

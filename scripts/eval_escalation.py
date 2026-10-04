@@ -102,11 +102,15 @@ def main():
     ap.add_argument("--split", choices=("all", "tune", "heldout"), default="all")
     ap.add_argument("--samples", type=int, default=3)
     ap.add_argument("--json", default=None, help="write the rates and per-case routes here")
+    ap.add_argument("--opt", action="append", default=[], help="override a reply-block option, e.g. "
+                    "gpu_memory_utilization=0.8 (YAML value)")
     a = ap.parse_args()
     cfg = load_config(a.config)
     block = dict(cfg["llm"]["reply"])
     if a.plugin:
         block["plugin"] = a.plugin; block.pop("model", None)
+    for o in a.opt:
+        k, v = o.split("=", 1); block[k] = yaml.safe_load(v)
     name = block.get("name") or block["plugin"]
     cases = [c for c in load_set(a.set) if a.split == "all" or c["split"] == a.split]
     llm = plugin_class("llm", block["plugin"])(block, PluginContext(EngineLoop(), cfg, name))

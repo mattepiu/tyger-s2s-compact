@@ -3,15 +3,20 @@ speakable part off at <tool_call>, parsing the two formats the Qwen chat templat
 
   * Hermes JSON (Qwen3-4B-Instruct-2507): <tool_call>{"name": ..., "arguments": {...}}</tool_call>
   * Qwen XML (Qwen3.5): <tool_call><function=NAME><parameter=P>value</parameter>...</function></tool_call>
+  * Gemma 4: <|tool_call>call:NAME{key:<|"|>text<|"|>,n:3}<tool_call|> (special tokens: decode them)
 
-Each plugin parses its own format first; a block in the other format still parses (logged once), so a model that
-switches format mid-deployment doesn't silently lose its tool calls.
+Each Qwen plugin parses its own format first; a block in the other Qwen format still parses (logged once), so a
+model that switches format mid-deployment doesn't silently lose its tool calls. Gemma's calls open with their own
+tag (TAGS), passed to the splitting / naming helpers.
 """
 from __future__ import annotations
 import json, logging, re, uuid
 
 log = logging.getLogger("llm")
 TAG = "<tool_call>"
+GEMMA_TAG, GEMMA_Q = "<|tool_call>", '<|"|>'
+TAGS = {"hermes_json": TAG, "qwen_xml": TAG, "gemma4": GEMMA_TAG}     # the tag a format's calls open with
+GCALL = re.compile(r"<\|tool_call>call:([\w.-]+)\{(.*?)\}(?:<tool_call\|>|<turn\|>|$)", re.S)
 TCALL = re.compile(r"<tool_call>(.*?)</tool_call>", re.S)
 TFUNC = re.compile(r"<function=([^>\s]+)>(.*?)</function>", re.S)
 TPARAM = re.compile(r"<parameter=([^>\s]+)>\n?(.*?)\n?</parameter>", re.S)
@@ -27,13 +32,13 @@ def _hold_back(text: str, tags) -> int:
     return 0
 
 
-def split_speakable(raw: str):
+def split_speakable(raw: str, tag: str = TAG):
     """(speakable_prefix, saw_tool_call) for the raw model text so far. A trailing partial "<tool_c" is held
-    back until it resolves; text from the first <tool_call> on is never speakable."""
-    i = raw.find(TAG)
+    back until it resolves; text from the first call `tag` on is never speakable."""
+    i = raw.find(tag)
     if i >= 0:
         return raw[:i], True
-    k = _hold_back(raw, (TAG,))
+    k = _hold_back(raw, (tag,))
     return (raw[:-k] if k else raw), False
 
 
@@ -86,9 +91,43 @@ def _hermes(body):
 FORMATS = {"hermes_json": _hermes, "qwen_xml": _xml}
 
 
+def _gemma_value(v: str):
+    v = v.strip()
+    if v.startswith(GEMMA_Q) and v.endswith(GEMMA_Q) and len(v) >= 2 * len(GEMMA_Q):
+        return v[len(GEMMA_Q):-len(GEMMA_Q)]
+    try:
+        return json.loads(v)                       # numbers, true / false, null
+    except Exception:
+        return v
+
+
+def _gemma_args(body: str) -> dict:
+    """key:value pairs, comma-separated; string values are wrapped in <|"|> and may contain commas or colons.
+    Flat values only (every tool here takes strings); a nested {...} value stays a string."""
+    out = {}; pos = 0
+    while pos < len(body):
+        colon = body.find(":", pos)
+        if colon < 0:
+            break
+        key = body[pos:colon].strip().strip(",").strip()
+        rest = body[colon + 1:]
+        if rest.startswith(GEMMA_Q):
+            end = rest.find(GEMMA_Q, len(GEMMA_Q))
+            end = len(rest) if end < 0 else end + len(GEMMA_Q)
+        else:
+            end = rest.find(",")
+            end = len(rest) if end < 0 else end
+        if key:
+            out[key] = _gemma_value(rest[:end])
+        pos = colon + 1 + end + 1
+    return out
+
+
 def parse_calls(raw: str, fmt: str):
-    """[{"name", "arguments"}] for each <tool_call> block in raw, read as `fmt` first, then as the other format;
-    a block neither reads is dropped (logged by kind only, never its text)."""
+    """[{"name", "arguments"}] for each call block in raw. The Qwen formats are read as `fmt` first, then as the
+    other; a block neither reads is dropped (logged by kind only, never its text)."""
+    if fmt == "gemma4":
+        return [{"name": m.group(1), "arguments": _gemma_args(m.group(2))} for m in GCALL.finditer(raw)]
     first = FORMATS[fmt]; other = next(f for k, f in FORMATS.items() if k != fmt)
     out = []
     for m in TCALL.finditer(raw):
@@ -106,18 +145,19 @@ def parse_calls(raw: str, fmt: str):
 
 
 # the first call's name, complete: Hermes {"name": "x" (closing quote seen) or XML <function=x>
-_NAME = (re.compile(r'\s*\{\s*"name"\s*:\s*"([^"\\]+)"'), re.compile(r"\s*<function=([^>\s]+)>"))
+_NAME = (re.compile(r'\s*\{\s*"name"\s*:\s*"([^"\\]+)"'), re.compile(r"\s*<function=([^>\s]+)>"),
+         re.compile(r"\s*call:([\w.-]+)\{"))
 NAME_WAIT = 64          # characters after the tag; a call that hasn't named its tool by then starts unnamed
 
 
-def tool_start(raw: str):
-    """The ("tool_start") payload for raw text that has a <tool_call>: {"name": ...} once the first call's name
-    has decoded (both formats name the tool first), {"name": None} if NAME_WAIT characters past the tag still
+def tool_start(raw: str, tag: str = TAG):
+    """The ("tool_start") payload for raw text that has a call `tag`: {"name": ...} once the first call's name
+    has decoded (every format names the tool first), {"name": None} if NAME_WAIT characters past the tag still
     don't name one, else None (wait for more text)."""
-    i = raw.find(TAG)
+    i = raw.find(tag)
     if i < 0:
         return None
-    body = raw[i + len(TAG):]
+    body = raw[i + len(tag):]
     for rx in _NAME:
         m = rx.match(body)
         if m:
