@@ -1,8 +1,9 @@
-"""VoxCPM2 streaming voice-clone TTS on a vLLM-Omni AsyncOmni engine, in-process (no HTTP).
+"""voxcpm2: VoxCPM2 streaming voice-clone TTS on a vLLM-Omni AsyncOmni engine, in-process (no HTTP).
 
-Surface: load_voice(path) -> Voice, then stream(text, voice) / render / warmup. Each stream(text, voice) is
-one VoxCPM2 request for one text chunk; audio is yielded per decode step as it arrives. VoxCPM2 emits 48 kHz;
-a stateful polyphase resampler brings it to out_sr (24 kHz: the EARS<->browser wire and the 2nd ear).
+TTSPlugin surface: list_voices(cfg) (scans voices.dir without loading anything), load_voice(name) -> Voice,
+stream(text, voice), warmup(voice), shutdown(). Each stream(text, voice) is one VoxCPM2 request for one text
+chunk; audio is yielded per decode step as it arrives. VoxCPM2 emits 48 kHz; a stateful polyphase resampler
+brings it to out_sr (24 kHz: the EARS<->browser wire and the 2nd ear).
 
 Voice cloning: the clip is resampled once, at load, to the rate VoxCPM2's audio VAE encodes at (the stage worker
 otherwise resampled it on the CPU for every request: ~50 ms). If a transcript sits next to the clip
@@ -16,13 +17,32 @@ Privacy: the clip and transcript are read into memory only (the speaker cache is
 nothing is written to disk or logged.
 """
 from __future__ import annotations
-import threading, uuid, logging
+import glob, os, threading, uuid, logging
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
+from app.config import repo_path
+from app.plugins.base import TTSCaps
+from app.resample import StreamingAudioResampler
+
 log = logging.getLogger("tts")
+
+
+def scan_voices(cfg: dict) -> tuple[dict, str | None]:
+    """({name: wav_path}, default_name): *.wav in voices.dir (a voices/<name>.txt next to a clip is its
+    transcript). Falls back to the first clip if voices.default isn't present."""
+    v = cfg.get("voices", {})
+    voices: dict[str, str] = {}
+    vdir = repo_path(v.get("dir"))
+    if vdir and vdir.is_dir():
+        for w in sorted(glob.glob(os.path.join(vdir, "*.wav"))):
+            voices[Path(w).stem] = w
+    default = v.get("default")
+    if default not in voices:
+        default = next(iter(voices), None)
+    return voices, default
 
 
 @dataclass(frozen=True, eq=False)
@@ -37,15 +57,33 @@ class Voice:
     feat_len: int = 0     # encoded clip length, which the prompt needs once the clip itself isn't sent
 
 
-class VoxCPM2TTS:
-    def __init__(self, eloop, model="openbmb/VoxCPM2", deploy_config=None, out_sr=24000, ref_max_s=10.0):
+class VoxCPM2:
+    remote = False
+
+    @classmethod
+    def list_voices(cls, cfg) -> tuple[list[str], str | None]:
+        voices, default = scan_voices(cfg)
+        return sorted(voices), default
+
+    def __init__(self, conf: dict, ctx):
         from transformers import AutoTokenizer
         from vllm_omni.entrypoints.async_omni import AsyncOmni
         from vllm_omni.entrypoints.utils import coerce_param_message_types
         from vllm_omni.model_executor.models.voxcpm2.voxcpm2_talker import build_cjk_split_map
-        self.eloop = eloop
-        self.out_sr = int(out_sr)
-        self.ref_max_s = float(ref_max_s)
+        self.cfg = ctx.cfg; self.eloop = eloop = ctx.eloop
+        model = conf.get("model") or "openbmb/VoxCPM2"
+        deploy_config = repo_path(conf.get("deploy_config"))
+        self.out_sr = int(conf.get("out_sr", 24000))
+        self.ref_max_s = float(conf.get("ref_max_s", 10.0))
+        names, default = scan_voices(self.cfg)
+        if names:
+            log.info("voices available: %s (default=%s)", sorted(names), default)
+        elif conf.get("allow_zero_shot"):          # testing only: VoxCPM2's unconditioned voice, no clone
+            log.warning("no voice clips in voices.dir -> zero-shot TTS voice (tts.allow_zero_shot)")
+        else:
+            raise RuntimeError("no voice reference clips found (put a *.wav in voices.dir)")
+        self._voices = {}                     # clip path -> (mtime, Voice): each clip is read once
+        self._voice_lock = threading.Lock()
 
         async def make():
             kw = {"deploy_config": str(deploy_config)} if deploy_config else {}
@@ -66,9 +104,28 @@ class VoxCPM2TTS:
             import yaml
             stages = (yaml.safe_load(Path(deploy_config).read_text()) or {}).get("stages") or [{}]
             self.max_batch = int(stages[0].get("max_num_seqs", 1))
+        self.caps = TTSCaps(cloning=True, max_batch=self.max_batch)
 
-    def load_voice(self, ref_path, name=None) -> Voice:
-        import os, soundfile as sf, librosa
+    def load_voice(self, name) -> Voice | None:
+        """The Voice for a clip name (re-scans voices.dir, so clips added after startup work), or None. A clip is
+        read once, and again only when its file changes."""
+        try:
+            voices, _ = scan_voices(self.cfg)
+        except Exception as e:
+            log.warning("voice discovery failed: %s", e); return None
+        path = voices.get(name)
+        if path is None:
+            return None
+        mtime = os.path.getmtime(path)
+        with self._voice_lock:
+            hit = self._voices.get(path)
+            if hit is None or hit[0] != mtime:
+                hit = (mtime, self._read_voice(path, name))
+                self._voices[path] = hit
+            return hit[1]
+
+    def _read_voice(self, ref_path, name=None) -> Voice:
+        import soundfile as sf, librosa
         wav, sr = sf.read(str(ref_path), dtype="float32", always_2d=True)
         wav = wav.mean(1)
         txt = Path(ref_path).with_suffix(".txt")
@@ -98,7 +155,6 @@ class VoxCPM2TTS:
 
     def stream(self, text, voice=None, stop_flag=None):
         """Yield mono float32 chunks @ out_sr for one text chunk, in `voice` (None = zero-shot)."""
-        from vllm_omni.utils.audio_resample import StreamingAudioResampler
         rid = f"tts-{uuid.uuid4().hex[:12]}"
         with self._tok_lock:      # sessions call this from several threads; HF fast tokenizers aren't re-entrant
             prompt = self._prompt(text, voice)
@@ -144,14 +200,11 @@ class VoxCPM2TTS:
             for _ in self.stream("Hi.", voice):
                 pass
 
-    def render(self, text, voice=None):
-        chunks = list(self.stream(text, voice))
-        return np.concatenate(chunks) if chunks else np.zeros(0, np.float32)
-
     def warmup(self, voice=None):
         """Pay VoxCPM2's one-time compiles before serving. It compiles lazily per batch size: the first time two
         (three, four) requests decode together, the WHOLE engine stalls ~25 s mid-conversation (seen live: a
-        backchannel next to a turn). So run every batch size up to max_num_seqs concurrently, up front."""
+        backchannel next to a turn). So run every batch size up to max_num_seqs concurrently, up front. Then put
+        every clip in voices.dir into the speaker cache, so no conversation pays a voice's first use."""
         import time
         for t in ("Warmup.", "This is another warmup sentence to settle the kernels before we go live."):
             for _ in self.stream(t, voice):
@@ -165,3 +218,8 @@ class VoxCPM2TTS:
             for x in th:
                 x.join()
             log.info("TTS warmup: batch %d in %.1fs", b, time.perf_counter() - t0)
+        for name in self.list_voices(self.cfg)[0]:
+            self.prime_voice(self.load_voice(name))
+
+    def shutdown(self):
+        self.engine.shutdown()

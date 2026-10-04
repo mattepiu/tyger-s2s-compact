@@ -4,7 +4,7 @@ Architecture:
   * The models are plugins (app/plugins, PLUGINS.md), chosen in config. LLM roles: `reply` (turns and the tool
     phase-B answer) and `filler` (backchannels, tool lead-ins, still-looking lines), the same instance unless
     configured apart. Local plugins run in-process on a shared asyncio loop (app/engines.py): the Qwen LLMs on
-    vLLM AsyncLLM, VoxCPM2 on vLLM-Omni AsyncOmni (app/tts_voxcpm.py). No HTTP between MOUTH and the models.
+    vLLM AsyncLLM, VoxCPM2 on vLLM-Omni AsyncOmni. No HTTP between MOUTH and the models.
     They can't be one vLLM-Omni pipeline: MOUTH has to sit between them (chunking, tools + lead-in,
     backchannels, barge-in).
   * The LLM reply is chunked by chunker.next_chunk: the FIRST chunk may end at a clause boundary (comma,
@@ -33,11 +33,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 from app.wire import send_msg, recv_msg
 from app.tools import build_tools, execute_tool
 from app.chunker import next_chunk, say_clean
-from app.config import load_config, discover_voices, repo_path, llm_roles
+from app.config import load_config, llm_roles
 from app.prompts import load_prompts
 from app.engines import EngineLoop
-from app.plugins import build_llms
-from app.tts_voxcpm import VoxCPM2TTS
+from app.plugins import build_llms, build_tts
 
 log = logging.getLogger("mouth")
 
@@ -99,7 +98,7 @@ class Mouth:
         roles = llm_roles(cfg)
         if "smart" in roles:
             raise NotImplementedError("the smart role (escalation, background tasks) comes in PLUGINS.md step 10")
-        m = cfg["mouth"]; t = cfg["tts"]
+        m = cfg["mouth"]
         self.cfg = cfg
         # prompts first: a bad prompts.yaml stops start-up before minutes of engine loading
         by_name = load_prompts(cfg, {name for name, _ in roles.values()})
@@ -111,51 +110,27 @@ class Mouth:
         self.bc_max_new = int(m.get("bc_max_new", 12))
         self.eloop = EngineLoop()
         # TTS first: its deploy config pins a small KV budget; the LLM's start-up check then sees what's left.
-        log.info("loading TTS %s", t["model"])
-        self.tts = VoxCPM2TTS(self.eloop, t["model"], deploy_config=repo_path(t.get("deploy_config")),
-                              out_sr=t.get("out_sr", 24000), ref_max_s=t.get("ref_max_s", 10.0))
+        self.tts = build_tts(cfg, self.eloop)            # at the 24 kHz wire rate
         self.llms = build_llms(cfg, self.eloop)          # role -> LLM plugin instance
         self.sr = self.tts.out_sr
-        self._voices = {}                     # clip path -> (mtime, Voice): each clip is read once
-        self._voice_lock = threading.Lock()
-        names, default = discover_voices(cfg)
-        if names:
-            log.info("voices available: %s (default=%s)", sorted(names), default)
-        elif t.get("allow_zero_shot"):          # testing only: VoxCPM2's unconditioned voice, no clone
-            log.warning("no voice clips in voices.dir -> zero-shot TTS voice (tts.allow_zero_shot)")
-        else:
-            raise RuntimeError("no voice reference clips found (put a *.wav in voices.dir)")
+        default, voice = self.default_voice()
         log.info("warming TTS (voice=%s)", default)
-        self.tts.warmup(self.default_voice()[1])
-        for name in sorted(names):                     # every clip into VoxCPM2's speaker cache before serving
-            self.tts.prime_voice(self.voice(name))
+        self.tts.warmup(voice)
         for llm in {id(x): x for x in self.llms.values()}.values():
             llm.warmup()
         # first request with the tools prompt is cold (~490 ms to first token vs ~55 ms after) -> pay it here
         p = self.prompts["reply"]
-        for _ in self.llms["reply"].stream([{"role": "system", "content": p.text("system", "voice_tools")},
-                                  {"role": "user", "content": p.text("warmup", "user")}], tools=self.tools, max_new=8):
+        warm = [{"role": "system", "content": p.text("system", "voice_tools")},
+                {"role": "user", "content": p.text("warmup", "user")}]
+        for _ in self.llms["reply"].stream(warm, tools=self.tools, max_new=8):
             pass
 
     def voice(self, name):
-        """The Voice for a clip name (re-scans voices.dir, so clips added after startup work), or None."""
-        try:
-            voices, _ = discover_voices(self.cfg)
-        except Exception as e:
-            log.warning("voice discovery failed: %s", e); return None
-        path = voices.get(name)
-        if path is None:
-            return None
-        mtime = os.path.getmtime(path)
-        with self._voice_lock:
-            hit = self._voices.get(path)
-            if hit is None or hit[0] != mtime:
-                hit = (mtime, self.tts.load_voice(path, name))
-                self._voices[path] = hit
-            return hit[1]
+        """The TTS plugin's voice handle for `name`, or None (clips added after startup work)."""
+        return self.tts.load_voice(name)
 
     def default_voice(self):
-        _, default = discover_voices(self.cfg)
+        _, default = self.tts.list_voices(self.cfg)
         return default, (self.voice(default) if default else None)
 
 
@@ -538,7 +513,7 @@ def main():
 
     def stop(signum, frame):                      # shut the engines down so their worker processes exit too
         log.info("MOUTH stopping (signal %d)", signum)    # (a bare SIGTERM orphans the VoxCPM2 stage process)
-        for shutdown in [m.tts.engine.shutdown] + [x.shutdown for x in {id(x): x for x in m.llms.values()}.values()]:
+        for shutdown in [m.tts.shutdown] + [x.shutdown for x in {id(x): x for x in m.llms.values()}.values()]:
             try:
                 shutdown()
             except Exception as e:

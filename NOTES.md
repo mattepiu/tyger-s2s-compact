@@ -86,6 +86,12 @@ both models (neither template renders the IDs).
 `qwen3-4b-2507` (the one-line rollback, Hermes JSON calls): smoke PASS, `--tools --fresh` 24/24 tools called,
 first-audio p50 360 ms, GPU peak 27 666 MiB.
 
+**Step 3 (TTS plugin `voxcpm2`, voices through `list_voices` / `load_voice`, the wire-rate wrapper):** smoke PASS
+(240 / 296 / 415 / 206 ms); `load_test.py` turn first-audio p50 543 / 503 / 488 (median 503 vs 482); GPU peak
+27 728 MiB; cloned-voice generate → first audio p50 86 ms (baseline 89). The streaming resampler is vendored from
+vLLM-Omni (`app/resample.py`, bit-identical output): importing it from there loads torch + vLLM (~12 s), which a
+hosted-only MOUTH must not.
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at

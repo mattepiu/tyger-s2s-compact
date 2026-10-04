@@ -1,7 +1,7 @@
 """Fake engines for driving MOUTH's Session without a GPU (tests only).
 
-FakeLLM / FakeTTS mimic LocalLLM.stream / VoxCPM2TTS.stream: generators that poll stop_flag between items, as
-EngineLoop.iterate does. FakeMouth carries the attributes Session reads from Mouth. Test text is synthetic.
+FakeLLM / FakeTTS mimic the LLM / TTS plugins' stream (app/plugins): generators that poll stop_flag between
+items, as EngineLoop.iterate does. FakeMouth carries the attributes Session reads from Mouth. Test text is synthetic.
 """
 import os, sys, threading, time
 
@@ -89,9 +89,26 @@ class FakeLLM:
 
 class FakeTTS:
     """Yields `n` chunks of `chunk_s` audio per request, `step_s` apart; records each request's text."""
+    remote = False
+
     def __init__(self, out_sr=24000, n=5, chunk_s=0.08, step_s=0.002, onset_s=0.0):
+        from app.plugins.base import TTSCaps
         self.out_sr, self.n, self.chunk_s, self.step_s, self.onset_s = out_sr, n, chunk_s, step_s, onset_s
         self.requests = []; self.aborted = 0; self.live = 0; self.lock = threading.Lock()
+        self.caps = TTSCaps(cloning=False, max_batch=4)
+
+    @classmethod
+    def list_voices(cls, cfg=None):
+        return ["fake"], "fake"
+
+    def load_voice(self, name):
+        return None
+
+    def warmup(self, voice=None):
+        pass
+
+    def shutdown(self):
+        pass
 
     def stream(self, text, voice=None, stop_flag=None):
         self.requests.append(text)

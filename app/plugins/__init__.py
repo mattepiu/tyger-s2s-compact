@@ -41,3 +41,16 @@ def build_llms(cfg: dict, eloop) -> dict:
         log.warning("remote LLM roles (transcripts leave the box): %s",
                     ", ".join(f"{r}={n}" for r, (n, _) in llm_roles(cfg).items() if r in remote))
     return out
+
+
+def build_tts(cfg: dict, eloop):
+    """The configured TTS plugin instance, at the 24 kHz wire rate."""
+    import logging
+    from app.plugins.base import PluginContext
+    from app.plugins.tts import AtWireRate, WIRE_SR
+    block = cfg["tts"]
+    logging.getLogger("plugins").info("loading TTS %s", block["plugin"])
+    tts = plugin_class("tts", block["plugin"])(block, PluginContext(eloop, cfg, block.get("name") or block["plugin"]))
+    if getattr(tts, "remote", False):
+        logging.getLogger("plugins").warning("remote TTS %s: reply text leaves the box", block["plugin"])
+    return tts if tts.out_sr == WIRE_SR else AtWireRate(tts)

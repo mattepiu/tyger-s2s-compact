@@ -1,7 +1,7 @@
-"""Load config.yaml + v1/.env. Secrets (TAVILY_API_KEY, HF_TOKEN) come from the env / .env and are never
-written to logs. Voices are discovered from a directory of *.wav reference clips (outside git)."""
+"""Load config.yaml + v1/.env and check its plugin shape. Secrets (TAVILY_API_KEY, HF_TOKEN) come from the env /
+.env and are never written to logs."""
 from __future__ import annotations
-import os, glob
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]   # v1/
@@ -129,18 +129,3 @@ def repo_path(p: str | None) -> Path | None:
         return None
     q = Path(p)
     return q if q.is_absolute() else ROOT / q
-
-
-def discover_voices(cfg: dict) -> tuple[dict, str]:
-    """Return ({name: wav_path}, default_name). Scans voices.dir for *.wav (a voices/<name>.txt next to a clip
-    is its transcript, read by the TTS). Falls back to the first clip if voices.default isn't present."""
-    v = cfg.get("voices", {})
-    voices: dict[str, str] = {}
-    vdir = repo_path(v.get("dir"))
-    if vdir and vdir.is_dir():
-        for w in sorted(glob.glob(os.path.join(vdir, "*.wav"))):
-            voices[Path(w).stem] = w
-    default = v.get("default")
-    if default not in voices:
-        default = next(iter(voices), None)
-    return voices, default

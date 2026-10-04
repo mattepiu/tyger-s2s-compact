@@ -9,19 +9,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 logging.basicConfig(level=logging.WARNING)
 import numpy as np, torch
-from app.config import load_config, discover_voices, repo_path
+from app.config import load_config
 from app.engines import EngineLoop
-from app.tts_voxcpm import VoxCPM2TTS
+from app.plugins.base import PluginContext
+from app.plugins.tts.voxcpm2 import VoxCPM2, scan_voices
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--voice", default=None); ap.add_argument("--n", type=int, default=12)
     a = ap.parse_args()
-    cfg = load_config(); t = cfg["tts"]
-    voices, default = discover_voices(cfg)
-    path = voices[a.voice or default]
-    tts = VoxCPM2TTS(EngineLoop(), t["model"], deploy_config=repo_path(t["deploy_config"]), out_sr=t.get("out_sr", 24000),
-                     ref_max_s=t.get("ref_max_s", 10.0))
-    voice = tts.load_voice(path)
+    cfg = load_config()
+    voices, default = scan_voices(cfg)
+    name = a.voice or default; path = voices[name]
+    tts = VoxCPM2(cfg["tts"], PluginContext(EngineLoop(), cfg, "voxcpm2"))
+    voice = tts.load_voice(name)
     TEXTS = ["Hi there, it's really nice to hear from you today.", "The weather looks lovely this afternoon, honestly.",
              "That sounds like a great plan for the weekend, I think.", "Let me know if there's anything else you need."]
 

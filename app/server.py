@@ -24,7 +24,8 @@ from app.ears_core.batched import EarsEngine, EarsService
 from app.ears_core.live_ears import HOP_FRAMES
 from app.ears_core.encoder_stream import ENC_SR
 from app.ears_core.labeling import FRAME_S
-from app.config import load_config, discover_voices
+from app.config import load_config
+from app.plugins import plugin_class
 from app import weights
 
 log = logging.getLogger("ears")
@@ -35,8 +36,13 @@ PLAYBACK_MARGIN_S = 0.25                        # slack for network + client sch
 
 SERVICE: EarsService | None = None
 CFG = None
-VOICES = {}
+VOICES: list[str] = []      # voice names from the TTS plugin's list_voices (EARS never builds the TTS)
 DEFAULT_VOICE = None
+
+
+def list_voices(cfg):
+    """(names, default) from the configured TTS plugin's class: a light import, no model loaded."""
+    return plugin_class("tts", cfg["tts"]["plugin"]).list_voices(cfg)
 
 
 def ds24to16(x):
@@ -64,10 +70,10 @@ async def voices_handler(request):
     # Re-scans the voices dir so clips added after startup show up on a refresh (no EARS restart needed).
     global VOICES, DEFAULT_VOICE
     try:
-        VOICES, DEFAULT_VOICE = discover_voices(CFG)
+        VOICES, DEFAULT_VOICE = list_voices(CFG)
     except Exception as e:
         log.warning("voice re-discovery failed: %s", e)
-    return web.json_response({"voices": sorted(VOICES.keys()), "voice": DEFAULT_VOICE})
+    return web.json_response({"voices": VOICES, "voice": DEFAULT_VOICE})
 
 
 def session_thresholds(cfg):
@@ -110,7 +116,7 @@ async def _conversation(ws, ears):
 
     await ws.send_json({"type": "ready", "hop_ms": int(HOP_FRAMES * FRAME_S * 1e3), "sr": ENC_SR,
                         "mouth": have_mouth,
-                        "voices": sorted(VOICES.keys()), "voice": DEFAULT_VOICE,
+                        "voices": VOICES, "voice": DEFAULT_VOICE,
                         "thresholds": {"barge_thr": ears.barge_thr, "bc_thr": ears.bc_thr,
                                        "ep_thr": ears.ep_thr, "ep_deb": ears.ep_deb,
                                        "endpoint": "ep", "fallback_frames": ears.FALLBACK_SIL_FRAMES}})
@@ -325,7 +331,7 @@ def main():
     CFG = load_config(args.config)
     import torch
     torch.set_num_threads(int(CFG["ears"].get("cpu_threads", 4)))   # default 48 threads mostly spin-wait
-    VOICES, DEFAULT_VOICE = discover_voices(CFG)
+    VOICES, DEFAULT_VOICE = list_voices(CFG)
     SERVICE = build_service(CFG)
     log.info("=== EARS ready (up to %d conversations) ===", SERVICE.engine.slots)
     app = web.Application()
