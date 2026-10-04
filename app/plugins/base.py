@@ -35,6 +35,13 @@ class LLMError(Exception):
         super().__init__(kind); self.kind = kind
 
 
+class TTSError(Exception):
+    """A hosted TTS request failed (rate limit, timeout, connection, HTTP error, too many in flight). The turn ends
+    without its audio. `kind` is for logs; never the text."""
+    def __init__(self, kind: str):
+        super().__init__(kind); self.kind = kind
+
+
 @dataclass(frozen=True)
 class TTSCaps:
     cloning: bool = False                  # takes reference clips from voices/ (never sent off the box)
