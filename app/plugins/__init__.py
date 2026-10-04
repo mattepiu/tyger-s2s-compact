@@ -7,6 +7,7 @@ REGISTRY = {
     "llm": {"qwen3-4b-2507": "app.plugins.llm.qwen3_2507:Qwen3Instruct2507",
             "qwen3.5-4b": "app.plugins.llm.qwen35:Qwen35",
             "openai": "app.plugins.llm.openai_compat:OpenAICompatLLM",     # hosted: transcripts leave the box
+            "anthropic": "app.plugins.llm.anthropic:AnthropicLLM",         # hosted: transcripts leave the box
             "fake": "app.plugins.llm.fake:FakeLLM"},
     "tts": {"voxcpm2": "app.plugins.tts.voxcpm2:VoxCPM2",
             "fake": "app.plugins.tts.fake:FakeTTS"},
