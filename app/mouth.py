@@ -35,7 +35,8 @@ from collections import deque
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root on path
 from app.wire import send_msg, recv_msg
-from app.tools import build_tools, execute_tool, EXPERT
+from app.tools import build_tools, execute_tool, EXPERT, START, CANCEL
+from app.tasks import TaskRunner, TaskSlots
 from app.chunker import next_chunk, say_clean
 from app.config import load_config, llm_roles
 from app.prompts import load_prompts
@@ -114,21 +115,29 @@ def turns_messages(p, turns, id_prefix="shot"):
     return msgs
 
 
-def reply_prefix(p, expert):
+def reply_prefix(p, expert, tasks=False):
     """The reply request before the conversation: the system prompt, the few-shot turns (reply_shots: local answers
-    and lookups), and with escalation on, the hand-off turns (escalation.shots), as earlier turns in the neutral
-    format. A fixed prefix, so it stays cached."""
-    system = p.text("escalation", "system") if expert else p.text("system", "voice_tools")
+    and lookups), with escalation on the hand-off turns (escalation.shots), with tasks on the start_task turns
+    (tasks.shots), as earlier turns in the neutral format. A fixed prefix, so it stays cached."""
+    system = p.text("tasks", "reply_system") if tasks else \
+        p.text("escalation", "system") if expert else p.text("system", "voice_tools")
     msgs = [{"role": "system", "content": system}] + turns_messages(p, p.turns("reply_shots"), "rshot")
-    return msgs + (turns_messages(p, p.turns("escalation")) if expert else [])
+    msgs += turns_messages(p, p.turns("escalation")) if expert else []
+    return msgs + (turns_messages(p, p.turns("tasks"), "tshot") if tasks else [])
+
+
+def plain_context(turns):
+    """Conversation turns as plain user / assistant text for a smart-model request (escalation, tasks): tool calls
+    and results dropped (provider-neutral, no foreign tool IDs, and less leaves the box)."""
+    return [{"role": x["role"], "content": x["content"]} for turn in turns for x in turn
+            if x["role"] in ("user", "assistant") and not x.get("tool_calls") and x.get("content")]
 
 
 def smart_messages(p, turns, transcript, question, others=()):
     """The smart model's request for an escalated turn: its system prompt, the given recent turns as plain text
     (tool calls and results dropped: provider-neutral, and less leaves the box), then the user's words with the
     reply model's restated question as a note, plus what other tools called in the same turn returned."""
-    ctx = [{"role": x["role"], "content": x["content"]} for turn in turns for x in turn
-           if x["role"] in ("user", "assistant") and not x.get("tool_calls") and x.get("content")]
+    ctx = plain_context(turns)
     user = p.fill("smart", "user", transcript=transcript, question=question or transcript)
     if others:
         user += p.fill("smart", "results", results="; ".join(f"{n}: {_compact_result(r)}" for n, r in others))
@@ -203,20 +212,24 @@ class Mouth:
     def __init__(self, cfg):
         roles = llm_roles(cfg)
         m = cfg["mouth"]
-        if (m.get("tasks") or {}).get("enabled"):
-            raise NotImplementedError("background tasks (mouth.tasks) come in PLUGINS.md steps 12-14")
         esc = m.get("escalation") or {}
         self.expert = "smart" in roles and bool(esc.get("enabled", True))   # ask_expert offered, smart answers it
         if "smart" in roles and not self.expert:
             log.warning("llm.smart is configured but mouth.escalation.enabled is false: it is never used")
+        self.tasks_cfg = m.get("tasks") or {}                     # background tasks need escalation (the smart model)
+        self.tasks_on = self.expert and bool(self.tasks_cfg.get("enabled", False))
+        if self.tasks_cfg.get("enabled") and not self.tasks_on:
+            log.warning("mouth.tasks.enabled needs llm.smart (and escalation): background tasks are off")
+        self.task_slots = TaskSlots(self.tasks_cfg.get("max_global", 4))
         self.context_turns = int(esc.get("context_turns", 4))     # history turns sent along with an escalated turn
         self.max_steps = int(esc.get("max_steps", 3))             # the smart model's own tool rounds per turn
         self.cfg = cfg
         # prompts first: a bad prompts.yaml stops start-up before minutes of engine loading
         by_name = load_prompts(cfg, {name for name, _ in roles.values()})
         self.prompts = {role: by_name[name] for role, (name, _) in roles.items()}   # role -> Prompts
-        self.tools = build_tools(self.prompts["reply"], expert=self.expert)
+        self.tools = build_tools(self.prompts["reply"], expert=self.expert, tasks=self.tasks_on)
         self.smart_tools = build_tools(self.prompts["smart"]) if self.expert else None   # lookups, no ask_expert
+        self.task_tools = build_tools(self.prompts["smart"], finish=True) if self.tasks_on else None
         self.max_gen = int(m.get("max_gen", 192))
         self.history_turns = int(m.get("history_turns", 8))
         self.bc_min_words = int(m.get("bc_min_words", 4))
@@ -233,7 +246,7 @@ class Mouth:
             llm.warmup()
         # first request with the tools prompt is cold (~490 ms to first token vs ~55 ms after) -> pay it here
         p = self.prompts["reply"]
-        warm = reply_prefix(p, self.expert) + [{"role": "user", "content": p.text("warmup", "user")}]
+        warm = reply_prefix(p, self.expert, self.tasks_on) + [{"role": "user", "content": p.text("warmup", "user")}]
         for _ in self.llms["reply"].stream(warm, tools=self.tools, max_new=8):
             pass
 
@@ -264,6 +277,7 @@ class Session:
         self._audio_s = 0.0                # reply audio generated so far this turn, in s
         self.turn_q: queue.Queue = queue.Queue()
         self.bc_q: queue.Queue = queue.Queue()
+        self.tasks = TaskRunner(m, context=self._task_context, on_done=self._task_done) if m.tasks_on else None
 
     def send(self, kind, payload=b""):
         if self.closed.is_set():
@@ -416,17 +430,26 @@ class Session:
         yield ("done", line)
 
     # ---- tool rounds: run the calls, and cover the wait with short lines ----
-    def _run_calls(self, calls, expert=False):
+    def _run_calls(self, calls, expert=False, transcript=""):
         """Run one round of tool calls at once; results in call order. A call the plugin flagged (bad arguments)
-        is never run; with `expert`, ask_expert isn't run either: the smart model answers it."""
+        is never run; with `expert`, ask_expert isn't run either: the smart model answers it. start_task /
+        cancel_task go to this conversation's task runner."""
         results = [None] * len(calls)
         p = self.m.prompts["reply"]
 
         def _run(i, c):
+            args = c.get("arguments") or {}
             if c.get("error"):
                 results[i] = {"error": c["error"]}
             elif expert and c["name"] == EXPERT:
                 results[i] = {"result": p.text("escalation", "tool_result")}
+            elif self.tasks is not None and c["name"] == START:
+                results[i] = self.tasks.start(args.get("goal"), transcript)
+            elif self.tasks is not None and c["name"] == CANCEL:
+                try:
+                    results[i] = self.tasks.cancel(int(args.get("task_id")))
+                except (TypeError, ValueError):
+                    results[i] = {"error": p.text("tasks", "unknown_task")}
             else:
                 results[i] = execute_tool(c["name"], c.get("arguments", {}))
         workers = [threading.Thread(target=_run, args=(i, c), daemon=True) for i, c in enumerate(calls)]
@@ -463,8 +486,9 @@ class Session:
     def _turn(self, transcript, stop_flag):
         m = self.m; voice = self.voice                 # one voice per reply (a switch applies to the next one)
         self._said = []; self._audio_s = 0.0; self._play_end = time.perf_counter()
-        msgs = reply_prefix(m.prompts["reply"], m.expert) + list(self.history) + \
-            [{"role": "user", "content": transcript}]
+        status = self.tasks.status_block() if self.tasks is not None else ""   # tasks: a note on this message only
+        msgs = reply_prefix(m.prompts["reply"], m.expert, m.tasks_on) + list(self.history) + \
+            [{"role": "user", "content": f"{status}\n\n{transcript}" if status else transcript}]
         events = m.llms["reply"].stream(msgs, tools=m.tools, max_new=m.max_gen, stop_flag=stop_flag)
         content, calls, native, started, refused = yield from self._speak_stream(events, voice, stop_flag)
         if refused and not stop_flag():
@@ -492,7 +516,7 @@ class Session:
                 if stop_flag() or not box["calls"]:
                     return
                 log.info("tool calls: %s", [c["name"] for c in box["calls"]])
-                box["results"] = self._run_calls(box["calls"], expert=m.expert)
+                box["results"] = self._run_calls(box["calls"], expert=m.expert, transcript=transcript)
                 ask = next((c for c in box["calls"] if c["name"] == EXPERT and not c.get("error")), None)
                 if ask is not None and m.expert and not stop_flag():
                     others = [(c["name"], r) for c, r in zip(box["calls"], box["results"]) if c["name"] != EXPERT]
@@ -604,6 +628,15 @@ class Session:
                 return " ".join(said), False
             rounds += 1; stream, msgs = box["next"], box["msgs"]
 
+    # ---- background tasks (step 12; announcing a finished one is step 13) ----
+    def _task_context(self):
+        m = self.m
+        return self.turns[-m.context_turns:] if m.context_turns > 0 else []
+
+    def _task_done(self, task):
+        """A task finished or failed; the status note tells the reply model on the next turn (step 13 will ask
+        EARS for the floor and announce it)."""
+
     # ---- say (S): TTS of a given text only; no LLM, not remembered ----
     def stream_say(self, text, stop_flag):
         self._said = []; self._audio_s = 0.0; self._play_end = time.perf_counter()
@@ -685,7 +718,10 @@ class Session:
             w.start()
         try:
             while True:
-                kind, payload = recv_msg(self.conn)
+                try:
+                    kind, payload = recv_msg(self.conn)
+                except OSError:                             # reset by the peer: the same as a clean close
+                    break
                 if kind is None:
                     break
                 if kind == b"T":
@@ -702,6 +738,8 @@ class Session:
                     self.turn_stop.set()
         finally:                                            # disconnect: stop + abort whatever is live
             self.closed.set(); self.turn_stop.set()
+            if self.tasks is not None:                      # background tasks end with the conversation
+                self.tasks.close()
             self.turn_q.put(None); self.bc_q.put(None)
             for w in workers:
                 w.join(timeout=5)

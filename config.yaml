@@ -69,6 +69,14 @@ mouth:
   cpu_threads: 4                     # torch CPU threads in the MOUTH process
   bc_min_words: 4                    # ASR partial shorter than this is flagged to the LLM as "only a few
                                      # words so far" -> it answers with a neutral hum instead of a reaction
+  tasks:                             # background tasks on llm.smart (start_task / cancel_task); PLUGINS.md 12-14
+    enabled: false                   # off until finished tasks are announced by themselves (step 13)
+    max_concurrent: 1                # running at once, per conversation
+    max_per_session: 5
+    max_global: 4                    # running at once across all conversations (hosted calls fan out)
+    max_wall_s: 300
+    max_steps: 8                     # the smart model's tool rounds per task
+    result_chars: 4000
   escalation:                        # used only with llm.smart
     context_turns: 4                 # recent turns sent along with an escalated question
     max_steps: 3                     # the smart model's own tool rounds per escalated turn

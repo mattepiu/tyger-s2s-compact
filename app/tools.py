@@ -32,15 +32,29 @@ TOOL_SCHEMAS = [
 EXPERT = "ask_expert"
 EXPERT_SCHEMA = {"type": "function", "function": {"name": EXPERT,
    "parameters": {"type": "object", "properties": {"question": {"type": "string"}}, "required": ["question"]}}}
-ALL_SCHEMAS = TOOL_SCHEMAS + [EXPERT_SCHEMA]
+# background tasks (PLUGINS.md steps 12-14): start / cancel offered to the `reply` model with ask_expert when
+# mouth.tasks.enabled; finish_task only to the smart model running a task. MOUTH handles all three itself.
+START, CANCEL, FINISH = "start_task", "cancel_task", "finish_task"
+TASK_SCHEMAS = [
+ {"type": "function", "function": {"name": START,
+   "parameters": {"type": "object", "properties": {"goal": {"type": "string"}}, "required": ["goal"]}}},
+ {"type": "function", "function": {"name": CANCEL,
+   "parameters": {"type": "object", "properties": {"task_id": {"type": "integer"}}, "required": ["task_id"]}}},
+]
+FINISH_SCHEMA = {"type": "function", "function": {"name": FINISH,
+   "parameters": {"type": "object", "properties": {"summary": {"type": "string"}, "result": {"type": "string"}},
+                  "required": ["summary", "result"]}}}
+ALL_SCHEMAS = TOOL_SCHEMAS + [EXPERT_SCHEMA] + TASK_SCHEMAS + [FINISH_SCHEMA]
 
 
-def build_tools(prompts, expert=False):
-    """The OpenAI function schemas with their descriptions from `prompts` (app.prompts.Prompts), plus ask_expert
-    last if `expert`. Key order is the original's (name, description, parameters; a property's type, then
-    description), since chat templates render the JSON as given."""
+def build_tools(prompts, expert=False, tasks=False, finish=False):
+    """The OpenAI function schemas with their descriptions from `prompts` (app.prompts.Prompts): the lookup /
+    action tools, then ask_expert if `expert`, start_task / cancel_task if `tasks`, finish_task if `finish` (the
+    smart model running a task). Key order is the original's (name, description, parameters; a property's type,
+    then description), since chat templates render the JSON as given."""
     text = prompts.tool_text(); out = []
-    for t in TOOL_SCHEMAS + ([EXPERT_SCHEMA] if expert else []):
+    for t in TOOL_SCHEMAS + ([EXPERT_SCHEMA] if expert else []) + (TASK_SCHEMAS if tasks else []) + \
+            ([FINISH_SCHEMA] if finish else []):
         f = t["function"]; d = text[f["name"]]; pdesc = d.get("params") or {}
         props = {}
         for p, spec in f["parameters"]["properties"].items():

@@ -2,7 +2,8 @@
 
 Routes each request by its system prompt (read from prompts.yaml, like MOUTH does): tool lead-in / still-looking /
 backchannel / the expert lead-in and still-looking lines / the smart model's answer (`smart`, or `smart_b` once a
-tool result is in) / phase B (a tool result present) / the main reply, and streams the scripted text for that kind a
+tool result is in) / a background task on the smart model (`task`, `task_b`; by default it calls finish_task) /
+phase B (a tool result present) / the main reply, and streams the scripted text for that kind a
 few characters at a time, polling stop_flag between items like the real engine loop. `reply` and `smart` may contain
 Hermes <tool_call>s, which go through the same splitting, naming (tool_start) and parsing as the local Qwen plugins. For tests of hosted
 behaviour, `fail` maps a request kind to an LLMError kind raised for it (after `fail_after` items), and `refuse`
@@ -14,13 +15,17 @@ import threading, time
 from app.plugins.base import LLMError
 from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id, tool_start, names_tool
 
-KINDS = ("reply", "phase_b", "leadin", "still", "ack", "expert_leadin", "expert_still", "smart", "smart_b")
+KINDS = ("reply", "phase_b", "leadin", "still", "ack", "expert_leadin", "expert_still", "smart", "smart_b", "task",
+         "task_b")
+FINISH_CALL = ('<tool_call>\n{"name": "finish_task", "arguments": {"summary": "About your task: it is done, and it '
+               'went well.", "result": "The full result of the task, in plain text."}}\n</tool_call>')
 DEFAULTS = {"reply": "Sure, here is a reasonably long first sentence for you. And a second one.",
             "phase_b": "It is sunny and twenty degrees there today, a lovely day.",
             "leadin": "One sec, let me look that up.", "still": "Still looking, almost there.", "ack": "oh nice",
             "expert_leadin": "Let me think that through.", "expert_still": "Still working it out.",
             "smart": "Here is the careful answer, worked out step by step. It holds up.",
             "smart_b": "Having checked, the careful answer is forty two.",
+            "task": FINISH_CALL, "task_b": FINISH_CALL,
             "step_s": 0.002, "chars": 4, "fail": {}, "fail_after": 0, "refuse": ()}
 
 
@@ -61,9 +66,9 @@ class FakeLLM:
         tool_result = messages[-1]["role"] == "tool"
         for kind, section in (("leadin", "tool_leadin"), ("ack", "backchannel"), ("still", "still_looking"),
                               ("expert_leadin", "expert_leadin"), ("expert_still", "expert_still"),
-                              ("smart", "smart")):
+                              ("smart", "smart"), ("task", "tasks")):
             if sys_txt.startswith(self.prompts.text(section, "system")):     # + appended hints (backchannel)
-                return "smart_b" if kind == "smart" and tool_result else kind
+                return kind + "_b" if kind in ("smart", "task") and tool_result else kind
         return "phase_b" if tool_result else "reply"
 
     def text_for(self, kind):

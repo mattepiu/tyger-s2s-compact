@@ -287,6 +287,22 @@ Tool-turn first audio p50: no smart 395 / 367 / 380 (was 439 with the name wait)
 longer escalation prompt + the name). Plain turns with smart on 468 / 513 / 467 (438 without): the hand-off shots
 add prefill. Smoke PASS both ways; GPU peak 30.4 GB.
 
+**Step 12 (background tasks: `app/tasks.py`, start_task / cancel_task, status note).** GPU-free gate:
+`tests/test_tasks.py` (13 tests on a fake `smart` with scripted tool rounds and delays):
+- start → keep chatting → done → the next reply request carries the status note with the summary;
+- "still working" while running;
+- the task's own tool rounds;
+- the caps: concurrent, per conversation, global across conversations (the slot comes back when a task ends);
+- the wall-clock timeout (the smart stream is aborted);
+- cancel by the user, and the conversation closing (both abort the stream and free the slot);
+- `max_steps` then the limit note;
+- a plain-text answer taken as the result;
+- an LLM error failing the task;
+- no goal, summary or result in any log line.
+
+Live with tasks off (the default until step 13): smoke PASS, turn p50 477 / 470 ms (unchanged). Also fixed: a
+connection reset from EARS ended `Session.run` with a traceback instead of a clean close.
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at

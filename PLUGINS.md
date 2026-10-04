@@ -634,6 +634,18 @@ this possible, because EARS already knows when the user is silent.
 - The goal and the context turns leave the box, as for escalation.
 - Logs carry task IDs, timings, step and token counts, and status. Never goals, results or summaries.
 
+**Built (step 12), `app/tasks.py`:**
+- `TaskRunner` per conversation, `TaskSlots` (the global cap) per MOUTH. The task's request: `tasks.system`, the
+  last `context_turns` turns as plain text, then the user's words, the goal and the language to write in
+  (`tasks.user`). It ends with `finish_task(summary, result)` (offered only to the task); a plain-text answer is
+  taken as both; past `max_steps` its calls get `tasks.limit`, one more round, then it fails.
+- The status note is prepended to the user's latest message (`[Background tasks you started for the user: …]`),
+  not a separate system message: the Qwen and Gemma chat templates take a system message only first. History
+  keeps the user's words only. Until step 13 announces results, the note carries the spoken summary of a finished
+  task, so the reply model can tell it when asked.
+- The reply prompt with tasks on is `tasks.reply_system` (the escalation prompt plus when to start / cancel a task)
+  and `tasks.shots` (start_task in EN / RU / ES) after the hand-off shots. `mouth.tasks.enabled` needs `llm.smart`.
+
 **Tests:**
 - **GPU-free:** a fake `smart` plugin with scripted tool rounds and delays, and the fake EARS. Cover:
   - start → continue chatting → done → `F` → wait for silence → `G` → announce;

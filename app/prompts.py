@@ -24,6 +24,14 @@ TEMPLATES = {
     ("smart", "results"): {"results"},
     ("language", "tool_note"): {"language"},
     ("language", "filler"): {"language"},
+    ("tasks", "user"): {"goal", "language", "transcript"},
+    ("tasks", "status_block"): {"tasks"},
+    ("tasks", "status_running"): {"id", "goal", "seconds"},
+    ("tasks", "status_done"): {"id", "goal", "summary"},
+    ("tasks", "status_announced"): {"id", "goal", "summary"},
+    ("tasks", "status_partial"): {"id", "goal", "summary"},
+    ("tasks", "status_failed"): {"id", "goal"},
+    ("tasks", "status_cancelled"): {"id", "goal"},
 }
 # plain text, sent as written
 TEXTS = [("system", "voice_tools"), ("tool_leadin", "system"), ("still_looking", "system"),
@@ -32,7 +40,9 @@ TEXTS = [("system", "voice_tools"), ("tool_leadin", "system"), ("still_looking",
          ("spoken", "error"), ("spoken", "refusal"),
          ("escalation", "system"), ("escalation", "tool_result"), ("expert_leadin", "system"),
          ("expert_still", "system"), ("expert_still", "said_none"), ("smart", "system"), ("smart", "limit"),
-         ("language", "tool_note_any")]
+         ("language", "tool_note_any"), ("language", "unknown"), ("tasks", "reply_system"), ("tasks", "system"),
+         ("tasks", "limit"), ("tasks", "cap_concurrent"), ("tasks", "cap_session"), ("tasks", "cap_global"),
+         ("tasks", "unknown_task")]
 SHOTS = ["tool_leadin", "still_looking", "backchannel", "expert_leadin", "expert_still"]
 
 
@@ -106,6 +116,15 @@ class Prompts:
                     and isinstance(t["call"].get("arguments"), dict)) for t in ts):
             self._fail("reply_shots", "must be a list of {user, reply} or {user, call: {name, arguments}, result, "
                                       "answer} turns (calls to tools of app/tools.py)")
+        from app.tools import START, CANCEL
+        ts = self._get("tasks", "shots")
+        if not isinstance(ts, list) or not all(
+                isinstance(t, dict) and set(t) == {"user", "call", "result", "answer"} and isinstance(t["user"], str)
+                and isinstance(t["answer"], str) and isinstance(t["call"], dict)
+                and t["call"].get("name") in (START, CANCEL) and isinstance(t["call"].get("arguments"), dict)
+                for t in ts):
+            self._fail("tasks.shots", "must be a list of {user, call: {name: start_task|cancel_task, arguments}, "
+                                      "result, answer} turns")
         langs = self._get("language", "names")
         if not isinstance(langs, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in langs.items()):
             self._fail("language.names", "must map language codes to names (text)")
@@ -152,10 +171,14 @@ class Prompts:
         return self.fill("language", "filler", language=name) if name else ""
 
     def turns(self, section) -> list[dict]:
-        """Structured few-shot turns: reply_shots (user + reply, or user + call + result + answer) or
-        escalation.shots (user + expert + answer, or user + reply)."""
+        """Structured few-shot turns: reply_shots (user + reply, or user + call + result + answer),
+        escalation.shots (user + expert + answer, or user + reply) or tasks.shots (user + call + result + answer)."""
         node = self.d[section]
         return [dict(t) for t in (node if isinstance(node, list) else node["shots"])]
+
+    def language_or_unknown(self, transcript) -> str:
+        """The user's language by name, or language.unknown ("the same language they spoke in")."""
+        return self.language_name(transcript) or self.text("language", "unknown")
 
     def tool_text(self) -> dict:
         return self.d["tools"]

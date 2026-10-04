@@ -9,14 +9,16 @@ from app.prompts import default_prompts  # noqa: E402
 from app.tools import build_tools  # noqa: E402
 from app.plugins.llm.fake import FakeLLM, wait_or_stop  # noqa: E402,F401
 from app.plugins.tts.fake import FakeTTS  # noqa: E402
+from app.tasks import TaskSlots  # noqa: E402
 
 PROMPTS = default_prompts()     # the repo's prompts.yaml; FakeLLM routes requests by their system prompt
 
 
 class FakeMouth:
     """`smart`: a FakeLLM for the smart role, which turns escalation on (ask_expert offered), as an llm.smart block
-    does in Mouth."""
-    def __init__(self, llm=None, tts=None, smart=None, context_turns=4, max_steps=3):
+    does in Mouth; `tasks`: a mouth.tasks dict, which with `smart` turns background tasks on. `slots`: share one
+    TaskSlots between FakeMouths to test the global cap."""
+    def __init__(self, llm=None, tts=None, smart=None, context_turns=4, max_steps=3, tasks=None, slots=None):
         self.llm = llm or FakeLLM(); self.tts = tts or FakeTTS()
         self.max_gen = 192; self.history_turns = 8; self.bc_min_words = 4; self.bc_max_new = 12
         self.temperature = 0.7; self.sr = self.tts.out_sr
@@ -24,8 +26,12 @@ class FakeMouth:
         self.llms = {"reply": self.llm, "filler": self.llm}
         self.expert = smart is not None
         self.context_turns, self.max_steps = context_turns, max_steps
-        self.tools = build_tools(PROMPTS, expert=self.expert)
+        self.tasks_cfg = tasks or {}
+        self.tasks_on = self.expert and bool(tasks)
+        self.task_slots = slots or TaskSlots(self.tasks_cfg.get("max_global", 4))
+        self.tools = build_tools(PROMPTS, expert=self.expert, tasks=self.tasks_on)
         self.smart_tools = build_tools(PROMPTS) if self.expert else None
+        self.task_tools = build_tools(PROMPTS, finish=True) if self.tasks_on else None
         if smart is not None:
             self.prompts["smart"] = PROMPTS; self.llms["smart"] = smart
 
