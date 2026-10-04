@@ -56,6 +56,8 @@ def check_llm_events(evs):
     if "tool_calls" in kinds:
         assert kinds[-1] == "tool_calls" and "tool_start" in kinds, kinds
         ev = evs[-1]; assert len(ev) == 3, "tool_calls carries (calls, native)"
+        named = evs[kinds.index("tool_start")][1]["name"]        # the filler is picked by it
+        assert named is None or (ev[1] and named == ev[1][0]["name"]), (named, [c["name"] for c in ev[1]])
         ids = [c["id"] for c in ev[1]]
         assert len(ids) == len(set(ids)) and all(isinstance(c["arguments"], dict) and c["name"] for c in ev[1])
     if "refusal" in kinds:
@@ -82,6 +84,7 @@ def llm_suite(llm, plain=True, tool_turn=True):
             check_llm_events(evs)
             calls = evs[-1][1] if evs and evs[-1][0] == "tool_calls" else []
             assert calls and calls[0]["name"] == "get_weather", f"no weather call for {city}"
+            assert evs[[e[0] for e in evs].index("tool_start")][1]["name"] == "get_weather", "tool_start unnamed"
             ids |= {c["id"] for c in calls}
         assert len(ids) == 2, "tool-call IDs repeat across requests"
 

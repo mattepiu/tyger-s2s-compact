@@ -91,7 +91,7 @@ def test_truncated_tool_call_not_run():
 def test_text_written_tool_call_parsed():
     raw = '<tool_call>\n{"name": "get_weather", "arguments": {"location": "Lima"}}\n</tool_call>'
     evs = parse([chunk(raw[:15]), chunk(raw[15:]), chunk(finish="stop")])
-    assert evs[0] == ("tool_start", {"name": None}) and evs[-1][1][0]["arguments"] == {"location": "Lima"}
+    assert evs[0] == ("tool_start", {"name": "get_weather"}) and evs[-1][1][0]["arguments"] == {"location": "Lima"}
     assert not any(e[0] == "text" for e in evs)
 
 

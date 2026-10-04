@@ -37,6 +37,11 @@ llm:                       # MOUTH's LLM roles; each block is one plugin instanc
     max_num_seqs: 8                # 4 sessions x (turn + backchannel) batched together
     temperature: 0.7
   filler: reply            # backchannels, tool lead-ins, still-looking lines: the same instance
+  # smart:                 # optional: answers turns the reply model escalates (ask_expert). HOSTED: escalated
+  #   plugin: anthropic    # turns and their mouth.escalation.context_turns of transcript leave the box
+  #   model: claude-opus-5-5
+  #   effort: low
+  #   max_tokens: 2048
 
 tts:                       # VoxCPM2, in-process vLLM-Omni AsyncOmni inside the MOUTH
   plugin: voxcpm2
@@ -61,3 +66,7 @@ mouth:
   cpu_threads: 4                     # torch CPU threads in the MOUTH process
   bc_min_words: 4                    # ASR partial shorter than this is flagged to the LLM as "only a few
                                      # words so far" -> it answers with a neutral hum instead of a reaction
+  escalation:                        # used only with llm.smart
+    context_turns: 4                 # recent turns sent along with an escalated question
+    max_steps: 3                     # the smart model's own tool rounds per escalated turn
+    max_new: 384

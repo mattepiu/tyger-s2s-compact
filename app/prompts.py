@@ -18,13 +18,19 @@ TEMPLATES = {
     ("backchannel", "no_repeat"): {"acks"},
     ("backchannel", "user_short"): {"partial"},
     ("backchannel", "user"): {"partial"},
+    ("expert_leadin", "user"): {"transcript"},
+    ("expert_still", "user"): {"transcript", "said"},
+    ("smart", "user"): {"transcript", "question"},
+    ("smart", "results"): {"results"},
 }
 # plain text, sent as written
 TEXTS = [("system", "voice_tools"), ("tool_leadin", "system"), ("still_looking", "system"),
          ("still_looking", "said_none"), ("backchannel", "system"), ("backchannel", "user_empty"),
          ("markers", "interrupted"), ("markers", "empty_reply"), ("warmup", "user"),
-         ("spoken", "error"), ("spoken", "refusal")]
-SHOTS = ["tool_leadin", "still_looking", "backchannel"]
+         ("spoken", "error"), ("spoken", "refusal"),
+         ("escalation", "system"), ("escalation", "tool_result"), ("expert_leadin", "system"),
+         ("expert_still", "system"), ("expert_still", "said_none"), ("smart", "system"), ("smart", "limit")]
+SHOTS = ["tool_leadin", "still_looking", "backchannel", "expert_leadin", "expert_still"]
 
 
 class PromptError(ValueError):
@@ -57,7 +63,7 @@ class Prompts:
         return node.get(key) if isinstance(node, dict) else None
 
     def _validate(self):
-        from app.tools import TOOL_SCHEMAS
+        from app.tools import ALL_SCHEMAS
         if self.d.get("version") != 1:
             self._fail("version", "must be 1")
         for sec, key in TEXTS:
@@ -79,10 +85,17 @@ class Prompts:
             if not isinstance(shots, list) or not all(
                     isinstance(p, list) and len(p) == 2 and all(isinstance(s, str) for s in p) for p in shots):
                 self._fail(f"{sec}.shots", "must be a list of [user, assistant] text pairs")
+        shots = self._get("escalation", "shots")
+        if not isinstance(shots, list) or not all(
+                isinstance(t, dict) and isinstance(t.get("user"), str) and
+                (set(t) == {"user", "reply"} and isinstance(t["reply"], str) or
+                 set(t) == {"user", "expert", "answer"} and isinstance(t["expert"], str) and isinstance(t["answer"], str))
+                for t in shots):
+            self._fail("escalation.shots", "must be a list of {user, reply} or {user, expert, answer} turns (text)")
         tools = self.d.get("tools")
         if not isinstance(tools, dict):
             self._fail("tools", "is missing")
-        names = {t["function"]["name"]: t["function"]["parameters"]["properties"] for t in TOOL_SCHEMAS}
+        names = {t["function"]["name"]: t["function"]["parameters"]["properties"] for t in ALL_SCHEMAS}
         for name, props in names.items():
             entry = tools.get(name)
             if not isinstance(entry, dict) or not isinstance(entry.get("description"), str):
@@ -106,6 +119,10 @@ class Prompts:
         if set(values) != want:
             raise PromptError(f"`{section}.{key}` takes {sorted(want)}, got {sorted(values)}")
         return Template(self.d[section][key]).substitute(values)
+
+    def turns(self, section) -> list[dict]:
+        """Structured few-shot turns (escalation.shots): dicts with user + reply, or user + expert + answer."""
+        return [dict(t) for t in self.d[section]["shots"]]
 
     def tool_text(self) -> dict:
         return self.d["tools"]

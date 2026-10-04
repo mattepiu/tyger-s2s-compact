@@ -145,6 +145,30 @@ Smoke PASS, barge → D 5 ms, no request errors, GPU peak 18.4 GB (no VoxCPM2). 
 Each text chunk is one request, and each pays the hosted time to first audio, so short chunks finish playing
 before the next one starts. The user removed the plugin (reverted); VoxCPM2 is the only TTS.
 
+**Step 10 (`smart` role, `ask_expert`, `tool_start` names the tool, fillers that fit the tool).** GPU-free: 12 new
+session tests on a fake `smart` (answer straight to TTS, request starts under the lead-in, expert still-lines,
+smart tool rounds and the `max_steps` cap, other tools' results as context, plain-text context turns, barge-in,
+smart error / refusal) and `tool_start` naming tests; the local contract run checks both Qwen plugins name
+`get_weather` at `tool_start`. Local-only parity (no `smart`: prompt and tools byte-identical):
+
+| | step 2–4 | step 10 |
+|---|---|---|
+| smoke plain / weather / reminder / backchannel | 240 / 305 / 419 / 198 ms | 233 / 335 / 449 / 205 ms, PASS |
+| `load_test.py` turn first-audio p50, 3 runs | 502 / 457 / 502 (median 502) | 537 / 476 / 464 (median 476) |
+| backchannel first-audio p50 | 474–591 | 568 / 651 / 622, then 402 / 618 (same code; noise) |
+| `--tools --fresh` first-audio p50, 3 runs; dead air p50 | 493 / 457 / 486 (median 486); 1011 | 569 / 533 / 517 (median 533); 1014–1090 |
+| GPU peak | 27 706 MiB | 27 702–27 776 MiB |
+
+Tool turns pay ~30–50 ms for the name: the lead-in now starts a few tokens after `<tool_call>` instead of at the
+tag (no tool-call parse failures in 79 calls).
+
+Live check with Qwen3.5-4B as `reply` and a **fake** `smart` (no remote calls; 10 synthetic prompts, one fresh
+session each): 5/5 hard prompts (EN / RU / ES: savings maths, loan vs invest, a Kyoto plan, mortgage terms,
+index vs active funds) escalated, 4/4 easy ones answered locally, the weather question used `get_weather`. The
+lead-ins fit ("That's a tough choice, let me weigh the options.", "Давайте я сравню эти варианты…"). Escalated
+turns' first audio (the lead-in) 412–461 ms alone; 4 at once 653–716 ms vs 580–808 for 4 weather turns at once
+and 396–454 for plain ones. Barge-in during an escalated turn → D 6 ms. Routing on a real test set is step 11.
+
 ## Box (2026-10-03) — new, healthy RTX 5090
 NVIDIA RTX 5090 (32 607 MiB), driver 590.48.01 / CUDA 13.1; 384-core CPU, 755 GB RAM. Same venv versions as below
 (torch 2.13.0+cu130, vllm 0.30.0, vllm-omni 0.30.0, transformers 5.14.1). **Not throttled**: under load it sits at

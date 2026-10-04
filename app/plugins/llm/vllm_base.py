@@ -2,16 +2,17 @@
 Qwen plugins, which override only the hooks: default_model, engine_kwargs, template_kwargs, tool_format,
 sampling, filter_text.
 
-stream(messages, tools=...) yields ("text", delta) for speakable text as it decodes; ("tool_start", {"name": None})
-the moment a <tool_call> tag appears (the call itself is still decoding, so the name isn't known yet); then at
-most one ("tool_calls", [{"id", "name", "arguments"}], None) at the end. Text from the first <tool_call> on is
+stream(messages, tools=...) yields ("text", delta) for speakable text as it decodes; ("tool_start", {"name": ...})
+once a <tool_call> tag has appeared and the tool's name has decoded after it (a few tokens; the arguments are still
+decoding), so MOUTH can pick a filler that fits the tool; then at most one ("tool_calls", [{"id", "name",
+"arguments"}], None) at the end. Text from the first <tool_call> on is
 never yielded as speech (a trailing partial "<tool_c" is held back until it resolves). The KV budget is pinned
 (kv_cache_gib), so GPU memory doesn't depend on what else is loaded.
 """
 from __future__ import annotations
 import asyncio, threading, uuid, logging
 
-from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id
+from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id, tool_start
 
 log = logging.getLogger("llm")
 
@@ -85,16 +86,19 @@ class VLLMChatPlugin:
                 if out.outputs and out.outputs[0].text:
                     yield out.outputs[0].text
 
-        raw, said, saw_tool = "", 0, False
+        raw, said, saw_tool, started = "", 0, False, None
         for d in self.eloop.iterate(deltas, abort=lambda: self.engine.abort(rid), stop_flag=stop_flag):
             raw += d
-            if saw_tool:
+            if started:
                 continue
-            speak, saw_tool = split_speakable(self.filter_text(raw))
-            if len(speak) > said:
-                yield ("text", speak[said:]); said = len(speak)
+            if not saw_tool:
+                speak, saw_tool = split_speakable(self.filter_text(raw))
+                if len(speak) > said:
+                    yield ("text", speak[said:]); said = len(speak)
             if saw_tool:                  # the call's arguments are still decoding; the caller can start a filler
-                yield ("tool_start", {"name": None})
+                started = tool_start(self.filter_text(raw))
+                if started:
+                    yield ("tool_start", started)
         if stop_flag and stop_flag():
             return
         visible = self.filter_text(raw, final=True)
@@ -102,6 +106,8 @@ class VLLMChatPlugin:
             yield ("text", visible[said:])
         if saw_tool:
             calls = parse_calls(visible, self.tool_format)
+            if not started:               # ended before the name decoded (a cut-off or garbled call)
+                yield ("tool_start", {"name": calls[0]["name"] if calls else None})
             yield ("tool_calls", [{"id": new_call_id(), **c} for c in calls], None)
 
     def warmup(self) -> None:

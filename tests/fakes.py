@@ -14,12 +14,20 @@ PROMPTS = default_prompts()     # the repo's prompts.yaml; FakeLLM routes reques
 
 
 class FakeMouth:
-    def __init__(self, llm=None, tts=None):
+    """`smart`: a FakeLLM for the smart role, which turns escalation on (ask_expert offered), as an llm.smart block
+    does in Mouth."""
+    def __init__(self, llm=None, tts=None, smart=None, context_turns=4, max_steps=3):
         self.llm = llm or FakeLLM(); self.tts = tts or FakeTTS()
         self.max_gen = 192; self.history_turns = 8; self.bc_min_words = 4; self.bc_max_new = 12
         self.temperature = 0.7; self.sr = self.tts.out_sr
-        self.prompts = {"reply": PROMPTS, "filler": PROMPTS}; self.tools = build_tools(PROMPTS)
+        self.prompts = {"reply": PROMPTS, "filler": PROMPTS}
         self.llms = {"reply": self.llm, "filler": self.llm}
+        self.expert = smart is not None
+        self.context_turns, self.max_steps, self.smart_max_new = context_turns, max_steps, 384
+        self.tools = build_tools(PROMPTS, expert=self.expert)
+        self.smart_tools = build_tools(PROMPTS) if self.expert else None
+        if smart is not None:
+            self.prompts["smart"] = PROMPTS; self.llms["smart"] = smart
 
     def default_voice(self):
         return "fake", None
@@ -54,8 +62,8 @@ class FakeConn:
                 self.cond.wait(rem)
 
 
-def make_session(llm=None, tts=None):
-    m = FakeMouth(llm, tts)
+def make_session(llm=None, tts=None, **kw):
+    m = FakeMouth(llm, tts, **kw)
     return M.Session(m, FakeConn()), m
 
 

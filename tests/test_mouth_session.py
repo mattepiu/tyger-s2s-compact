@@ -178,8 +178,12 @@ def dead_air(evs, sr=24000):
     return gap
 
 
+LONG_CALL = ('<tool_call>\n{"name": "web_search", "arguments": {"query": "the opening hours of the old town '
+             'museum in Paris this coming weekend"}}\n</tool_call>')
+
+
 def test_filler_starts_before_call_finishes_decoding():
-    llm = FakeLLM(reply=TOOL_REPLY, step_s=0.02, chars=2)    # the call takes ~0.8 s to decode
+    llm = FakeLLM(reply=LONG_CALL, step_s=0.01, chars=2)     # named at ~0.15 s, decoded at ~0.75 s
     s, m = make_session(llm, FakeTTS(n=3))
     t_tool = []
     orig = M.execute_tool
@@ -190,7 +194,7 @@ def test_filler_starts_before_call_finishes_decoding():
     finally:
         M.execute_tool = orig
     first_audio = next(t for k, _, t in evs if k == "audio") - t0
-    assert len(t_tool) == 1 and 0.6 < t_tool[0] - t0 < 1.0, "tool should start as soon as the call is parsed"
+    assert len(t_tool) == 1 and 0.6 < t_tool[0] - t0 < 1.1, "tool should start as soon as the call is parsed"
     assert first_audio < t_tool[0] - t0 - 0.2, \
         f"filler first audio {1e3 * first_audio:.0f} ms, call parsed at {1e3 * (t_tool[0] - t0):.0f} ms"
     assert evs[-1][0] == "done" and "phase_b" in [c[0] for c in llm.calls]
@@ -322,6 +326,165 @@ def test_flagged_tool_call_never_runs():
     finally:
         M.execute_tool = orig
     assert ran == [] and "invalid arguments" in s.history[2]["content"]
+
+
+# ---- escalation (step 10): ask_expert, answered by the smart model straight to the TTS ----------------------
+ASK = ('<tool_call>\n{"name": "ask_expert", "arguments": {"question": "How much would 200 dollars a month in an '
+       'index fund grow to over 20 years?"}}\n</tool_call>')
+
+
+def kinds(llm):
+    return [c[0] for c in llm.calls]
+
+
+def test_no_expert_without_smart():
+    """Without a smart model the reply prompt and tools are exactly the local-only ones (parity)."""
+    s, m = make_session(FakeLLM())
+    run_turn(s, "hello")
+    msgs = s.m.llm.calls[0][1]
+    assert msgs[0]["content"] == PROMPTS.text("system", "voice_tools") and len(msgs) == 2
+    assert "ask_expert" not in [t["function"]["name"] for t in m.tools]
+
+
+def test_expert_prompt_has_shots_and_tool():
+    s, m = make_session(FakeLLM(), smart=FakeLLM())
+    run_turn(s, "hello")
+    msgs = s.m.llm.calls[0][1]
+    assert msgs[0]["content"] == PROMPTS.text("escalation", "system")
+    asks = [c for x in msgs if x.get("tool_calls") for c in x["tool_calls"]]
+    assert asks and all(c["name"] == "ask_expert" for c in asks) and msgs[-1]["content"] == "hello"
+    assert len({c["id"] for c in asks}) == len(asks)
+    assert [t["function"]["name"] for t in m.tools][-1] == "ask_expert"
+    assert "ask_expert" not in [t["function"]["name"] for t in m.smart_tools]
+    assert s.m.llms["smart"].calls == [], "a plain turn must not reach the smart model"
+
+
+def test_expert_turn_answered_by_smart():
+    llm, smart = FakeLLM(reply=ASK), FakeLLM()
+    s, m = make_session(llm, FakeTTS(n=2), smart=smart)
+    evs, _ = run_turn(s, "what do I get from 200 a month over 20 years?")
+    assert "expert_leadin" in kinds(llm) and "leadin" not in kinds(llm), kinds(llm)
+    assert "phase_b" not in kinds(llm), "the reply model must not answer an escalated turn"
+    assert kinds(smart) == ["smart"]
+    req = smart.calls[0][1]
+    assert req[0]["content"] == PROMPTS.text("smart", "system")
+    assert req[-1]["content"].startswith("what do I get from 200") and "index fund" in req[-1]["content"]
+    assert evs[-1][1].endswith(smart.smart) and evs[-1][1].startswith(llm.expert_leadin)
+    assert [h["role"] for h in s.history] == ["user", "assistant", "tool", "assistant"]
+    assert s.history[1]["tool_calls"][0]["name"] == "ask_expert" and s.history[3]["content"] == smart.smart
+    first_id = s.history[1]["tool_calls"][0]["id"]
+    run_turn(s, "and if I doubled it?")                 # the follow-up sees the escalation in history
+    follow = [c[1] for c in llm.calls if c[0] == "reply"][-1]
+    assert any(x.get("tool_calls") and x["tool_calls"][0]["id"] == first_id for x in follow)
+
+
+def test_smart_request_starts_under_the_leadin():
+    """The smart request goes out as soon as the call parses, not after the lead-in has been spoken."""
+    t = {}
+
+    class Timed(FakeLLM):
+        def stream(self, messages, **kw):
+            t.setdefault("smart", time.perf_counter())
+            yield from super().stream(messages, **kw)
+    llm = FakeLLM(reply=ASK, chars=8)
+    s, m = make_session(llm, FakeTTS(n=10, step_s=0.03), smart=Timed())       # lead-in audio takes 0.3 s
+    evs, _ = run_turn(s, "what do I get from 200 a month over 20 years?")
+    leadin_audio = [tt for k, v, tt in evs if k == "audio"]
+    assert t["smart"] < leadin_audio[5], "smart request waited for the lead-in"
+
+
+def test_expert_still_covers_a_slow_smart_model():
+    """A smart model slow to its first words (thinking): expert still-looking lines, which know the lead-in."""
+    llm = FakeLLM(reply=ASK, chars=16)
+    smart = FakeLLM(step_s=3.0, chars=80)                        # first text after 3 s
+    tts = FakeTTS(n=3, chunk_s=0.08, step_s=0.005)               # each line: 0.24 s of audio
+    s, m = make_session(llm, tts, smart=smart)
+    evs, _ = run_turn(s, "plan a three day trip to Rome")
+    assert kinds(llm).count("expert_still") == M.MAX_STILL and "still" not in kinds(llm), kinds(llm)
+    first = next(c[1] for c in llm.calls if c[0] == "expert_still")
+    assert llm.expert_leadin in first[-1]["content"]
+    assert evs[-1][1].endswith(smart.smart)
+
+
+def test_smart_tool_round():
+    llm = FakeLLM(reply=ASK)
+    smart = FakeLLM(smart="Let me check that. " + TOOL_REPLY)
+    s, m = make_session(llm, FakeTTS(n=2), smart=smart)
+    ran = []
+    orig = M.execute_tool
+    M.execute_tool = lambda n, a: ran.append(n) or {"answer": "sunny"}
+    try:
+        evs, _ = run_turn(s, "should I bike to work in Paris tomorrow?")
+    finally:
+        M.execute_tool = orig
+    assert ran == ["get_weather"] and kinds(smart) == ["smart", "smart_b"]
+    second = smart.calls[1][1]
+    assert second[-2]["tool_calls"][0]["name"] == "get_weather" and "sunny" in second[-1]["content"]
+    assert evs[-1][1].endswith(smart.smart_b) and s.history[-1]["content"].endswith(smart.smart_b)
+    assert "phase_b" not in kinds(llm)
+
+
+def test_smart_tool_rounds_capped():
+    llm = FakeLLM(reply=ASK)
+    smart = FakeLLM(smart=TOOL_REPLY, smart_b=TOOL_REPLY)         # never stops calling tools
+    s, m = make_session(llm, FakeTTS(n=2), smart=smart, max_steps=1)
+    with SlowTool(0):
+        evs, _ = run_turn(s, "keep checking")
+    limit = PROMPTS.text("smart", "limit")
+    assert kinds(smart) == ["smart", "smart_b", "smart_b"], kinds(smart)
+    assert limit not in json.dumps(smart.calls[1][1], ensure_ascii=False)
+    assert limit in json.dumps(smart.calls[2][1][-1], ensure_ascii=False)
+    assert evs[-1][:2] == ("done", PROMPTS.text("spoken", "error"))
+
+
+def test_other_tool_results_go_to_smart():
+    both = ('<tool_call>\n{"name": "get_weather", "arguments": {"location": "Rome"}}\n</tool_call>\n' + ASK)
+    llm, smart = FakeLLM(reply=both), FakeLLM()
+    s, m = make_session(llm, FakeTTS(n=2), smart=smart)
+    orig = M.execute_tool
+    M.execute_tool = lambda n, a: {"answer": "rainy, 14 C"}
+    try:
+        run_turn(s, "is Rome nice for a walk tomorrow, and what should I see?")
+    finally:
+        M.execute_tool = orig
+    last = smart.calls[0][1][-1]["content"]
+    assert "get_weather" in last and "rainy, 14 C" in last
+    assert [c["name"] for c in s.history[1]["tool_calls"]] == ["get_weather", "ask_expert"]
+
+
+def test_smart_context_is_recent_plain_turns():
+    llm, smart = FakeLLM(), FakeLLM()
+    s, m = make_session(llm, FakeTTS(n=1), smart=smart, context_turns=2)
+    with SlowTool(0):
+        for q in ("first question", "second question"):
+            run_turn(s, q)
+        llm.text["reply"] = TOOL_REPLY; run_turn(s, "weather in Paris?")
+        llm.text["reply"] = ASK; run_turn(s, "now the hard one")
+    req = smart.calls[0][1]
+    assert [x["role"] for x in req] == ["system", "user", "assistant", "user", "assistant", "user"], req
+    assert req[1]["content"] == "second question" and req[3]["content"] == "weather in Paris?"
+    assert all("tool_calls" not in x for x in req)
+
+
+def test_barge_during_expert_answer():
+    llm = FakeLLM(reply=ASK)
+    smart = FakeLLM(smart="The first part of a careful answer is right here, friend. Then a second sentence "
+                          "follows it. And a third one that is never heard.", step_s=0.01)
+    s, m = make_session(llm, FakeTTS(n=4), smart=smart)
+    evs, _ = run_turn(s, "explain compound interest", stop_at=lambda k, n: n == 6)   # 4 lead-in + 2 answer
+    time.sleep(0.05)
+    assert evs[-1][0] == "done" and smart.aborted >= 1 and smart.live == 0
+    assert [h["role"] for h in s.history] == ["user", "assistant", "tool", "assistant"]
+    assert s.history[-1]["content"].endswith(PROMPTS.text("markers", "interrupted"))
+    assert "third one" not in s.history[-1]["content"]
+
+
+def test_smart_failure_and_refusal_are_spoken():
+    for smart, key in ((FakeLLM(fail={"smart": "timeout"}), "error"), (FakeLLM(refuse=("smart",)), "refusal")):
+        s, m = make_session(FakeLLM(reply=ASK), FakeTTS(n=2), smart=smart)
+        evs, _ = run_turn(s, "a hard question")
+        assert evs[-1][:2] == ("done", PROMPTS.text("spoken", key)), (key, evs[-1])
+        assert s.history[0]["content"] == "a hard question"
 
 
 # ---- S: TTS only, for test tools (load_test_ears.py's fixed utterance) --------------------------------------

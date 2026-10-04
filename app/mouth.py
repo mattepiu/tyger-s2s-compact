@@ -16,6 +16,10 @@ Architecture:
     their own engine requests (vLLM batches them; llm.max_num_seqs, deploy/voxcpm2.yaml max_num_seqs).
   * Barge-in (B on the wire) stops the session's current turn; its live LLM/TTS request is aborted.
   * reminder/message tools return a "not connected" demo marker (tools.py) and the model says so.
+  * Escalation (only with an `llm.smart` block): the reply model gets the ask_expert tool. Its lead-in fits the
+    tool (the plugins name it at tool_start), the smart request starts as soon as the call parses, and the smart
+    model's answer streams straight to the TTS (its own lookups covered by still-looking lines). Only escalated
+    turns and their last mouth.escalation.context_turns turns of transcript go to the smart model.
   * Backchannels are always contextual LLM acks off the ASR partial: a reaction to the content, or a neutral
     hum when the partial is too short (< mouth.bc_min_words) to react to. No canned/pre-rendered acks.
 EARS<->MOUTH wire: T/C/B/V in; X/A/D out, plus K = backchannel audio (kept apart from reply audio A, since the
@@ -31,7 +35,7 @@ from collections import deque
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root on path
 from app.wire import send_msg, recv_msg
-from app.tools import build_tools, execute_tool
+from app.tools import build_tools, execute_tool, EXPERT
 from app.chunker import next_chunk, say_clean
 from app.config import load_config, llm_roles
 from app.prompts import load_prompts
@@ -56,10 +60,11 @@ def _with_shots(system, shots, user):
     return msgs + [{"role": "user", "content": user}]
 
 
-def still_user(p, transcript, fillers):
-    """The still-looking request's user line: what was asked and the lines already spoken."""
-    said = " ".join(f"'{f}'" for f in fillers) or p.text("still_looking", "said_none")
-    return p.fill("still_looking", "user", transcript=transcript, said=said)
+def still_user(p, transcript, fillers, section="still_looking"):
+    """A still-looking request's user line (`section`: still_looking or expert_still): what was asked and the
+    lines already spoken."""
+    said = " ".join(f"'{f}'" for f in fillers) or p.text(section, "said_none")
+    return p.fill(section, "user", transcript=transcript, said=said)
 
 
 def bc_messages(p, recent_acks, partial, bc_min_words):
@@ -82,6 +87,93 @@ def _text(events):
     return "".join(e[1] for e in events if e[0] == "text")
 
 
+def expert_result(p):
+    """The ask_expert tool result as kept in history (the expert's answer follows it)."""
+    return _compact_result({"result": p.text("escalation", "tool_result")})
+
+
+def reply_prefix(p, expert):
+    """The reply request before the conversation: the system prompt, and with escalation on, its few-shot turns
+    (prompts.yaml escalation.shots) as earlier turns in the neutral format. A fixed prefix, so it stays cached."""
+    if not expert:
+        return [{"role": "system", "content": p.text("system", "voice_tools")}]
+    msgs = [{"role": "system", "content": p.text("escalation", "system")}]
+    for i, t in enumerate(p.turns("escalation"), 1):
+        msgs.append({"role": "user", "content": t["user"]})
+        if "reply" in t:
+            msgs.append({"role": "assistant", "content": t["reply"]})
+            continue
+        cid = f"call_shot{i:04d}"
+        msgs += [{"role": "assistant", "content": None,
+                  "tool_calls": [{"id": cid, "name": EXPERT, "arguments": {"question": t["expert"]}}]},
+                 {"role": "tool", "tool_call_id": cid, "content": expert_result(p)},
+                 {"role": "assistant", "content": t["answer"]}]
+    return msgs
+
+
+def smart_messages(p, turns, transcript, question, others=()):
+    """The smart model's request for an escalated turn: its system prompt, the given recent turns as plain text
+    (tool calls and results dropped: provider-neutral, and less leaves the box), then the user's words with the
+    reply model's restated question as a note, plus what other tools called in the same turn returned."""
+    ctx = [{"role": x["role"], "content": x["content"]} for turn in turns for x in turn
+           if x["role"] in ("user", "assistant") and not x.get("tool_calls") and x.get("content")]
+    user = p.fill("smart", "user", transcript=transcript, question=question or transcript)
+    if others:
+        user += p.fill("smart", "results", results="; ".join(f"{n}: {_compact_result(r)}" for n, r in others))
+    return [{"role": "system", "content": p.text("smart", "system")}] + ctx + [{"role": "user", "content": user}]
+
+
+def round_messages(content, calls, native, results, compact=False):
+    """One tool round in the neutral format: the assistant's calls (plugin-issued IDs; `native` passed through)
+    and a result per call, full or compacted for history."""
+    asst = {"role": "assistant", "content": (content or "").strip() or None,
+            "tool_calls": [{"id": c["id"], "name": c["name"], "arguments": c.get("arguments", {})} for c in calls]}
+    if native is not None:
+        asst["native"] = native
+    res = (lambda r: _compact_result(r)) if compact else \
+        (lambda r: json.dumps(r if r is not None else {"error": "no result"}))
+    return [asst] + [{"role": "tool", "tool_call_id": c["id"], "content": res(r)} for c, r in zip(calls, results)]
+
+
+class _Prefetch:
+    """An LLM stream running on a helper thread from now on, so it is under way while this one speaks; iterate it
+    here, in order. `ready` is set at its first event (or when it ends), `t_first` is when that event came. An
+    exception in the stream is raised to the reader; a stop ends the iteration."""
+    def __init__(self, gen_fn, stop_flag):
+        self.q: queue.Queue = queue.Queue(); self.ready = threading.Event(); self.stop_flag = stop_flag
+        self.t_first = None
+        threading.Thread(target=self._run, args=(gen_fn,), daemon=True).start()
+
+    def _run(self, gen_fn):
+        try:
+            for x in gen_fn():
+                if self.t_first is None:
+                    self.t_first = time.perf_counter()
+                self.q.put(x); self.ready.set()
+        except Exception as e:
+            self.q.put(e)
+        finally:
+            self.q.put(_END); self.ready.set()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        while True:
+            try:
+                x = self.q.get(timeout=0.01)
+            except queue.Empty:
+                if self.stop_flag():
+                    raise StopIteration
+                continue
+            if x is _END:
+                self.q.put(_END)                       # stays ended
+                raise StopIteration
+            if isinstance(x, Exception):
+                raise x
+            return x
+
+
 def _compact_result(r, cap=600):
     """A tool result as kept in history: the answer without the raw search hits, capped. Enough for the model to
     see that it called a tool and what came back, so later turns keep calling tools instead of answering live
@@ -97,14 +189,22 @@ class Mouth:
     Session."""
     def __init__(self, cfg):
         roles = llm_roles(cfg)
-        if "smart" in roles:
-            raise NotImplementedError("the smart role (escalation, background tasks) comes in PLUGINS.md step 10")
         m = cfg["mouth"]
+        if (m.get("tasks") or {}).get("enabled"):
+            raise NotImplementedError("background tasks (mouth.tasks) come in PLUGINS.md steps 12-14")
+        esc = m.get("escalation") or {}
+        self.expert = "smart" in roles and bool(esc.get("enabled", True))   # ask_expert offered, smart answers it
+        if "smart" in roles and not self.expert:
+            log.warning("llm.smart is configured but mouth.escalation.enabled is false: it is never used")
+        self.context_turns = int(esc.get("context_turns", 4))     # history turns sent along with an escalated turn
+        self.max_steps = int(esc.get("max_steps", 3))             # the smart model's own tool rounds per turn
+        self.smart_max_new = int(esc.get("max_new", 384))
         self.cfg = cfg
         # prompts first: a bad prompts.yaml stops start-up before minutes of engine loading
         by_name = load_prompts(cfg, {name for name, _ in roles.values()})
         self.prompts = {role: by_name[name] for role, (name, _) in roles.items()}   # role -> Prompts
-        self.tools = build_tools(self.prompts["reply"])
+        self.tools = build_tools(self.prompts["reply"], expert=self.expert)
+        self.smart_tools = build_tools(self.prompts["smart"]) if self.expert else None   # lookups, no ask_expert
         self.max_gen = int(m.get("max_gen", 192))
         self.history_turns = int(m.get("history_turns", 8))
         self.bc_min_words = int(m.get("bc_min_words", 4))
@@ -121,8 +221,7 @@ class Mouth:
             llm.warmup()
         # first request with the tools prompt is cold (~490 ms to first token vs ~55 ms after) -> pay it here
         p = self.prompts["reply"]
-        warm = [{"role": "system", "content": p.text("system", "voice_tools")},
-                {"role": "user", "content": p.text("warmup", "user")}]
+        warm = reply_prefix(p, self.expert) + [{"role": "user", "content": p.text("warmup", "user")}]
         for _ in self.llms["reply"].stream(warm, tools=self.tools, max_new=8):
             pass
 
@@ -261,17 +360,17 @@ class Session:
     # ---- speak an LLM text stream: a short first chunk (clause), then whole sentences ----
     def _speak_stream(self, events, voice, stop_flag):
         """Speak the text of an LLM event stream as it arrives. Yields MOUTH events; returns (text, calls, native,
-        started, refused). Returns at "tool_start" (started=True) without consuming the rest: the call is still
-        decoding, and the caller finishes `events` itself. Text before the tag that didn't close a chunk is never
-        spoken. A refusal (hosted models) returns refused=True with nothing more spoken."""
+        started, refused). Returns at "tool_start" (started = its payload, {"name": ...}) without consuming the
+        rest: the call is still decoding, and the caller finishes `events` itself. Text before the tag that didn't
+        close a chunk is never spoken. A refusal (hosted models) returns refused=True with nothing more spoken."""
         content = ""; calls = None; native = None; done = 0
         for ev in events:
             kind, val = ev[0], ev[1]
             if kind == "tool_start":
-                return content, None, None, True, False
+                return content, None, None, val or {"name": None}, False
             if kind == "refusal":
                 log.info("reply refused (category=%s)", val)
-                return content, None, None, False, True
+                return content, None, None, None, True
             if kind == "text":
                 content += val
                 yield ("text", content)
@@ -287,10 +386,10 @@ class Session:
             elif kind == "tool_calls":
                 calls, native = val, ev[2]
             if stop_flag():
-                return content, calls, native, False, False
+                return content, calls, native, None, False
         if not calls and not stop_flag():
             yield from self._say(content[done:], voice, stop_flag)
-        return content, calls, native, False, False
+        return content, calls, native, None, False
 
     def _speak_line(self, key, transcript, stop_flag):
         """End the turn with one of MOUTH's own lines (prompts.yaml `spoken`): the apology after a failed LLM
@@ -304,6 +403,42 @@ class Session:
             self._remember(transcript, line)
         yield ("done", line)
 
+    # ---- tool rounds: run the calls, and cover the wait with short lines ----
+    def _run_calls(self, calls, expert=False):
+        """Run one round of tool calls at once; results in call order. A call the plugin flagged (bad arguments)
+        is never run; with `expert`, ask_expert isn't run either: the smart model answers it."""
+        results = [None] * len(calls)
+        p = self.m.prompts["reply"]
+
+        def _run(i, c):
+            if c.get("error"):
+                results[i] = {"error": c["error"]}
+            elif expert and c["name"] == EXPERT:
+                results[i] = {"result": p.text("escalation", "tool_result")}
+            else:
+                results[i] = execute_tool(c["name"], c.get("arguments", {}))
+        workers = [threading.Thread(target=_run, args=(i, c), daemon=True) for i, c in enumerate(calls)]
+        for w in workers:
+            w.start()
+        for w in workers:
+            w.join()
+        return results
+
+    def _cover(self, done, section, transcript, fillers, voice, stop_flag):
+        """Until done(): whenever the last line has played out FILLER_GAP_S ago, one more short line from
+        prompts.yaml `section` (still_looking or expert_still), up to MAX_STILL. Appends the lines to `fillers`."""
+        n = 0
+        while not done() and not stop_flag():
+            if n < MAX_STILL and time.perf_counter() >= self._play_end + FILLER_GAP_S:
+                n += 1
+                user = still_user(self.m.prompts["filler"], transcript, fillers, section)
+                q = self._spawn(lambda user=user: self._filler(section, user, voice, stop_flag))
+                line = yield from self._relay(q, stop_flag)
+                if line:
+                    fillers.append(line)
+            else:
+                time.sleep(0.01)
+
     # ---- a full turn (may call tools) ----
     def stream_turn(self, transcript, stop_flag):
         try:
@@ -315,8 +450,8 @@ class Session:
     def _turn(self, transcript, stop_flag):
         m = self.m; voice = self.voice                 # one voice per reply (a switch applies to the next one)
         self._said = []; self._audio_s = 0.0; self._play_end = time.perf_counter()
-        msgs = [{"role": "system", "content": m.prompts["reply"].text("system", "voice_tools")}] + list(self.history) + \
-               [{"role": "user", "content": transcript}]
+        msgs = reply_prefix(m.prompts["reply"], m.expert) + list(self.history) + \
+            [{"role": "user", "content": transcript}]
         events = m.llms["reply"].stream(msgs, tools=m.tools, max_new=m.max_gen, stop_flag=stop_flag)
         content, calls, native, started, refused = yield from self._speak_stream(events, voice, stop_flag)
         if refused and not stop_flag():
@@ -328,11 +463,13 @@ class Session:
             reply = content.strip(); self._remember(transcript, reply)
             yield ("done", reply); return
 
-        # ---- tool path (L-04). The <tool_call> tag just appeared: a helper thread finishes decoding the call
-        # and runs the tools the moment it parses, while this one speaks a filler made alongside (vLLM batches the
-        # two requests). If the tools are still out FILLER_GAP_S after the filler has played, one more short
-        # "still looking" line, up to MAX_STILL. Everything stops on barge (stop_flag); tool threads are daemons.
-        box = {"calls": calls or [], "native": native, "results": [], "error": None}; tools_done = threading.Event()
+        # ---- tool path (L-04). The call's name just decoded: a helper thread finishes decoding the call and runs
+        # the tools the moment it parses, while this one speaks a lead-in that fits the tool, made alongside (vLLM
+        # batches the two requests). If the tools are still out FILLER_GAP_S after the last line has played, one
+        # more short "still looking" line, up to MAX_STILL. For ask_expert the smart request starts right after the
+        # other tools, still under the lead-in. Everything stops on barge (stop_flag); helper threads are daemons.
+        box = {"calls": calls or [], "native": native, "results": [], "error": None, "smart": None}
+        tools_done = threading.Event()
 
         def finish_call_and_run_tools():
             try:
@@ -342,18 +479,17 @@ class Session:
                 if stop_flag() or not box["calls"]:
                     return
                 log.info("tool calls: %s", [c["name"] for c in box["calls"]])
-                results = [None] * len(box["calls"])
-
-                def _run(i, c):                     # a call the plugin flagged (bad arguments) is never run
-                    results[i] = {"error": c["error"]} if c.get("error") else \
-                        execute_tool(c["name"], c.get("arguments", {}))
-                workers = [threading.Thread(target=_run, args=(i, c), daemon=True)
-                           for i, c in enumerate(box["calls"])]
-                for w in workers:
-                    w.start()
-                for w in workers:
-                    w.join()
-                box["results"] = results
+                box["results"] = self._run_calls(box["calls"], expert=m.expert)
+                ask = next((c for c in box["calls"] if c["name"] == EXPERT and not c.get("error")), None)
+                if ask is not None and m.expert and not stop_flag():
+                    others = [(c["name"], r) for c, r in zip(box["calls"], box["results"]) if c["name"] != EXPERT]
+                    recent = self.turns[-m.context_turns:] if m.context_turns > 0 else []
+                    box["smart_msgs"] = smart_messages(m.prompts["smart"], recent, transcript,
+                                                       (ask.get("arguments") or {}).get("question"), others)
+                    box["smart_t0"] = time.perf_counter()
+                    box["smart"] = _Prefetch(lambda: m.llms["smart"].stream(
+                        box["smart_msgs"], tools=m.smart_tools, max_new=m.smart_max_new, stop_flag=stop_flag),
+                        stop_flag)
             except Exception as e:
                 box["error"] = e
                 log.warning("tool call error: %s", type(e).__name__)
@@ -361,56 +497,96 @@ class Session:
                 tools_done.set()
         threading.Thread(target=finish_call_and_run_tools, daemon=True).start()
 
-        fillers = []; n_still = 0
+        tool = started["name"] if started else (calls[0]["name"] if calls else None)
+        to_expert = m.expert and tool == EXPERT
+        fillers = []
         if not self._said:                     # the model's own words before the tag already did the job
-            user = m.prompts["filler"].fill("tool_leadin", "user", transcript=transcript)
-            q = self._spawn(lambda: self._filler("tool_leadin", user, voice, stop_flag))
+            section = "expert_leadin" if to_expert else "tool_leadin"
+            user = m.prompts["filler"].fill(section, "user", transcript=transcript)
+            q = self._spawn(lambda: self._filler(section, user, voice, stop_flag))
             line = yield from self._relay(q, stop_flag)
             if line:
                 fillers.append(line)
-        while not tools_done.is_set() and not stop_flag():
-            if n_still < MAX_STILL and time.perf_counter() >= self._play_end + FILLER_GAP_S:
-                n_still += 1
-                user = still_user(m.prompts["filler"], transcript, fillers)
-                q = self._spawn(lambda user=user: self._filler("still_looking", user, voice, stop_flag))
-                line = yield from self._relay(q, stop_flag)
-                if line:
-                    fillers.append(line)
-            else:
-                tools_done.wait(0.01)
-        lead = " ".join(f for f in fillers if f)
+        yield from self._cover(lambda: tools_done.is_set() and (box["smart"] is None or box["smart"].ready.is_set()),
+                               "expert_still" if to_expert else "still_looking", transcript, fillers, voice, stop_flag)
         if stop_flag():
             self._remember_barged(transcript)
-            yield ("done", lead); return
+            yield ("done", " ".join(fillers)); return
         if isinstance(box["error"], LLMError):       # the call never finished decoding (hosted LLM failed)
             raise box["error"]
         calls, results = box["calls"], box["results"]
         results = results if len(results) == len(calls) else [None] * len(calls)
         if not calls:                                       # a tag with no parseable call: nothing to answer from
+            lead = " ".join(fillers)
             self._remember(transcript, lead)
             yield ("done", lead); return
 
-        # neutral format: plugin-issued IDs, unique for the session; `native` is the plugin's own, passed through
-        asst = {"role": "assistant", "content": content.strip() or None,
-                "tool_calls": [{"id": c["id"], "name": c["name"], "arguments": c.get("arguments", {})}
-                               for c in calls]}
-        if box["native"] is not None:
-            asst["native"] = box["native"]
-        msgs2 = msgs + [asst] + [{"role": "tool", "tool_call_id": c["id"],
-                                  "content": json.dumps(r if r is not None else {"error": "no result"})}
-                                 for c, r in zip(calls, results)]
-        kept = [asst] + [{"role": "tool", "tool_call_id": c["id"], "content": _compact_result(r)}
-                         for c, r in zip(calls, results)]
-        full2, _, _, _, refused = yield from self._speak_stream(
-            m.llms["reply"].stream(msgs2, max_new=m.max_gen, stop_flag=stop_flag), voice, stop_flag)
+        kept = round_messages(content, calls, box["native"], results, compact=True)
+        if box["smart"] is not None:                       # escalated: the smart model answers, straight to TTS
+            full2, refused = yield from self._expert_answer(box["smart"], box["smart_msgs"], box["smart_t0"],
+                                                            transcript, voice, stop_flag, fillers)
+        else:
+            msgs2 = msgs + round_messages(content, calls, box["native"], results)
+            full2, _, _, _, refused = yield from self._speak_stream(
+                m.llms["reply"].stream(msgs2, max_new=m.max_gen, stop_flag=stop_flag), voice, stop_flag)
         if refused and not stop_flag():
             yield from self._speak_line("refusal", transcript, stop_flag); return
+        lead = " ".join(fillers)
         reply = (lead + " " + full2).strip()
         if stop_flag():
             self._remember_barged(transcript, kept)
         else:
             self._remember(transcript, full2.strip() or lead, kept)
         yield ("done", reply)
+
+    def _expert_answer(self, stream, msgs, t0, transcript, voice, stop_flag, fillers):
+        """Speak the smart model's answer as it streams (`stream`, already under way), running its own tool rounds:
+        up to max_steps, each covered by still-looking lines and the next request started as soon as the results
+        are in. Past max_steps its calls get the smart.limit note instead of results, and a model that still calls
+        tools fails the turn (LLMError: MOUTH apologises). Returns (text, refused). Logs timings and counts only."""
+        m = self.m; said = []; rounds = 0; t_first = stream.t_first
+        while True:
+            text, calls, native, started, refused = yield from self._speak_stream(stream, voice, stop_flag)
+            if text.strip():
+                said.append(text.strip())
+            if refused or stop_flag() or not (calls or started):
+                log.info("escalated turn: smart first event %s, %d tool rounds%s",
+                         f"{1e3 * (t_first - t0):.0f} ms" if t_first else "none", rounds,
+                         " (barged)" if stop_flag() else "")
+                return " ".join(said), refused
+            if rounds > m.max_steps:
+                log.warning("escalated turn: smart model kept calling tools past max_steps")
+                raise LLMError("max_steps")
+            box = {"calls": calls or [], "native": native, "next": None, "msgs": None, "error": None}
+            done = threading.Event()
+
+            def finish_round(stream=stream, msgs=msgs, text=text, limit=rounds >= m.max_steps):
+                try:
+                    for ev in stream:
+                        if ev[0] == "tool_calls":
+                            box["calls"], box["native"] = ev[1], ev[2]
+                    if stop_flag() or not box["calls"]:
+                        return
+                    log.info("escalated turn: tool calls %s", [c["name"] for c in box["calls"]])
+                    results = [{"error": m.prompts["smart"].text("smart", "limit")}] * len(box["calls"]) if limit \
+                        else self._run_calls(box["calls"])
+                    box["msgs"] = msgs + round_messages(text, box["calls"], box["native"], results)
+                    box["next"] = _Prefetch(lambda: m.llms["smart"].stream(
+                        box["msgs"], tools=m.smart_tools, max_new=m.smart_max_new, stop_flag=stop_flag), stop_flag)
+                except Exception as e:
+                    box["error"] = e
+                finally:
+                    done.set()
+            threading.Thread(target=finish_round, daemon=True).start()
+            yield from self._cover(lambda: done.is_set() and (box["next"] is None or box["next"].ready.is_set()),
+                                   "still_looking", transcript, fillers, voice, stop_flag)
+            if stop_flag():
+                return " ".join(said), False
+            if box["error"] is not None:
+                raise box["error"]
+            if box["next"] is None:                         # a tool call that didn't parse: nothing more to say
+                return " ".join(said), False
+            rounds += 1; stream, msgs = box["next"], box["msgs"]
 
     # ---- say (S): TTS of a given text only; no LLM, not remembered ----
     def stream_say(self, text, stop_flag):

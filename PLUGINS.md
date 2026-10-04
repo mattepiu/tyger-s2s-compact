@@ -274,7 +274,8 @@ tools:                     # descriptions only; schemas (names, types, required)
     description: "..."
     params: {query: "..."}
   get_weather: {...}
-# later steps add: smart.system (SMART_SYS), escalation (criteria, shots), tasks (system, status_block, announce)
+# step 10 added: escalation (system, shots, tool_result), expert_leadin, expert_still, smart (system, user,
+# results, limit), tools.ask_expert; step 12 adds tasks (system, status_block, announce)
 ```
 
 **Rules:**
@@ -513,19 +514,34 @@ code.
 - So the filler can match the tool: "let me think about that" for `ask_expert`, "let me check" for lookups.
 - The `filler` role makes the lead-in, as today.
 
+**Built (step 10), in `prompts.yaml`:**
+- `escalation.system` replaces `system.voice_tools` when `smart` is configured: the same text plus the criteria and
+  the follow-up rule. `escalation.shots` are structured turns (`{user, reply}` or `{user, expert, answer}`), sent
+  as earlier turns in the neutral format right after the system prompt, so the prefix stays fixed and cached.
+  Without `smart` the prompt and tools are byte-identical to before.
+- `expert_leadin` / `expert_still` are the lead-in and still-looking lines for `ask_expert`; `tool_leadin` /
+  `still_looking` stay for lookups.
+- Config: `mouth.escalation: {enabled: true, context_turns: 4, max_steps: 3, max_new: 384}` (all optional; on
+  whenever `llm.smart` is set). `mouth.tasks.enabled` stops start-up until steps 12–14 exist.
+
 **Running it:**
 1. MOUTH builds the smart model's request:
    - a `SMART_SYS` prompt with the same spoken persona and style rules as `TTS_TOOLS_SYS`: short (≤ ~4
      sentences unless asked for detail), no markdown;
-   - the last `context_turns` turns of history;
+   - the last `context_turns` turns of history, as plain user / assistant text (tool calls and results dropped:
+     provider-neutral, no foreign tool IDs, and less leaves the box);
    - the user's actual transcript;
-   - the local model's `question` as a note.
+   - the local model's `question` as a note (`smart.user`).
 2. The smart model gets the same tools (`web_search` etc.), up to `escalation.max_steps` tool rounds, with
    still-looking lines covering them.
 3. Its answer streams **straight to the TTS** through the chunker, like a phase-B answer. The local model doesn't
    rephrase it, so no latency is added.
 4. Other tools the local model called in the same turn run first, and their results go to the smart model as
-   context.
+   context (a compact note in its user message, `smart.results`).
+5. The smart request starts the moment the call parses (after those tools), while the lead-in is still playing.
+   If its first words are slow (thinking), `expert_still` lines cover the wait as for a slow tool. Past
+   `max_steps` its tool calls get the `smart.limit` note instead of results; a model that still calls tools
+   fails the turn with the spoken apology.
 
 **History:** user turn → assistant `tool_calls: [ask_expert]` → tool result `"answered by expert"` → assistant
 message = the expert's answer.

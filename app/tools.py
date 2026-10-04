@@ -27,14 +27,20 @@ TOOL_SCHEMAS = [
  {"type": "function", "function": {"name": "send_message",
    "parameters": {"type": "object", "properties": {"recipient": {"type": "string"}, "body": {"type": "string"}}, "required": ["recipient", "body"]}}},
 ]
+# escalation (PLUGINS.md step 10): offered to the `reply` model only when a `smart` model is configured. MOUTH runs
+# it itself (the smart model answers the turn); it never reaches execute_tool.
+EXPERT = "ask_expert"
+EXPERT_SCHEMA = {"type": "function", "function": {"name": EXPERT,
+   "parameters": {"type": "object", "properties": {"question": {"type": "string"}}, "required": ["question"]}}}
+ALL_SCHEMAS = TOOL_SCHEMAS + [EXPERT_SCHEMA]
 
 
-def build_tools(prompts):
-    """The OpenAI function schemas with their descriptions from `prompts` (app.prompts.Prompts). Key order is the
-    original's (name, description, parameters; a property's type, then description), since chat templates
-    render the JSON as given."""
+def build_tools(prompts, expert=False):
+    """The OpenAI function schemas with their descriptions from `prompts` (app.prompts.Prompts), plus ask_expert
+    last if `expert`. Key order is the original's (name, description, parameters; a property's type, then
+    description), since chat templates render the JSON as given."""
     text = prompts.tool_text(); out = []
-    for t in TOOL_SCHEMAS:
+    for t in TOOL_SCHEMAS + ([EXPERT_SCHEMA] if expert else []):
         f = t["function"]; d = text[f["name"]]; pdesc = d.get("params") or {}
         props = {}
         for p, spec in f["parameters"]["properties"].items():

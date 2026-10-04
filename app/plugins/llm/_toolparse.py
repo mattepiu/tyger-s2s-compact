@@ -105,6 +105,26 @@ def parse_calls(raw: str, fmt: str):
     return out
 
 
+# the first call's name, complete: Hermes {"name": "x" (closing quote seen) or XML <function=x>
+_NAME = (re.compile(r'\s*\{\s*"name"\s*:\s*"([^"\\]+)"'), re.compile(r"\s*<function=([^>\s]+)>"))
+NAME_WAIT = 64          # characters after the tag; a call that hasn't named its tool by then starts unnamed
+
+
+def tool_start(raw: str):
+    """The ("tool_start") payload for raw text that has a <tool_call>: {"name": ...} once the first call's name
+    has decoded (both formats name the tool first), {"name": None} if NAME_WAIT characters past the tag still
+    don't name one, else None (wait for more text)."""
+    i = raw.find(TAG)
+    if i < 0:
+        return None
+    body = raw[i + len(TAG):]
+    for rx in _NAME:
+        m = rx.match(body)
+        if m:
+            return {"name": m.group(1)}
+    return {"name": None} if len(body) >= NAME_WAIT else None
+
+
 def new_call_id() -> str:
     """A tool-call ID unique for the session (the neutral format; Claude needs unique, matching IDs)."""
     return f"call_{uuid.uuid4().hex[:8]}"

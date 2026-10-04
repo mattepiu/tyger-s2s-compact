@@ -3,7 +3,8 @@ guard, and the neutral -> chat-template history conversion. Run: .venv/bin/pytho
 import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from app.plugins.llm._toolparse import split_speakable, parse_calls, strip_think, new_call_id  # noqa: E402
+from app.plugins.llm._toolparse import split_speakable, parse_calls, strip_think, new_call_id, tool_start, \
+    NAME_WAIT  # noqa: E402
 from app.plugins.llm.vllm_base import to_template_messages  # noqa: E402
 
 
@@ -99,6 +100,31 @@ def test_think_then_tool_call():
     raw = "<think>need weather</think>" + XML
     assert stream_speakable(raw, 3, strip_think) == ("", True)
     assert parse_calls(strip_think(raw, True), "qwen_xml")[0]["name"] == "get_weather"
+
+
+# ---- tool_start names the tool (the filler is picked by it) -------------------------------------------------
+def first_start(raw, step=1):
+    """The first tool_start payload while raw streams in, and how many characters had arrived by then."""
+    for i in range(step, len(raw) + step, step):
+        got = tool_start(raw[:i])
+        if got:
+            return got, min(i, len(raw))
+    return None, len(raw)
+
+
+def test_tool_start_waits_for_the_whole_name():
+    for raw, fmt in ((HERMES, "hermes"), (XML, "xml")):
+        got, at = first_start(raw)
+        assert got == {"name": "get_weather"}, (fmt, got)
+        assert raw[:at].endswith('"get_weather"' if fmt == "hermes" else "<function=get_weather>"), raw[:at]
+        assert at < len(raw) - 20, "named well before the call finished decoding"
+    assert tool_start('Okay. <tool_call>\n{"name": "get_wea') is None
+    assert tool_start("no call here") is None
+
+
+def test_tool_start_gives_up_on_a_garbled_call():
+    raw = "<tool_call>" + "x" * NAME_WAIT
+    assert tool_start(raw[:-1]) is None and tool_start(raw) == {"name": None}
 
 
 # ---- IDs and history conversion ----------------------------------------------------------------------------

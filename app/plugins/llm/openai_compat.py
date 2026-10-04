@@ -9,7 +9,8 @@ bodies are never logged; keep OPENAI_LOG unset (the SDK's debug logging prints b
   * Streaming: delta.content -> text (through a <think> guard: some models put reasoning in content); the first
     delta.tool_calls fragment -> tool_start (with the name when the server sends it); arguments accumulate per
     index and are parsed at the end. reasoning / reasoning_content fields are never read. Tool calls written as
-    <tool_call> text in content are parsed too (logged once: the model lacks native tool calls).
+    <tool_call> text in content are parsed too (logged once: the model lacks native tool calls); their tool_start
+    waits for the written name, as in the local plugins.
   * Tool-call IDs are this plugin's own (call_<8 hex>), unique for the session whatever the server sends. A call
     whose arguments don't parse or lack a required key is returned with "error" set: MOUTH never runs it.
   * Fails fast (a voice turn can't wait): max_retries 1, short timeouts, a 429 is not waited out. Every failure is
@@ -20,7 +21,7 @@ from __future__ import annotations
 import asyncio, json, logging, os
 
 from app.plugins.base import LLMError
-from app.plugins.llm._toolparse import split_speakable, strip_think, parse_calls, new_call_id
+from app.plugins.llm._toolparse import split_speakable, strip_think, parse_calls, new_call_id, tool_start
 
 log = logging.getLogger("llm")
 
@@ -90,23 +91,27 @@ class ChatStreamParser:
             content = _get(delta, "content")
             if content:
                 self.raw += content                  # kept whole: a <tool_call> written as text is parsed at the end
-                if not self.started:
+                if not self.started and not self.text_tool:
                     speak, self.text_tool = split_speakable(self._visible())
                     if len(speak) > self.said:
                         out.append(("text", speak[self.said:])); self.said = len(speak)
-                    if self.text_tool:
-                        self.started = True; out.append(("tool_start", {"name": None}))
+                if self.text_tool and not self.started:      # start once the written call names its tool
+                    start = tool_start(self._visible())
+                    if start:
+                        self.started = True; out.append(("tool_start", start))
         return out
 
     def finish(self):
         out = []
         if self.refusal and not self.calls and not self.said:
             return [("refusal", None)]
-        if not self.started:
+        if not self.started and not self.text_tool:
             visible = self._visible(final=True)
             if len(visible) > self.said:
                 out.append(("text", visible[self.said:]))
             return out
+        if not self.started:                          # a written call that ended before naming its tool
+            self.started = True; out.append(("tool_start", {"name": None}))
         if self.finish_reason == "length":            # cut off mid-call: never run a truncated call
             log.warning("tool call cut off at max_tokens; not run")
             return out + [("tool_calls", [], None)]
