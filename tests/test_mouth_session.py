@@ -4,7 +4,7 @@ cancelled by a turn (I-07). Run: .venv/bin/python tests/test_mouth_session.py
 import os, sys, json, socket, threading, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fakes import FakeLLM, FakeTTS, FakeMouth, make_session, run_turn  # noqa: E402
+from fakes import FakeLLM, FakeTTS, FakeMouth, PROMPTS, make_session, run_turn  # noqa: E402
 from app import mouth as M  # noqa: E402
 from app import tools as T  # noqa: E402
 from app.wire import send_msg, recv_msg  # noqa: E402
@@ -66,7 +66,7 @@ def test_barged_plain_turn_remembered():
     assert roles == ["user", "assistant"], roles
     assert s.history[0]["content"] == "what's the weather on Friday?"
     a = s.history[1]["content"]
-    assert a.startswith("Here is the first part") and a.endswith(M.INTERRUPTED), a
+    assert a.startswith("Here is the first part") and a.endswith(PROMPTS.text("markers", "interrupted")), a
     assert "third sentence" not in a, a                     # never generated -> never remembered
     # the follow-up turn sees the first question
     run_turn(s, "no, Saturday")
@@ -83,7 +83,7 @@ def test_barge_truncates_to_played_audio():
     run_turn(s, "tell me", stop_at=lambda k, n: n == 11)      # MOUTH had generated into chunk 3
     a = s.history[1]["content"]
     assert "first sentence" in a and "second sentence" not in a, a
-    assert a.endswith(M.INTERRUPTED)
+    assert a.endswith(PROMPTS.text("markers", "interrupted"))
 
 
 def test_barge_before_any_audio_keeps_user():
@@ -93,7 +93,7 @@ def test_barge_before_any_audio_keeps_user():
     threading.Timer(0.05, stop.set).start()
     list(s.stream_turn("hello?", stop.is_set))
     assert [h["role"] for h in s.history] == ["user", "assistant"]
-    assert s.history[1]["content"] == M.INTERRUPTED.strip()
+    assert s.history[1]["content"] == PROMPTS.text("markers", "interrupted").strip()
 
 
 # ---- I-03: barge during a tool call doesn't wait for the tool ------------------------------------------

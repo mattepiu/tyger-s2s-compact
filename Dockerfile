@@ -26,7 +26,7 @@ RUN uv venv /app/.venv --python 3.12 && \
 COPY app ./app
 COPY static ./static
 COPY deploy ./deploy
-COPY config.yaml run.sh ./
+COPY config.yaml prompts.yaml run.sh ./
 RUN chmod +x run.sh
 
 ENV HF_HOME=/hf HF_HUB_DISABLE_XET=1

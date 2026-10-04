@@ -81,6 +81,12 @@ never commit, upload, or redistribute them.**
 `config.yaml` holds model ids, engine memory budgets, endpoint thresholds, the voice directory, and runtime
 flags. No secrets live here. Worth knowing:
 
+- **Prompts** live in `prompts.yaml`, not in code: system prompts, few-shot turns, the small templates MOUTH
+  fills in, and the tool descriptions. It is checked at MOUTH start (a bad key or placeholder stops start-up with
+  the key named) and read once, so restart MOUTH after editing. `prompts/<llm instance>.yaml` (e.g.
+  `prompts/qwen3.5-4b.yaml`) overrides parts of it for one model. Keep few-shot examples synthetic: the file is
+  committed.
+
 - **Endpoint thresholds** (`ears.ep_thr` etc.) ship at the training-time defaults and have **not** been
   retuned on a live browser mic — offline thresholds have been seen to run ~2× too high on real mic signal.
   Expect to tune these live with `?debug=1`, then freeze the values back into `config.yaml`.

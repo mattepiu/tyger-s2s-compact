@@ -29,76 +29,51 @@ from collections import deque
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root on path
 from app.wire import send_msg, recv_msg
-from app.tools import TOOLS, execute_tool
-from app.chunker import next_chunk, say_clean, TTS_SYS
-from app.config import load_config, discover_voices, repo_path
+from app.tools import build_tools, execute_tool
+from app.chunker import next_chunk, say_clean
+from app.config import load_config, discover_voices, repo_path, llm_roles
+from app.prompts import load_prompts
 from app.engines import EngineLoop
 from app.llm import LocalLLM
 from app.tts_voxcpm import VoxCPM2TTS
 
 log = logging.getLogger("mouth")
 
-TTS_TOOLS_SYS = TTS_SYS + (
-    " You can call tools when they help. For anything time-sensitive or that you may not know -- current "
-    "weather, prices, news, sports scores, live facts, or the current time -- call the appropriate tool "
-    "directly instead of guessing, asking permission, or telling the user to check a website. After a tool "
-    "returns, give a short spoken answer in one or two sentences using the result; never read out raw data, "
-    "URLs, code, or JSON. If a tool reports it is not connected yet, tell the user that plainly instead of "
-    "pretending it was done. If one of your earlier replies ends with a dash, the user cut you off there and "
-    "heard only that much of it.")
-INTERRUPTED = " —"         # marks a barged reply in history (explained in TTS_TOOLS_SYS); say_clean speaks it as a pause
-
-# Tool fillers (L-04). No example lines inside the system prompts: a 4B model repeats a quoted example nearly every
-# time (it said "Sure, let me check that for you." on every tool turn). Few-shot turns that name the topic, in
-# several languages, make it react to what was asked instead (same fix as BC_SHOTS).
-LEADIN_SYS = (
-    "You are a voice assistant and you are about to look something up for the user right now. Say ONE short, "
-    "natural spoken sentence that tells them what you're checking, naming the specific thing they asked about. "
-    "Do NOT answer the question, do NOT mention tools or say the word tool, do NOT ask anything. Use the same "
-    "language the user spoke. Plain spoken words only, at most about ten words.")
-LEADIN_SHOTS = [
-    ("The user asked: \"what's the weather like in Lisbon this weekend?\"", "Let me pull up the Lisbon forecast."),
-    ("The user asked: \"how much is bitcoin right now\"", "Checking the latest bitcoin price."),
-    ("The user asked: \"какая сейчас погода в Казани?\"", "Сейчас гляну погоду в Казани."),
-    ("The user asked: \"¿quién ganó el partido del Madrid anoche?\"", "Déjame ver el resultado del Madrid."),
-    ("The user asked: \"what time is it in Tokyo?\"", "One moment, checking the time in Tokyo."),
-]
-STILL_SYS = (
-    "You are a voice assistant. You are looking something up for the user and it is taking a moment longer. Say "
-    "ONE very short, natural spoken sentence that you're still on it, tied to what they asked. Do NOT repeat or "
-    "rephrase what you already said, do NOT answer the question, do NOT mention tools. Use the same language the "
-    "user spoke. Plain spoken words only, at most about eight words.")
-STILL_SHOTS = [
-    ("The user asked: \"what's the weather like in Lisbon this weekend?\". You already said: 'Let me pull up the "
-     "Lisbon forecast.'", "Still getting Lisbon's weekend numbers."),
-    ("The user asked: \"how much is bitcoin right now\". You already said: 'Checking the latest bitcoin price.'",
-     "The bitcoin quote is taking a second."),
-    ("The user asked: \"какая сейчас погода в Казани?\". You already said: 'Сейчас гляну погоду в Казани.'",
-     "Данные по Казани ещё грузятся."),
-]
+# Every prompt is in prompts.yaml (app/prompts.py): system prompts, few-shot turns, the templates below, the
+# history markers and the tool descriptions. None of that text belongs in code.
 FILLER_GAP_S = 0.8         # tools still out this long after the filler has played -> one more "still looking" line
 MAX_STILL = 2              # at most this many "still looking" lines per tool turn
+RECENT_ACKS = 3
 _END = object()
 
-BC_PROMPT = (
-    "You are a voice assistant listening to the user, who is STILL speaking. You have NOT been given the "
-    "floor. Read their partial words so far and emit ONLY a brief, natural spoken reaction (one to four words) "
-    "to WHAT they are saying -- match its content and emotion, for example 'oh nice', 'oh no', 'wow, really?', "
-    "'that makes sense', 'got it', 'right', 'sure', 'ha, yeah', 'that's great', 'oh, I see'. If they have said "
-    "too little so far to react to, or nothing in their words calls for a specific reaction, use a neutral hum "
-    "such as 'mm-hm' or 'mhm'. Do NOT answer, do NOT ask a real question, do NOT continue their sentence, do "
-    "NOT take the floor. Always react in the same language the user is speaking. Plain spoken words only, "
-    "no markdown or symbols. Just the short reaction.")
-RECENT_ACKS = 3
-# Few-shot turns for the backchannel prompt. A 4B model copies the English examples in BC_PROMPT over an
-# abstract "use the user's language" rule; showing reactions in several languages fixes that.
-BC_SHOTS = [
-    ("The user is currently saying: \"I finally finished my first marathon last weekend\"", "wow, nice!"),
-    ("The user is currently saying: \"у меня сегодня машина сломалась прямо по дороге на работу\"", "ой, нет"),
-    ("The user has only said a few words so far: \"so I\"", "mm-hm"),
-    ("The user has only said a few words so far: \"ну вот\"", "угу"),
-    ("The user is currently saying: \"ayer por fin aprobé el examen de conducir\"", "¡qué bien!"),
-]
+
+def _with_shots(system, shots, user):
+    msgs = [{"role": "system", "content": system}]
+    for q, a in shots:
+        msgs += [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
+    return msgs + [{"role": "user", "content": user}]
+
+
+def still_user(p, transcript, fillers):
+    """The still-looking request's user line: what was asked and the lines already spoken."""
+    said = " ".join(f"'{f}'" for f in fillers) or p.text("still_looking", "said_none")
+    return p.fill("still_looking", "user", transcript=transcript, said=said)
+
+
+def bc_messages(p, recent_acks, partial, bc_min_words):
+    """The backchannel request: the system prompt (+ the acks not to repeat), few-shot turns, and the partial
+    framed as empty / only a few words / a reaction-worthy utterance."""
+    system = p.text("backchannel", "system")
+    if recent_acks:
+        system += p.fill("backchannel", "no_repeat", acks=", ".join(f"'{a}'" for a in recent_acks))
+    user = (partial or "").strip()
+    if not user:
+        said = p.text("backchannel", "user_empty")
+    elif len(user.split()) < bc_min_words:
+        said = p.fill("backchannel", "user_short", partial=user)
+    else:
+        said = p.fill("backchannel", "user", partial=user)
+    return _with_shots(system, p.shots("backchannel"), said)
 
 
 def _text(events):
@@ -123,13 +98,16 @@ _LLM_PLUGIN_MODELS = {"qwen3.5-4b": ("Qwen/Qwen3.5-4B", {"enable_thinking": Fals
 class Mouth:
     """Shared by all sessions: the two engines and voice loading. Per-conversation state lives in Session."""
     def __init__(self, cfg):
-        from app.config import llm_roles
         roles = llm_roles(cfg)
         if roles["filler"] is not roles["reply"] or "smart" in roles:
             raise NotImplementedError("separate filler / smart LLM instances come with the LLM plugins")
         m = cfg["mouth"]; lc = cfg["llm"]["reply"]; t = cfg["tts"]
         model, switches = _LLM_PLUGIN_MODELS[lc["plugin"]]
         self.cfg = cfg
+        # prompts first: a bad prompts.yaml stops start-up before minutes of engine loading
+        by_name = load_prompts(cfg, {name for name, _ in roles.values()})
+        self.prompts = {role: by_name[name] for role, (name, _) in roles.items()}   # role -> Prompts
+        self.tools = build_tools(self.prompts["reply"])
         self.max_gen = int(m.get("max_gen", 192))
         self.history_turns = int(m.get("history_turns", 8))
         self.bc_min_words = int(m.get("bc_min_words", 4))
@@ -161,8 +139,9 @@ class Mouth:
         for name in sorted(names):                     # every clip into VoxCPM2's speaker cache before serving
             self.tts.prime_voice(self.voice(name))
         # first request with the tools prompt is cold (~490 ms to first token vs ~55 ms after) -> pay it here
-        for _ in self.llm.stream([{"role": "system", "content": TTS_TOOLS_SYS}, {"role": "user", "content": "Hi."}],
-                                 tools=TOOLS, max_new=8):
+        p = self.prompts["reply"]
+        for _ in self.llm.stream([{"role": "system", "content": p.text("system", "voice_tools")},
+                                  {"role": "user", "content": p.text("warmup", "user")}], tools=self.tools, max_new=8):
             pass
 
     def voice(self, name):
@@ -232,7 +211,8 @@ class Session:
         """One turn into history: the user's words, the tool call + compact results if any, the reply."""
         if user.strip():
             self.turns.append([{"role": "user", "content": user.strip()}, *tool_msgs,
-                               {"role": "assistant", "content": reply or "..."}])
+                               {"role": "assistant",
+                                "content": reply or self.m.prompts["reply"].text("markers", "empty_reply")}])
             self.turns = self.turns[-self.m.history_turns:]
 
     def _remember_barged(self, user, tool_msgs=()):
@@ -240,7 +220,8 @@ class Session:
         when they cut in (all generated chunks if EARS didn't say how much had played), marked interrupted."""
         played = self.barge_played_s
         heard = [t for t, at in self._said if played is None or at < played]
-        self._remember(user, (" ".join(t.strip() for t in heard) + INTERRUPTED).strip(), tool_msgs)
+        mark = self.m.prompts["reply"].text("markers", "interrupted")   # the system prompt explains it
+        self._remember(user, (" ".join(t.strip() for t in heard) + mark).strip(), tool_msgs)
 
     def _say(self, text, voice, stop_flag):
         """TTS one text chunk as reply audio; logs it in self._said once its first audio is out."""
@@ -275,13 +256,11 @@ class Session:
         threading.Thread(target=run, daemon=True).start()
         return q
 
-    def _filler(self, sys_prompt, shots, user, voice, stop_flag):
-        """One filler line from the LLM (system prompt + few-shot turns + `user`), then its TTS:
-        ("text", line), ("audio", chunk)..."""
-        msgs = [{"role": "system", "content": sys_prompt}]
-        for q, a in shots:
-            msgs += [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
-        msgs.append({"role": "user", "content": user})
+    def _filler(self, section, user, voice, stop_flag):
+        """One filler line from the LLM (prompts.yaml `section`: system prompt + few-shot turns, then `user`),
+        then its TTS: ("text", line), ("audio", chunk)..."""
+        p = self.m.prompts["filler"]
+        msgs = _with_shots(p.text(section, "system"), p.shots(section), user)
         line = _text(self.m.llm.stream(msgs, max_new=24, stop_flag=stop_flag)).strip()
         if not line or stop_flag():
             return
@@ -343,9 +322,9 @@ class Session:
     def stream_turn(self, transcript, stop_flag):
         m = self.m; voice = self.voice                 # one voice per reply (a switch applies to the next one)
         self._said = []; self._audio_s = 0.0; self._play_end = time.perf_counter()
-        msgs = [{"role": "system", "content": TTS_TOOLS_SYS}] + list(self.history) + \
+        msgs = [{"role": "system", "content": m.prompts["reply"].text("system", "voice_tools")}] + list(self.history) + \
                [{"role": "user", "content": transcript}]
-        events = m.llm.stream(msgs, tools=TOOLS, max_new=m.max_gen, stop_flag=stop_flag)
+        events = m.llm.stream(msgs, tools=m.tools, max_new=m.max_gen, stop_flag=stop_flag)
         content, calls, started = yield from self._speak_stream(events, voice, stop_flag)
         if stop_flag():
             self._remember_barged(transcript)
@@ -387,18 +366,16 @@ class Session:
 
         fillers = []; n_still = 0
         if not self._said:                     # the model's own words before the tag already did the job
-            q = self._spawn(lambda: self._filler(LEADIN_SYS, LEADIN_SHOTS, f"The user asked: \"{transcript}\"",
-                                                 voice, stop_flag))
+            user = m.prompts["filler"].fill("tool_leadin", "user", transcript=transcript)
+            q = self._spawn(lambda: self._filler("tool_leadin", user, voice, stop_flag))
             line = yield from self._relay(q, stop_flag)
             if line:
                 fillers.append(line)
         while not tools_done.is_set() and not stop_flag():
             if n_still < MAX_STILL and time.perf_counter() >= self._play_end + FILLER_GAP_S:
                 n_still += 1
-                said = " ".join(f"'{f}'" for f in fillers) or "nothing yet"
-                q = self._spawn(lambda said=said: self._filler(
-                    STILL_SYS, STILL_SHOTS, f"The user asked: \"{transcript}\". You already said: {said}",
-                    voice, stop_flag))
+                user = still_user(m.prompts["filler"], transcript, fillers)
+                q = self._spawn(lambda user=user: self._filler("still_looking", user, voice, stop_flag))
                 line = yield from self._relay(q, stop_flag)
                 if line:
                     fillers.append(line)
@@ -443,21 +420,7 @@ class Session:
         """The LLM picks the ack: a reaction to the content, or a neutral hum when the partial is too short
         (< bc_min_words, flagged to it explicitly) or gives nothing to react to."""
         m = self.m
-        user = (partial or "").strip()
-        sys_prompt = BC_PROMPT
-        if self.recent_acks:
-            sys_prompt += " You just said " + ", ".join(f"'{a}'" for a in self.recent_acks) + \
-                          " -- don't repeat those."
-        if not user:
-            said = "The user is speaking, but no words have been recognized yet."
-        elif len(user.split()) < m.bc_min_words:
-            said = f"The user has only said a few words so far: \"{user}\""
-        else:
-            said = f"The user is currently saying: \"{user}\""
-        messages = [{"role": "system", "content": sys_prompt}]
-        for q, a in BC_SHOTS:
-            messages += [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
-        messages.append({"role": "user", "content": said})
+        messages = bc_messages(m.prompts["filler"], list(self.recent_acks), partial, m.bc_min_words)
         text = _text(m.llm.stream(messages, max_new=m.bc_max_new, stop_flag=stop_flag)).strip()
         if text:
             self.recent_acks.append(text)

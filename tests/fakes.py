@@ -9,6 +9,10 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app import mouth as M  # noqa: E402
+from app.prompts import default_prompts  # noqa: E402
+from app.tools import build_tools  # noqa: E402
+
+PROMPTS = default_prompts()     # the repo's prompts.yaml; FakeLLM routes requests by their system prompt
 
 
 def wait_or_stop(seconds, stop_flag, poll=0.002):
@@ -34,11 +38,11 @@ class FakeLLM:
 
     def _kind(self, messages):
         sys_txt = messages[0]["content"] if messages and messages[0]["role"] == "system" else ""
-        if sys_txt.startswith(M.LEADIN_SYS[:40]):
+        if sys_txt.startswith(PROMPTS.text("tool_leadin", "system")[:40]):
             return "leadin"
-        if sys_txt.startswith(M.BC_PROMPT[:40]):
+        if sys_txt.startswith(PROMPTS.text("backchannel", "system")[:40]):
             return "bc"
-        if getattr(M, "STILL_SYS", None) and sys_txt.startswith(M.STILL_SYS[:40]):
+        if sys_txt.startswith(PROMPTS.text("still_looking", "system")[:40]):
             return "still"
         if messages[-1]["role"] == "tool":
             return "phase_b"
@@ -115,6 +119,7 @@ class FakeMouth:
         self.llm = llm or FakeLLM(); self.tts = tts or FakeTTS()
         self.max_gen = 192; self.history_turns = 8; self.bc_min_words = 4; self.bc_max_new = 12
         self.temperature = 0.7; self.sr = self.tts.out_sr
+        self.prompts = {"reply": PROMPTS, "filler": PROMPTS}; self.tools = build_tools(PROMPTS)
 
     def default_voice(self):
         return "fake", None

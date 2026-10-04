@@ -12,20 +12,37 @@ try:
 except Exception:
     ZoneInfo = None
 
-# ---- schemas (exp-10 live-mic toolcall_eval TOOLS, verbatim) -----------------------------------
-TOOLS = [
- {"type": "function", "function": {"name": "get_weather", "description": "Get the current weather for a location.",
-   "parameters": {"type": "object", "properties": {"location": {"type": "string", "description": "City, e.g. 'Paris'"},
+# ---- schemas (exp-10 live-mic toolcall_eval TOOLS): names, types, required. The tool and parameter
+# descriptions are prompts and live in prompts.yaml (`tools:`); build_tools joins the two. -------------------
+TOOL_SCHEMAS = [
+ {"type": "function", "function": {"name": "get_weather",
+   "parameters": {"type": "object", "properties": {"location": {"type": "string"},
      "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}}, "required": ["location"]}}},
- {"type": "function", "function": {"name": "web_search", "description": "Search the web for current, real-time, or recent information. USE THIS whenever the user asks for anything time-sensitive or that may have changed since your training: current prices (crypto, stocks, currencies), sports scores and results, breaking or recent news, today's events, or any fact you are not certain is up to date. Prefer calling this over saying you don't know or telling the user to check a website.",
+ {"type": "function", "function": {"name": "web_search",
    "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
- {"type": "function", "function": {"name": "get_current_time", "description": "Get the current time in a timezone or city.",
-   "parameters": {"type": "object", "properties": {"timezone": {"type": "string", "description": "IANA tz or city"}}, "required": ["timezone"]}}},
- {"type": "function", "function": {"name": "set_reminder", "description": "Create a reminder for the user.",
+ {"type": "function", "function": {"name": "get_current_time",
+   "parameters": {"type": "object", "properties": {"timezone": {"type": "string"}}, "required": ["timezone"]}}},
+ {"type": "function", "function": {"name": "set_reminder",
    "parameters": {"type": "object", "properties": {"text": {"type": "string"}, "time": {"type": "string"}}, "required": ["text", "time"]}}},
- {"type": "function", "function": {"name": "send_message", "description": "Send a text message to a contact.",
+ {"type": "function", "function": {"name": "send_message",
    "parameters": {"type": "object", "properties": {"recipient": {"type": "string"}, "body": {"type": "string"}}, "required": ["recipient", "body"]}}},
 ]
+
+
+def build_tools(prompts):
+    """The OpenAI function schemas with their descriptions from `prompts` (app.prompts.Prompts). Key order is the
+    original's (name, description, parameters; a property's type, then description), since chat templates
+    render the JSON as given."""
+    text = prompts.tool_text(); out = []
+    for t in TOOL_SCHEMAS:
+        f = t["function"]; d = text[f["name"]]; pdesc = d.get("params") or {}
+        props = {}
+        for p, spec in f["parameters"]["properties"].items():
+            props[p] = {"type": spec["type"], "description": pdesc[p],
+                        **{k: v for k, v in spec.items() if k != "type"}} if p in pdesc else dict(spec)
+        out.append({"type": "function", "function": {"name": f["name"], "description": d["description"],
+                    "parameters": {**f["parameters"], "properties": props}}})
+    return out
 
 TCALL = re.compile(r"<tool_call>(.*?)</tool_call>", re.S)
 TFUNC = re.compile(r"<function=([^>\s]+)>(.*?)</function>", re.S)
