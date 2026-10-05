@@ -24,6 +24,7 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | I-11 | security | low (demo) / high (public) | confirmed in code | No auth, no message-size or buffer limits on :7860 |
 | I-12 | MOUTH | high | **fixed** | Tool calls never enter history, so later turns stop calling tools and invent answers |
 | I-13 | metrics | medium | **fixed** | `load_test_ears.py` runs don't compare: LLM-made speech and replies, random hop phase |
+| I-14 | ops | low | confirmed on the box | `run.sh` giving up on a slow first start orphans the LLM engine on the GPU |
 | L-01 | perf | lever | **partly done** | Encoder re-encodes the full 8 s window, twice, every hop, in fp32 |
 | L-02 | latency | lever | — | Decisions quantised to 320 ms hops |
 | L-03 | latency | lever | **done** | Per-request voice encode (precomputed voice profile) |
@@ -236,6 +237,19 @@ never.
 **Fix (2026-10-03):** history is a list of turns (trimmed whole, so a tool message never loses its call), and a
 tool turn keeps the assistant `tool_calls` message plus a compact result (no raw search hits, ≤ 600 chars). Now
 6/6 and 24/24. Tests: `tests/test_mouth_session.py`.
+
+### I-14 — `run.sh` giving up on a slow first start orphans the LLM engine (low, confirmed on the box)
+**Where:** `run.sh` `wait_tcp` (900 tries, ~15 min) and `cleanup` (kills the PIDs it started).
+
+**What happened (box of 2026-10-05):** the first start downloaded VoxCPM2 + Gemma (~22 GB) slowly, and VoxCPM2's
+first compile was still running when `wait_tcp` gave up ("MOUTH did not come up"). `cleanup` killed MOUTH's PID,
+but Gemma's vLLM EngineCore (a child of MOUTH) survived with 14.7 GB of GPU memory. `scripts/stop.sh` finds stacks
+by their `run.sh` process, which had exited, so it said "not running"; the engine had to be killed by its process
+group by hand. The next start would have failed vLLM's free-memory check.
+
+**Fix options:** in `cleanup`, signal MOUTH's whole process group (start it with `setsid`, or kill `-$$` when
+`run.sh` leads its own group), the way `stop.sh` does; raise or drop the timeout while MOUTH is still alive (its
+log shows progress), since `wait_tcp` already fails fast when MOUTH exits.
 
 ---
 
