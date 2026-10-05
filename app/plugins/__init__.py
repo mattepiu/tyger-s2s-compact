@@ -9,6 +9,8 @@ REGISTRY = {
             "gemma-4-e4b": "app.plugins.llm.gemma4:Gemma4E4B",
             "gemma-4-e2b": "app.plugins.llm.gemma4:Gemma4E2B",
             "gemma-4-26b-a4b-nvfp4": "app.plugins.llm.gemma4:Gemma4_26B_A4B",
+            "gemma-4-e4b-nvfp4": "app.plugins.llm.gemma4:Gemma4E4B_NVFP4",
+            "gemma-4-12b-nvfp4": "app.plugins.llm.gemma4:Gemma4_12B_NVFP4",
             "qwen3-8b-nvfp4": "app.plugins.llm.qwen3_hybrid:Qwen3_8B",
             "qwen3-14b-nvfp4": "app.plugins.llm.qwen3_hybrid:Qwen3_14B",
             "nemotron-nano-9b-v2-nvfp4": "app.plugins.llm.nemotron_nano:NemotronNano9B",

@@ -160,6 +160,8 @@ in `PLUGINS.md`). Each block names its `plugin:`; the rest of the block is that 
 | LLM | `gemma-4-e2b` | local, vLLM in MOUTH | E4B's smaller sibling: ~3.5 GB less GPU, ~90 ms faster, but fails the routing eval (`NOTES.md`) |
 | LLM | `qwen3-8b-nvfp4`, `qwen3-14b-nvfp4` | local, vLLM in MOUTH | NVIDIA NVFP4 checkpoints; fit, but fail the routing eval (lean local) |
 | LLM | `nemotron-nano-9b-v2-nvfp4` | local, vLLM in MOUTH | NVFP4, Mamba-2 hybrid, `<TOOLCALL>` calls; fails the routing eval, no Russian |
+| LLM | `gemma-4-e4b-nvfp4` | local, vLLM in MOUTH | unsloth NVFP4 E4B (int8 per-layer embeddings): routes like E4B FP8, 3.6 GB less GPU, same latency |
+| LLM | `gemma-4-12b-nvfp4` | local, vLLM in MOUTH | unsloth NVFP4 dense 12B; fits, but fails the routing eval and leaks its thought channel |
 | LLM | `gemma-4-26b-a4b-nvfp4` | local, vLLM in MOUTH | NVFP4 MoE; passes the routing eval but 17 GiB of weights: doesn't fit next to VoxCPM2 + EARS on 32 GB |
 | LLM | `qwen3.5-4b` | local, vLLM in MOUTH | the previous responder (XML tool calls); rollback = a few lines in `config.yaml` |
 | LLM | `qwen3-4b-2507` | local, vLLM in MOUTH | the one before (Hermes JSON tool calls) |

@@ -113,6 +113,48 @@ None of the three that fit meets the routing gate, so none got the stack benchma
   the same channel with content). Without smart it answered 9 / 248 RU / ES reminder / message requests "not
   connected" without calling the tool.
 
+### unsloth NVFP4 Gemma 4: E4B and 12B (user's request)
+llm-compressor (compressed-tensors) checkpoints, mixed precision. **E4B** (`unsloth/gemma-4-E4B-it-NVFP4`, plugin
+`gemma-4-e4b-nvfp4`): FP8-dynamic attention and 11 layers' MLPs, NVFP4 for the other MLPs, and the **per-layer
+embedding table in int8** (`pack-quantized`), which vLLM loads (packed in int32 words): 2.63 GiB instead of 5.25.
+**12B** (`unsloth/gemma-4-12b-it-NVFP4`, `gemma-4-12b-nvfp4`): the encoder-free "unified" Gemma 4 (vLLM
+`Gemma4UnifiedForConditionalGeneration`: no towers, small vision / audio projections), 48 dense layers, FP8 attention,
+NVFP4 MLPs, no per-layer embeddings. Same eval settings as above.
+
+| | E4B FP8 (current) | **E4B NVFP4 (unsloth)** | 12B NVFP4 (unsloth) |
+|---|---|---|---|
+| weights on the GPU (vLLM "Model loading took") | 10.39 (10.54) GiB | **6.85 (7.10)**: PLE int8 2.63, token emb 1.25, FP8 1.49, NVFP4 1.14 | 9.06 (9.25): NVFP4 3.96, FP8 2.75, token emb 1.88 |
+| single stream decode | 186 tok/s | **213** | 129 |
+| with smart + tasks: right; missed (held-out / fresh) | 98.7%; 0.6% (2.1 / 0) | **98.7%; 0.2% (0.7 / 0)** | 89.6%; 14.8% (18.1 / 11.2) |
+| with smart: speech wrong language / narration | 6 / 0 of 347 | 12 / 1 of 345 | 1 / **310** of 715 |
+| with smart: after a tool result, wrong language / markup | 2 / 5 of 412 | 0 / 4 of 411 | 1 / **334** of 380 |
+| no smart: right; tool → tool | 99.6%; 246 / 248 | 98.6%; 240 / 248 | 88.6%; **184** / 248 |
+| no smart: speech wrong language | 3 / 314 | 5 / 320 | 0 / 381 |
+
+- **12B fails:** it misses 15% of escalations, answers reminder / message requests "not connected" without calling
+  the tool (25.8% of tool cases without smart), and opens the empty thought channel (`<|channel>thought\n<channel|>`)
+  in plain replies too, once in a loop. It is also the slowest decoder here.
+- **E4B NVFP4 routes like E4B FP8.** Slightly worse: "send a message to Alex" answered locally 7 / 8 without smart
+  (FP8: 2 / 8; 8 / 248 tool cases vs 2), and Spanish opinion / naming questions answered in English a little more
+  often (12 vs 6 with smart). No thought-channel tags at all.
+
+Full stack, E4B NVFP4 against E4B FP8 (config without `llm.smart`, same scripts, same box, the FP8 runs from earlier
+the same day):
+
+| | E4B FP8 | E4B NVFP4 |
+|---|---|---|
+| GPU idle / **peak at 4 sessions** | 29.8 / **30.3 GB** | 26.2 / **26.7 GB** |
+| smoke plain / weather / reminder / backchannel first-audio | 256 / 247 / 293 / 170 ms, PASS | 259 / 287 / 273 / 149 ms, PASS |
+| `load_test.py` turn first-audio p50, 3 runs | 455 / 425 / 458 (median 455) | 443 / 421 / 440 (median 440) |
+| `--tools --fresh` first-audio p50, 3 runs | 412 / 401 / 422 (median 412) | 414 / 459 / 429 (median 429) |
+| `load_test_ears.py` end of speech → first audio p50, 1 conv (2 runs) | 1113, 1034 | 1119, 1012 |
+| 4 conv (3 runs) | 1169 / 1183 / 1194 | 1204 / 1189 / 1154 |
+
+Latency is the same within run-to-run noise: first audio waits on the 40-character first chunk and the TTS, and the
+faster decode doesn't show. Under 4-way batching the forced "count to ten" reply varied in 2 of 3 runs (the test
+warns). E4B NVFP4 frees **3.6 GB** at the same speed and routing, at the cost of slightly more skipped message calls
+and English replies to Spanish. Not switched: the user decides (`plugin: gemma-4-e4b-nvfp4`, drop `quantization`).
+
 Also on this box: end of speech → endpoint at 1 conversation is 803–883 ms p50 (last box: 684–686, two runs within
 4 ms; here they differ by 80 ms) and 912–932 ms at 4. The test utterance renders a little longer here (3.04 s,
 voiced 2.64 s; last box 2.88 / 2.62 s). Not looked into; L-02 measures detection next.

@@ -41,3 +41,16 @@ class Gemma4_26B_A4B(Gemma4E4B):
     tried against E4B. ~17 GiB of weights: on a 32 GB card it doesn't fit next to VoxCPM2 + EARS. The quantization
     comes from the checkpoint: leave `quantization` unset."""
     default_model = "nvidia/Gemma-4-26B-A4B-NVFP4"
+
+
+class Gemma4E4B_NVFP4(Gemma4E4B):
+    """gemma-4-e4b-nvfp4: unsloth's llm-compressor checkpoint of E4B: FP8 attention (and 11 layers' MLPs), NVFP4 for
+    the other MLPs, and the per-layer embedding table in int8. The quantization comes from the checkpoint: leave
+    `quantization` unset."""
+    default_model = "unsloth/gemma-4-E4B-it-NVFP4"
+
+
+class Gemma4_12B_NVFP4(Gemma4E4B):
+    """gemma-4-12b-nvfp4: unsloth's llm-compressor checkpoint of the dense 12B Gemma 4 (the encoder-free "unified"
+    variant: no vision / audio towers): FP8 attention, NVFP4 MLPs. Leave `quantization` unset."""
+    default_model = "unsloth/gemma-4-12b-it-NVFP4"
