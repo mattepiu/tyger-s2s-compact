@@ -71,6 +71,48 @@ audio, but it regresses routing, the reply language and spoken markup, which the
 ("robust tool calling is crucial"). What the freed memory would have bought, not measured: VoxCPM2 or Gemma KV
 headroom for a 5th–6th conversation, or room for L-02 / L-01 option 2 without crowding the 32 GB.
 
+### NVFP4 responders: Qwen3-8B / 14B, Nemotron Nano 9B v2, Gemma 4 26B-A4B (user's request)
+NVIDIA's ModelOpt NVFP4 checkpoints (W4A4, scales in the checkpoint: the plugins leave `quantization` unset). vLLM 0.30
+serves all four on the 5090 (sm_120): FlashInfer-CUTLASS NVFP4 GEMM, and the FLASHINFER_CUTLASS NVFP4 MoE backend
+for Gemma 26B (its first load JIT-compiles ~8 min of MoE kernels). New plugins: `qwen3-8b-nvfp4` / `qwen3-14b-nvfp4`
+(hybrid Qwen3, `enable_thinking: false`, Hermes JSON, the `<think>` guard), `nemotron-nano-9b-v2-nvfp4` (NemotronH
+Mamba-2 hybrid, `/no_think` in the system prompt, fp32 SSM cache as NVIDIA asks, a new `<TOOLCALL>[…]` parser
+format; its template can't take a `None` content, so tool-call turns get `""`), `gemma-4-26b-a4b-nvfp4` (the E4B
+plugin, another checkpoint). Same eval settings as above (temperature 0.7, 8 samples, prompts tuned on Gemma E4B).
+
+**Memory budget.** On the running stack VoxCPM2 takes 9.2 GB, EARS 5.7 GB (+~0.4 under load) and the E4B engine
+15.0 GB (10.5 GiB weights + 3 GiB KV + ~1.1 GiB graphs / activations). An LLM engine can have ~17 GB, i.e. ≤ ~12.5
+GiB of weights with the same 3 GiB KV.
+
+| | E4B FP8 (ref) | Qwen3-8B | Nemotron Nano 9B v2 | Qwen3-14B | Gemma 4 26B-A4B |
+|---|---|---|---|---|---|
+| weights (vLLM "Model loading took") | 10.54 GiB | 5.98 | 7.38 | 9.97 | **17.05** (vision tower skipped) |
+| fits next to VoxCPM2 + EARS | yes | yes | yes | yes | **no** (~4.5 GiB over) |
+| single stream decode | 186 tok/s | 217 | 180 | 141 | 180 |
+| **with smart + tasks: right; missed** (gate ≤ 10%) | **98.7%; 0.6%** | 92.4%; 13.8% | 88.6%; 20.4% | 91.0%; 18.5% | **98.4%; 1.9%** |
+| missed: held-out / fresh | 2.1 / 0.0% | 9.7 / 40.0% | 16.0 / 37.5% | 11.1 / 33.8% | 4.9 / 0.0% |
+| tool → tool | 256 / 256 | 253 | 243 | 251 | 256 |
+| speech: wrong language / narration | 6 / 0 of 347 | 8 / 3 of 419 | 4 / 27 of 466 | 2 / 0 of 445 | 0 / 0 of 354 |
+| after a tool result: wrong language / markup | 2 / 5 of 412 | 15 / 5 of 432 | 12 / 5 of 388 | 1 / 0 of 435 | 0 / **333** of 424 |
+| **no smart: right; tool → tool** | 99.6%; 246 / 248 | 100%; 248 | 99.1%; 243 | 100%; 248 | 98.4%; 239 |
+| no smart: speech in the wrong language | 3 / 314 | **43** / 312 | **40** / 319 | 10 / 312 | 0 / 321 |
+| no smart: after a tool result, wrong language | 0 / 246 | 11 / 248 | 19 / 243 | 0 / 248 | 0 / 239 |
+
+None of the three that fit meets the routing gate, so none got the stack benchmark:
+- **Qwen3-14B and 8B lean local**, like Qwen3.5-4B and 2507 before them (step 11): TCP handshake, regex / palindrome
+  code, health questions, a rental contract, "recount carefully", follow-ups on an escalated topic. Fresh-split
+  misses 34–40%. The 8B also answers plain English questions in Russian without smart (43 / 312): the Russian
+  few-shot turns pull it. Both call tools reliably.
+- **Nemotron Nano 9B v2** misses 20%, talks about its tools ("I'll use the ask_expert tool…") and answers English
+  questions in Russian (40 / 312). Its model card doesn't list Russian.
+- **Gemma 4 26B-A4B meets the gate** (98.4%, 1.9% missed, no wrong-language reply) but needs ~4.5 GiB more than this
+  card has. Its 17 GiB: 10.6 NVFP4 packed weights (only the routed experts are NVFP4), 3.1 bf16 (every layer's
+  attention and dense MLP: the checkpoint's ignore list), 1.4 token embeddings, 1.3 the FP4 weights' FP8 block scales. FP8 for the
+  bf16 linears would save ~1.5 GiB, not the ~4.5 needed. After a tool result it nearly always opens an **empty** thought channel
+  (`<|channel>thought\n<channel|>` then the answer): a filter would have to strip that before the TTS (E2B leaks
+  the same channel with content). Without smart it answered 9 / 248 RU / ES reminder / message requests "not
+  connected" without calling the tool.
+
 Also on this box: end of speech → endpoint at 1 conversation is 803–883 ms p50 (last box: 684–686, two runs within
 4 ms; here they differ by 80 ms) and 912–932 ms at 4. The test utterance renders a little longer here (3.04 s,
 voiced 2.64 s; last box 2.88 / 2.62 s). Not looked into; L-02 measures detection next.

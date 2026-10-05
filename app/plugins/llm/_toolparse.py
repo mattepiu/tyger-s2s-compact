@@ -4,6 +4,7 @@ speakable part off at <tool_call>, parsing the two formats the Qwen chat templat
   * Hermes JSON (Qwen3-4B-Instruct-2507): <tool_call>{"name": ..., "arguments": {...}}</tool_call>
   * Qwen XML (Qwen3.5): <tool_call><function=NAME><parameter=P>value</parameter>...</function></tool_call>
   * Gemma 4: <|tool_call>call:NAME{key:<|"|>text<|"|>,n:3}<tool_call|> (special tokens: decode them)
+  * Nemotron (Nano 9B v2): <TOOLCALL>[{"name": ..., "arguments": {...}}, ...]</TOOLCALL>
 
 Each Qwen plugin parses its own format first; a block in the other Qwen format still parses (logged once), so a
 model that switches format mid-deployment doesn't silently lose its tool calls. Gemma's calls open with their own
@@ -15,7 +16,10 @@ import json, logging, re, uuid
 log = logging.getLogger("llm")
 TAG = "<tool_call>"
 GEMMA_TAG, GEMMA_Q = "<|tool_call>", '<|"|>'
-TAGS = {"hermes_json": TAG, "qwen_xml": TAG, "gemma4": GEMMA_TAG}     # the tag a format's calls open with
+NEMO_TAG = "<TOOLCALL>"
+TAGS = {"hermes_json": TAG, "qwen_xml": TAG, "gemma4": GEMMA_TAG,     # the tag a format's calls open with
+        "nemotron_json": NEMO_TAG}
+NCALL = re.compile(r"<TOOLCALL>(.*?)(?:</TOOLCALL>|$)", re.S)
 GCALL = re.compile(r"<\|tool_call>call:([\w.-]+)\{(.*?)\}(?:<tool_call\|>|<turn\|>|$)", re.S)
 TCALL = re.compile(r"<tool_call>(.*?)</tool_call>", re.S)
 TFUNC = re.compile(r"<function=([^>\s]+)>(.*?)</function>", re.S)
@@ -142,11 +146,41 @@ def gemma_normalize(raw: str, names, final: bool = False) -> str:
     return out
 
 
+def _nemotron(body: str):
+    """A <TOOLCALL> body: a JSON list of {"name", "arguments"} (arguments may be a JSON string). A list cut off
+    before its closing bracket still parses if closing it is enough."""
+    body = body.strip()
+    for b in (body, body + "]", body + "}]"):
+        try:
+            calls = json.loads(b)
+            break
+        except Exception:
+            calls = None
+    if isinstance(calls, dict):
+        calls = [calls]
+    out = []
+    for c in calls if isinstance(calls, list) else []:
+        if not isinstance(c, dict) or not c.get("name"):
+            continue
+        a = c.get("arguments") or {}
+        if isinstance(a, str):
+            try:
+                a = json.loads(a)
+            except Exception:
+                a = {}
+        out.append({"name": c["name"], "arguments": a if isinstance(a, dict) else {}})
+    if not out:
+        log.warning("unparseable tool call dropped")
+    return out
+
+
 def parse_calls(raw: str, fmt: str):
     """[{"name", "arguments"}] for each call block in raw. The Qwen formats are read as `fmt` first, then as the
     other; a block neither reads is dropped (logged by kind only, never its text)."""
     if fmt == "gemma4":
         return [{"name": m.group(1), "arguments": _gemma_args(m.group(2))} for m in GCALL.finditer(raw)]
+    if fmt == "nemotron_json":
+        return [c for m in NCALL.finditer(raw) for c in _nemotron(m.group(1))]
     first = FORMATS[fmt]; other = next(f for k, f in FORMATS.items() if k != fmt)
     out = []
     for m in TCALL.finditer(raw):
@@ -163,9 +197,10 @@ def parse_calls(raw: str, fmt: str):
     return out
 
 
-# the first call's name, complete: Hermes {"name": "x" (closing quote seen) or XML <function=x>
+# the first call's name, complete: Hermes {"name": "x" (closing quote seen), XML <function=x>, Gemma call:x{, or
+# Nemotron [{"name": "x"
 _NAME = (re.compile(r'\s*\{\s*"name"\s*:\s*"([^"\\]+)"'), re.compile(r"\s*<function=([^>\s]+)>"),
-         re.compile(r"\s*call:([\w.-]+)\{"))
+         re.compile(r"\s*call:([\w.-]+)\{"), re.compile(r'\s*\[\s*\{\s*"name"\s*:\s*"([^"\\]+)"'))
 NAME_WAIT = 64          # characters after the tag; a call that hasn't named its tool by then starts unnamed
 
 

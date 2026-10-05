@@ -4,7 +4,7 @@ import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.plugins.llm._toolparse import split_speakable, parse_calls, strip_think, new_call_id, tool_start, \
-    NAME_WAIT, GEMMA_TAG, gemma_normalize, names_tool  # noqa: E402
+    NAME_WAIT, GEMMA_TAG, NEMO_TAG, gemma_normalize, names_tool  # noqa: E402
 from app.plugins.llm.vllm_base import to_template_messages  # noqa: E402
 
 
@@ -130,6 +130,52 @@ def test_gemma_normalize_leaves_speech_alone():
     assert gemma_normalize("Let me get", NAMES) == "Let me " and gemma_normalize("Let me get", NAMES, True) == "Let me get"
     assert gemma_normalize(GEMMA, NAMES) == GEMMA                       # already tagged: unchanged
     assert gemma_normalize("set_reminder{x}", []) == "set_reminder{x}"  # no tools offered: plain text
+
+
+# ---- Nemotron (nemotron-nano-9b-v2-nvfp4): <TOOLCALL>[...]</TOOLCALL> -----------------------------------------
+NEMO = '<TOOLCALL>[{"name": "get_weather", "arguments": {"location": "Paris"}}]</TOOLCALL>'
+
+
+def test_nemotron_never_spoken_parsed_named():
+    for step in (1, 2, 5):
+        said, saw = stream_speakable_tag(NEMO, NEMO_TAG, step)
+        assert said == "" and saw
+    assert parse_calls(NEMO, "nemotron_json") == [{"name": "get_weather", "arguments": {"location": "Paris"}}]
+    assert tool_start('<TOOLCALL>[{"name": "get_wea', NEMO_TAG) is None
+    assert tool_start('<TOOLCALL>[{"name": "get_weather", "argu', NEMO_TAG) == {"name": "get_weather"}
+
+
+def test_nemotron_values_multiple_and_cut_off():
+    raw = ('Let me look.\n<TOOLCALL>[{"name": "web_search", "arguments": {"query": "a, b: c"}}, '
+           '{"name": "set_reminder", "arguments": "{\\"text\\": \\"call mom\\", \\"when\\": \\"6 pm\\"}"}]</TOOLCALL>')
+    said, saw = stream_speakable_tag(raw, NEMO_TAG, 3)
+    assert said.strip() == "Let me look." and saw
+    assert parse_calls(raw, "nemotron_json") == [
+        {"name": "web_search", "arguments": {"query": "a, b: c"}},
+        {"name": "set_reminder", "arguments": {"text": "call mom", "when": "6 pm"}}]           # string arguments
+    assert parse_calls('<TOOLCALL>[{"name": "get_weather", "arguments": {"location": "Oslo"}}',
+                       "nemotron_json") == [{"name": "get_weather", "arguments": {"location": "Oslo"}}]  # no "]"
+    assert parse_calls("<TOOLCALL>[{not json</TOOLCALL>", "nemotron_json") == []
+
+
+def stream_speakable_tag(raw, tag, step):
+    said, buf, saw = "", "", False
+    for i in range(0, len(raw), step):
+        buf += raw[i:i + step]
+        if not saw:
+            speak, saw = split_speakable(buf, tag)
+            assert speak.startswith(said); said = speak
+    return said, saw
+
+
+def test_nemotron_no_think_in_system_prompt():
+    from app.plugins.llm.nemotron_nano import NemotronNano9B
+    p = NemotronNano9B.__new__(NemotronNano9B)
+    assert p.prepare_messages([{"role": "system", "content": "Be brief."}, {"role": "user", "content": "hi"}]) == \
+        [{"role": "system", "content": "Be brief.\n/no_think"}, {"role": "user", "content": "hi"}]
+    assert p.prepare_messages([{"role": "user", "content": "hi"}])[0] == {"role": "system", "content": "/no_think"}
+    call = {"role": "assistant", "content": None, "tool_calls": []}
+    assert p.prepare_messages([call])[1]["content"] == ""                # the template can't take a None content
 
 
 # ---- <think> guard (qwen3.5-4b) ----------------------------------------------------------------------------

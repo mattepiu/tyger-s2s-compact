@@ -34,3 +34,10 @@ class Gemma4E2B(Gemma4E4B):
     """gemma-4-e2b: the smaller sibling (2.3B effective, 5.1B with per-layer embeddings), tried against E4B to save
     GPU memory. Same template, tool format and options; its own instance name for logs and prompt overrides."""
     default_model = "google/gemma-4-E2B-it"
+
+
+class Gemma4_26B_A4B(Gemma4E4B):
+    """gemma-4-26b-a4b-nvfp4: NVIDIA's NVFP4 (ModelOpt) checkpoint of the 26B mixture-of-experts Gemma 4 (~4B active),
+    tried against E4B. ~17 GiB of weights: on a 32 GB card it doesn't fit next to VoxCPM2 + EARS. The quantization
+    comes from the checkpoint: leave `quantization` unset."""
+    default_model = "nvidia/Gemma-4-26B-A4B-NVFP4"
