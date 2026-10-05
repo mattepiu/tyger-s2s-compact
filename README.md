@@ -143,6 +143,9 @@ CONFIG=config.fake.yaml ./run.sh                 # the whole stack on the fake p
 .venv/bin/python scripts/bench_tts_voice.py              # GPU free: cloned-voice TTS first-audio per request
 .venv/bin/python scripts/eval_escalation.py --samples 8  # GPU free: routing (local / tool / expert / background) and
                                                          #   reply language on 140 synthetic cases; local model only
+.venv/bin/python scripts/bench_llm_weights.py <hf repo>  # GPU free: an LLM's GPU memory per module + single-stream tok/s
+scripts/bench_stack.sh TAG CONFIG STACK_LOG              # needs run.sh up (CONFIG): smoke + load tests, logs in bench_runs/TAG
+.venv/bin/python scripts/bench_summary.py TAG [TAG...]   # the numbers from bench_runs/, side by side
 scripts/stop.sh                                          # stop run.sh (and any stage worker it leaves behind)
 ```
 
