@@ -1,5 +1,80 @@
 # tyger v1 — build notes
 
+## Box (2026-10-05) — another new RTX 5090, healthy
+NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 7C13, 256 threads. **Not throttled**: under
+load P1, memory 13 801 MHz. Fresh-box install (README step 1) went through unchanged. The first `./run.sh` gave up
+waiting for MOUTH: slow downloads (VoxCPM2 + Gemma ~22 GB, Gemma's load counted 393 s of it) and VoxCPM2's first
+compile ran past `run.sh`'s ~15 min wait, and its cleanup left Gemma's EngineCore holding 14.7 GB (I-14). The
+second start: MOUTH ~5 min, EARS +5 min (nemotron + heads download); warm restart ~2.2 min.
+
+### Gemma 4 memory: the encoders are skipped; per-layer embeddings; E2B against E4B
+Same box, same scripts, both models with the config's options (FP8, `language_model_only`, thinking off, KV 3 GiB,
+temperature 0.7; the model card recommends `temperature=1.0, top_p=0.95, top_k=64`, not used for either). Stack
+runs use a copy of `config.yaml` **without `llm.smart`** (no OpenAI calls from `load_test.py`'s plain prompts;
+tasks off with it); the routing eval measures the with-smart prompts offline. Tavily is off, so tool turns get the
+tool's error result at once: tool-turn numbers don't compare with earlier rounds.
+
+**The vision and audio encoders are not loaded.** With `language_model_only`, vLLM's
+`MultiModalConfig.get_limit_per_prompt` is 0 for every modality, so `Gemma4ForConditionalGeneration` builds both
+`vision_tower` and `audio_tower` as `StageMissingLayer` (`_mark_tower_model`). Checked inside the loaded model
+(`apply_model`, every CUDA tensor by name): both towers are `StageMissingLayer`, no vision or audio tensor is on
+the GPU. vLLM's "Model loading took" is 10.54 GiB for E4B (10.66 standalone). The tensors add up to 10.39 GiB:
+10.20 GiB of weights, which the safetensors headers predict for the text model with FP8 linears (10.25), plus
+0.19 GiB of buffers (rotary caches, the PLE input buffer for CUDA graphs). A tower would add 0.3–0.6 GiB.
+
+| on the GPU (GiB) | E4B | E2B |
+|---|---|---|
+| per-layer embedding table (bf16; layers × 256 × 262 144) | **5.25** (42 layers, 2.82 B params) | **4.38** (35 layers, 2.35 B) |
+| token embeddings (bf16) | 1.25 | 0.75 |
+| decoder linears (FP8) | 3.70 | 1.75 |
+| buffers | 0.19 | 0.19 |
+| total tensors / vLLM "Model loading took" | 10.39 / 10.54 | 7.06 / 7.10 |
+| checkpoint towers, not loaded (bf16): vision / audio | 0.32 / 0.58 | 0.31 / 0.57 |
+
+The per-layer embedding table is half of E4B's GPU weights and 62% of E2B's. On-the-fly FP8 only quantizes Linear
+layers, so it stays bf16. It is a lookup (a few rows per token), so it costs memory, not speed; offloading it to CPU
+memory was ruled out by the user (too slow).
+
+**E2B against E4B:**
+
+| | E4B | E2B |
+|---|---|---|
+| single stream decode (512 tokens, alone) | 186 tok/s | 281 tok/s |
+| GPU idle / peak at 4 sessions (`load_test.py`) | 29.8 / **30.3 GB** | 26.3 / **26.8 GB** |
+| smoke plain / weather / reminder / backchannel first-audio | 256 / 247 / 293 / 170 ms, PASS | 183 / 188 / 217 / 147 ms, PASS |
+| `load_test.py --sessions 4 --turns 6` turn first-audio p50, 3 runs | 455 / 425 / 458 (median 455) | 371 / 365 / 345 (median 365) |
+| backchannel first-audio p50 | 448–492 ms | 323–378 ms |
+| `--tools --fresh` turn first-audio p50, 3 runs | 412 / 401 / 422 (median 412) | 329 / 329 / 346 (median 329) |
+| `load_test_ears.py` 1 conv: endpoint → first audio p50; end of speech → first audio p50 (2 runs) | 231, 237; 1113, 1034 ms | 179, 169; 1005, 978 ms |
+| `load_test_ears.py` 4 conv: endpoint → first audio p50; end of speech → first audio p50 (3 runs) | 265–271; 1169 / 1183 / 1194 ms | 209–218; 1131 / 1145 / 1119 ms |
+| **routing eval, with smart + tasks** (140 cases × 8): right; missed escalations | **98.7%; 0.6%** | **75.5%; 42.9%** (held-out 46.5%, fresh 61.3%) |
+| with smart: unneeded escalations; tool → tool | 0%; 256 / 256 | 0%; 254 / 256 |
+| with smart: speech in the wrong language / narration or markup | 6 / 0 of 347 | 75 / 95 of 599 |
+| with smart: answer after a tool result in the wrong language | 2 of 412 | 64 of 414 |
+| **routing eval, no smart** (70 cases × 8, production without a key): right; tool → tool | 99.6%; 246 / 248 | 99.8%; 247 / 248 |
+| no smart: answer after a tool result in the wrong language | **0 / 246** | **78 / 247** |
+
+E4B reproduces last round's eval (98.3% right, 0.4% missed) within sampling. E2B fails the routing gate (≤ 10%
+missed) by a wide margin, and its failures aren't sampling noise:
+- **It answers hard questions itself:** chest pain, mRNA vaccines, TCP handshake, palindrome code, job offers,
+  RU / ES health and legal questions: 8 / 8 local. Sometimes it says the hand-off instead of calling the tool ("Ask
+  expert explain how blockchain works in detail.", "I can ask an expert for the best financial advice on this.").
+- **It opens the thinking channel despite `enable_thinking: false`:** `<|channel>thought\nThinking Process: …` on
+  reasoning prompts (bat and ball, sum to 100, savings maths, plans); most of the 95 narration / markup flags.
+  MOUTH would speak it.
+- **Answers after a tool result follow the few-shot turns' language, not the user's:** English weather, reminder
+  and message questions answered in Russian (78 / 247 without smart), although the language hint names English.
+- Tool calls themselves are fine: lookups and actions are called as reliably as with E4B.
+
+**Recommendation: keep E4B.** E2B frees ~3.5 GB (peak 30.3 → 26.8 GB of 32.6) and is ~50–90 ms faster to first
+audio, but it regresses routing, the reply language and spoken markup, which the user named as what matters
+("robust tool calling is crucial"). What the freed memory would have bought, not measured: VoxCPM2 or Gemma KV
+headroom for a 5th–6th conversation, or room for L-02 / L-01 option 2 without crowding the 32 GB.
+
+Also on this box: end of speech → endpoint at 1 conversation is 803–883 ms p50 (last box: 684–686, two runs within
+4 ms; here they differ by 80 ms) and 912–932 ms at 4. The test utterance renders a little longer here (3.04 s,
+voiced 2.64 s; last box 2.88 / 2.62 s). Not looked into; L-02 measures detection next.
+
 ## Box (2026-10-04) — another new RTX 5090, healthy
 NVIDIA RTX 5090 (32 607 MiB), driver 595.91.07 / CUDA 13.2; AMD EPYC 7742, 128 threads, 125 GB RAM. **Not
 throttled**: under load P1, SM 2910 MHz, memory 13 801 MHz (max 3105 / 14 001). Fresh-box install (README step 1,

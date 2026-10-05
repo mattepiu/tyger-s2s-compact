@@ -157,6 +157,7 @@ in `PLUGINS.md`). Each block names its `plugin:`; the rest of the block is that 
 | kind | plugin | runs | notes |
 |---|---|---|---|
 | LLM | `gemma-4-e4b` | local, vLLM in MOUTH | the default responder (`quantization: fp8`): thinking off, text only, Gemma tool-call tokens |
+| LLM | `gemma-4-e2b` | local, vLLM in MOUTH | E4B's smaller sibling: ~3.5 GB less GPU, ~90 ms faster, but fails the routing eval (`NOTES.md`) |
 | LLM | `qwen3.5-4b` | local, vLLM in MOUTH | the previous responder (XML tool calls); rollback = a few lines in `config.yaml` |
 | LLM | `qwen3-4b-2507` | local, vLLM in MOUTH | the one before (Hermes JSON tool calls) |
 | LLM | `openai` | **hosted** | any OpenAI-compatible chat endpoint (`base_url`: OpenAI, Groq, Cerebras, a vLLM server) |

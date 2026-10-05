@@ -28,3 +28,9 @@ class Gemma4E4B(VLLMChatPlugin):
 
     def normalize_calls(self, text, names, final=False):
         return gemma_normalize(text, names, final)
+
+
+class Gemma4E2B(Gemma4E4B):
+    """gemma-4-e2b: the smaller sibling (2.3B effective, 5.1B with per-layer embeddings), tried against E4B to save
+    GPU memory. Same template, tool format and options; its own instance name for logs and prompt overrides."""
+    default_model = "google/gemma-4-E2B-it"
