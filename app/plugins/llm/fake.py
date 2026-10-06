@@ -1,9 +1,9 @@
-"""fake: a scripted LLM, no model (tests, CI, and running the stack without a GPU: config.fake.yaml).
+"""fake: a scripted LLM, no model (tests, CI, and running the stack without a GPU: config/fake.yaml).
 
-Routes each request by its system prompt (read from prompts.yaml, like MOUTH does): tool lead-in / still-looking /
-backchannel / the expert lead-in and still-looking lines / the smart model's answer (`smart`, or `smart_b` once a
-tool result is in) / a background task on the smart model (`task`, `task_b`; by default it calls finish_task) /
-phase B (a tool result present) / the main reply, and streams the scripted text for that kind a
+Routes each request by its system prompt (read from config/prompts.yaml, like MOUTH does): tool lead-in /
+still-looking / backchannel / the expert lead-in and still-looking lines / the smart model's answer (`smart`, or
+`smart_b` once a tool result is in) / a background task on the smart model (`task`, `task_b`; by default it calls
+finish_task) / phase B (a tool result present) / the main reply, and streams the scripted text for that kind a
 few characters at a time, polling stop_flag between items like the real engine loop. `reply` and `smart` may contain
 Hermes <tool_call>s, which go through the same splitting, naming (tool_start) and parsing as a local plugin's calls. For tests of hosted
 behaviour, `fail` maps a request kind to an LLMError kind raised for it (after `fail_after` items), and `refuse`

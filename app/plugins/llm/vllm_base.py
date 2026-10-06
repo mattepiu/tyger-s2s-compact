@@ -141,7 +141,7 @@ class VLLMChatPlugin(LLMPlugin):
                 yield ("tool_start", {"name": calls[0]["name"] if calls else None})
             yield ("tool_calls", [{"id": new_call_id(), **c} for c in calls], None)
 
-    # warmup: none. MOUTH's own start-up request (prompts.yaml `warmup`) pays the first prefill
+    # warmup: none. MOUTH's own start-up request (config/prompts.yaml `warmup`) pays the first prefill
 
     def shutdown(self) -> None:
         self.engine.shutdown()

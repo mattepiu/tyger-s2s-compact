@@ -26,6 +26,9 @@
 >   split into `stack/`, `validate/` and `bench/` (e.g. `scripts/validate_heads.py` is now
 >   `scripts/validate/heads.py`), and `tests/` into `ears/`, `mouth/` and `plugins/`. Paths in the text below are
 >   as they were.
+> - The config files are in `config/` (R-11): `config.yaml` is `config/default.yaml`, `config.fake.yaml` is
+>   `config/fake.yaml`, `prompts.yaml` is `config/prompts.yaml` (overrides in `config/prompts/`), and
+>   `deploy/voxcpm2.yaml` is `config/engines/voxcpm2.yaml`, named by `tts.engine_config` (was `deploy_config`).
 >
 > README → "Adding a plugin" shows the current pattern with a worked example.
 

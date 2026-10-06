@@ -34,7 +34,7 @@ class Mouth:
         self.context_turns = int(esc.get("context_turns", 4))     # history turns sent along with an escalated turn
         self.max_steps = int(esc.get("max_steps", 3))             # the smart model's own tool rounds per turn
         self.cfg = cfg
-        # prompts first: a bad prompts.yaml stops start-up before minutes of engine loading
+        # prompts first: a bad config/prompts.yaml stops start-up before minutes of engine loading
         by_name = load_prompts(cfg, {name for name, _ in roles.values()})
         self.prompts = {role: by_name[name] for role, (name, _) in roles.items()}   # role -> Prompts
         self.tools = build_tools(self.prompts["reply"], expert=self.expert, tasks=self.tasks_on)
@@ -45,7 +45,7 @@ class Mouth:
         self.bc_min_words = int(m.get("bc_min_words", 4))
         self.bc_max_new = int(m.get("bc_max_new", 12))
         self.eloop = EngineLoop()
-        # TTS first: its deploy config pins a small KV budget; the LLM's start-up check then sees what's left.
+        # TTS first: its engine config pins a small KV budget; the LLM's start-up check then sees what's left.
         self.tts = build_tts(cfg, self.eloop)            # at the 24 kHz wire rate
         self.llms = build_llms(cfg, self.eloop)          # role -> LLM plugin instance
         self.sr = self.tts.out_sr

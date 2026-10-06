@@ -63,7 +63,7 @@ def test_second_ear_does_not_depend_on_chunk_edges():
 
 
 def app(max_sessions=1):
-    cfg = copy.deepcopy(load_config(os.path.join(ROOT, "config.fake.yaml")))
+    cfg = copy.deepcopy(load_config(os.path.join(ROOT, "config/fake.yaml")))
     cfg["server"]["max_sessions"] = max_sessions
     cfg["server"]["mouth_port"] = 1                             # nothing there: EARS-only conversations
     return EarsApp(cfg, EnergyEars(cfg["ears"], PluginContext(None, cfg, "fake")))

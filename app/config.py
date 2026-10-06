@@ -1,10 +1,12 @@
-"""Load config.yaml + v1/.env and check its plugin shape. Secrets (TAVILY_API_KEY, HF_TOKEN) come from the env /
+"""Load config/default.yaml + v1/.env and check its plugin shape. Secrets (TAVILY_API_KEY, HF_TOKEN) come from the env /
 .env and are never written to logs."""
 from __future__ import annotations
 import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]   # v1/
+CONFIG_DIR = ROOT / "config"                 # the stack's config, prompts and engine configs
+DEFAULT = CONFIG_DIR / "default.yaml"         # what run.sh loads unless CONFIG names another file
 
 
 def load_env(env_path: str | None = None):
@@ -128,7 +130,7 @@ def llm_roles(cfg: dict) -> dict[str, tuple[str, dict]]:
 
 def load_config(path: str | None = None) -> dict:
     import yaml
-    p = Path(path) if path else (ROOT / "config.yaml")
+    p = Path(path) if path else DEFAULT
     load_env()                       # so ${HF_HOME} etc. are set before expansion
     os.environ.setdefault("HF_HOME", "/workspace/.hf_home")
     return validate_config(_expand(yaml.safe_load(p.read_text())))

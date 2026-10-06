@@ -7,11 +7,11 @@
 #   background - research, compare many options, plan a multi-day trip, draft something long: start_task (only
 #            evaluated with tasks on); a status question answers locally from the note, "drop it" is a tool
 # `also`: routes that count as right too (planning can be answered now or researched). `history` holds earlier
-# turns in the form of prompts.yaml escalation.shots: {user, reply} answered locally, or {user, expert, answer}
+# turns in the form of config/prompts.yaml escalation.shots: {user, reply} answered locally, or {user, expert, answer}
 # escalated; `status` is the background-task note MOUTH puts in front of the user's message.
 # Held-out cases (not used for tuning the prompt): every third case of each route, in file order (the script
 # computes it), and the `fresh` cases at the end. History turns may also be lookups: {user, call: {name,
-# arguments}, result, answer}. Don't reuse the few-shot topics of prompts.yaml here.
+# arguments}, result, answer}. Don't reuse the few-shot topics of config/prompts.yaml here.
 version: 1
 cases:
   # ---- local ----

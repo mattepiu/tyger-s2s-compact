@@ -2,9 +2,10 @@
 
 Each plugin class declares `Options`, a subclass of PluginOptions whose fields are the keys its config block may set
 (with their types and defaults; a field without a default must be set). `from_config` builds it from the block and
-rejects what doesn't fit, naming the key: an unknown key (a typo is an error, never silently ignored), a missing
-required key, a value of the wrong type. config.py runs it for every block when the config loads, so a bad block
-fails at startup, before any model loads. `plugin:` and `name:` belong to the config shape, not to the plugin.
+rejects what doesn't fit, naming the key: a renamed key (`RENAMED`: the message names the new one), an unknown key
+(a typo is an error, never silently ignored), a missing required key, a value of the wrong type. config.py runs it
+for every block when the config loads, so a bad block fails at startup, before any model loads. `plugin:` and
+`name:` belong to the config shape, not to the plugin.
 
 Scalars are coerced the way YAML leaves them: an int where a float is declared, a number where a string is (an
 all-digit revision hash). A bool must be a bool.
@@ -12,12 +13,15 @@ all-digit revision hash). A bool must be a bool.
 from __future__ import annotations
 import dataclasses, difflib, types, typing
 from dataclasses import dataclass
+from typing import ClassVar
 
 SHAPE_KEYS = ("plugin", "name")              # every block's; config.py reads them
 
 
 @dataclass(frozen=True, kw_only=True)
 class PluginOptions:
+    RENAMED: ClassVar[dict] = {}             # old key -> new key: an old key is rejected with the new one named
+
     @classmethod
     def from_config(cls, block: dict | None, ignore=()) -> PluginOptions:
         """The options in `block` (`ignore`: keys someone else reads, e.g. an EARS plugin's thresholds). ValueError
@@ -25,6 +29,8 @@ class PluginOptions:
         block = {k: v for k, v in (block or {}).items() if k not in SHAPE_KEYS and k not in ignore}
         fields = {f.name: f for f in dataclasses.fields(cls)}
         for key in block:
+            if key in cls.RENAMED:
+                raise ValueError(f"`{key}` is now `{cls.RENAMED[key]}`")
             if key not in fields:
                 near = difflib.get_close_matches(key, fields, n=1)
                 raise ValueError(f"unknown option `{key}`" + (f" (did you mean `{near[0]}`?)" if near else "")

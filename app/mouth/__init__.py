@@ -13,7 +13,7 @@ Architecture:
     request whose audio streams out per decode step, so playback starts on chunk 1 while the rest render.
   * Concurrency: the engines are shared; each EARS connection is its own Session (history, voice, recent
     acks) on its own thread, and within a Session turns and backchannels run on separate workers, each as
-    their own engine requests (vLLM batches them; llm.max_num_seqs, deploy/voxcpm2.yaml max_num_seqs).
+    their own engine requests (vLLM batches them; llm.max_num_seqs, config/engines/voxcpm2.yaml max_num_seqs).
   * Barge-in (B on the wire) stops the session's current turn; its live LLM/TTS request is aborted.
   * reminder/message tools return a "not connected" demo marker (app/tools/stubs.py) and the model says so.
   * Escalation (only with an `llm.smart` block): the reply model gets the ask_expert tool. Its lead-in fits the

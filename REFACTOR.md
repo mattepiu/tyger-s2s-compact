@@ -6,7 +6,7 @@ step by step on branch `plugins`, one commit per step (`R-NN: …` in the subjec
 the next.
 
 **Progress:** all steps done (2026-10-06): R-00 plan, R-01, R-02, R-03, R-04a, R-04b, R-05, R-06a, R-06b, R-06c,
-R-07a, R-07b, R-07c, R-08, R-09, and the extra R-10a/b/c/d. Per-step results and measurements: NOTES.md → "Readability refactor". The layout
+R-07a, R-07b, R-07c, R-08, R-09, and the extra R-10a/b/c/d and R-11. Per-step results and measurements: NOTES.md → "Readability refactor". The layout
 below is the code as built.
 
 **Goal:** a reader can find where a thing happens from its name, and a new plugin is one package plus one registry
@@ -29,12 +29,12 @@ protocol between EARS, MOUTH and the browser (message kinds stay as they are).
 
 ```
 app/
-  config.py                # loading and checking config.yaml (every plugin block against its Options)
+  config.py                # loading and checking config/default.yaml (every plugin block against its Options)
   wire.py                  # the EARS <-> MOUTH protocol (framing, message kinds)
   runtime/                 # what both processes' code runs on (R-10b)
     event_loop.py          #   EngineLoop: one asyncio loop for MOUTH's in-process engines and API clients
     audio.py               #   StreamingAudioResampler: chunk-invariant resampling (the 24 kHz wire, the 2nd ear)
-  prompts/                 # prompts.yaml loader + checks (__init__.py) and the language guess (lang.py) (R-10a)
+  prompts/                 # config/prompts.yaml loader + checks (__init__.py) and the language guess (lang.py) (R-10a)
   mouth/                   # the MOUTH process (python -m app.mouth)
     __main__.py            #   Server: accepts EARS connections, one Session thread each; signal handling
     service.py             #   Mouth: the loaded plugins, prompts, tool lists (shared by sessions); shutdown()
@@ -80,7 +80,8 @@ scripts/                   # (R-10c)
   validate/                # GPU parity checks (heads, rnnt, ears_batched, barge, long_turn, second_ear) and
                            #   reference.py: one conversation through the heads release, the plain way
   bench/                   # measurements (tts_voice, llm_weights, stack.sh + summary) and escalation.py + its set
-  stop.sh                  # stop run.sh
+config/                    # (R-11) default.yaml, fake.yaml, prompts.yaml (+ prompts/), engines/voxcpm2.yaml
+run.sh  stop.sh            # start / stop the stack
 tests/                     # (R-10d) fakes.py; test_config / test_prompts / test_tools; ears/, mouth/, plugins/
 ```
 
@@ -105,6 +106,7 @@ config without `llm.smart`.
 | R-10 | **Extra (user, 2026-10-06): `app/` grouped by who uses each module.** R-10a: `chunker`, `messages`, `tasks` into `app/mouth/`; `prompts` + `lang` become `app/prompts/`. R-10b: `engines` + `resample` into `app/runtime/` (`event_loop.py`, `audio.py`); `weights` into the nemotron-tyger package (`release.py`). `config.py` and `wire.py` stay at the top. Pure moves (`git mv`), no aliases for the old paths. | GPU-free; lint; smoke |
 | R-10c | **`scripts/` by kind**: `stack/` (smoke + load tests on the running stack), `validate/` (GPU parity checks + their reference), `bench/` (measurements + the escalation eval); the folder replaces the name prefix (`validate/heads.py`, `bench/summary.py`, `stack/load_ears.py`); `stop.sh` stays. | each script starts; validators rerun; README / HANDOFF / ISSUES commands updated |
 | R-10d | **`tests/` by part**: `ears/`, `mouth/`, `plugins/` with the part prefix dropped and pytest's `test_` kept; config / prompts / tools tests stay at the top. | GPU-free suite; README / HANDOFF commands updated |
+| R-11 | **`config/`** (user, 2026-10-06): `config.yaml` → `config/default.yaml`, `config.fake.yaml` → `config/fake.yaml`, `prompts.yaml` → `config/prompts.yaml` (+ `config/prompts/` overrides), `deploy/voxcpm2.yaml` → `config/engines/voxcpm2.yaml`; `tts.deploy_config` renamed `engine_config` (Options `RENAMED`: the old key is rejected with the new one named); `scripts/stop.sh` → `stop.sh` next to `run.sh`. | GPU-free; lint; `CONFIG=config/fake.yaml ./run.sh`; stack smoke |
 
 Order: R-01 first so the refactor commits are pure moves. R-02 → R-03 (MOUTH) and R-04 → R-06 (EARS) are
 independent; R-07 / R-08 touch both sides and come after them.

@@ -6,7 +6,7 @@ Routes: local (no call), tool (any lookup / action, cancel_task included), exper
 researched as a task). The decision is the reply model's alone, so only that model runs: no smart model, no
 remote calls, no cost. Each case is sent exactly as MOUTH would send it (messages.reply_prefix for the mode, then the
 case's history, then the user turn, with the case's `status` note in front as MOUTH prepends it), at the model's
-configured temperature, `--samples` times. The mode follows config.yaml (tasks on if mouth.tasks.enabled);
+configured temperature, `--samples` times. The mode follows config/default.yaml (tasks on if mouth.tasks.enabled);
 --no-tasks / --no-expert evaluate the prompts without them (cases needing the missing route are skipped). Needs the GPU free (stop run.sh). Prints routes and rates;
 the set is synthetic, so misrouted cases are listed with their text.
 
@@ -17,7 +17,7 @@ result (phase B), with fixed English stub results (the real reminder / message s
 lookups), and scores that answer's speech the same way: English tool output must not pull the reply language.
 
   .venv/bin/python scripts/bench/escalation.py [--plugin gemma-4-e4b-nvfp4 --opt quantization=null] [--samples 3]
-      [--split heldout] [--prompts prompts.yaml,/path/candidate.yaml]   several prompt files: one model load
+      [--split heldout] [--prompts config/prompts.yaml,/path/candidate.yaml]   several prompt files: one model load
 """
 import sys, re, json, argparse, logging, collections
 from concurrent.futures import ThreadPoolExecutor
@@ -189,7 +189,7 @@ def main():
     ap.add_argument("--no-expert", action="store_true", help="the prompt and tools without a smart model (no "
                     "ask_expert); expert cases are skipped")
     ap.add_argument("--no-tasks", action="store_true", help="the prompt and tools without background tasks, "
-                    "even if config.yaml has them on; background cases are skipped")
+                    "even if config/default.yaml has them on; background cases are skipped")
     ap.add_argument("--opt", action="append", default=[], help="override a reply-block option, e.g. "
                     "gpu_memory_utilization=0.8 (YAML value)")
     a = ap.parse_args()
@@ -208,7 +208,7 @@ def main():
                                                               for t in c.get("history", []))))]
     llm = plugin_class("llm", block["plugin"])(block, PluginContext(EngineLoop(), cfg, name))
     out = {}
-    for pf in (a.prompts.split(",") if a.prompts else [cfg["mouth"].get("prompts") or "prompts.yaml"]):
+    for pf in (a.prompts.split(",") if a.prompts else [cfg["mouth"].get("prompts") or "config/prompts.yaml"]):
         cfg["mouth"]["prompts"] = str(repo_path(pf))
         p = load_prompts(cfg, [name])[name]
         results = evaluate(llm, p, cases, a.samples, int(cfg["mouth"].get("max_gen", 192)),

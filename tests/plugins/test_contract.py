@@ -110,7 +110,7 @@ def test_llm_local():
     if not LOCAL:
         raise Skip("TYGER_CONTRACT_LOCAL=1 to run the Gemma plugins")
     base = dict(CFG["llm"]["reply"])
-    # the backup's checkpoint is pre-quantized: no `quantization` at load (config.yaml's backup comment)
+    # the backup's checkpoint is pre-quantized: no `quantization` at load (config/default.yaml's backup comment)
     for name, over in (("gemma-4-e4b", {}), ("gemma-4-e4b-nvfp4", {"quantization": None})):
         llm = plugin_class("llm", name)({**base, **over, "plugin": name}, ctx(name, eloop()))
         try:

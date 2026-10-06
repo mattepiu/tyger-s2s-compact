@@ -1,7 +1,7 @@
 # The whole stack with the `fake` plugins: no GPU, no model downloads, no network (unless a fake reply calls a
 # tool and TAVILY_API_KEY is set; the default replies don't). Checks the app/ears / app/mouth wiring and the web
 # page on a laptop or in CI:
-#   CONFIG=config.fake.yaml ./run.sh      then open http://localhost:7860, or run scripts/stack/load_ears.py --config ...
+#   CONFIG=config/fake.yaml ./run.sh   then open http://localhost:7860, or run scripts/stack/load_ears.py --config ...
 # Speak (or play anything above ~-45 dB); 0.5 s of silence ends the turn with the fixed transcript below, the fake
 # LLM's scripted reply comes back as a quiet tone whose length follows the text, and talking over it barges in.
 
@@ -39,8 +39,8 @@ voices:
   default: fake
 
 mouth:
-  prompts: prompts.yaml
-  prompt_overrides_dir: prompts
+  prompts: config/prompts.yaml
+  prompt_overrides_dir: config/prompts
   max_gen: 192
   history_turns: 8
   bc_max_new: 12

@@ -103,7 +103,7 @@ async def settle(s=0.05):
 
 async def setup():
     global EARS
-    cfg = load_config(os.path.join(ROOT, "config.fake.yaml"))
+    cfg = load_config(os.path.join(ROOT, "config/fake.yaml"))
     cfg = copy.deepcopy(cfg)
     cfg["mouth"]["tasks"] = {"announce_after_silence_ms": SIL_MS}
     mouth = FakeMouth(); port = await mouth.start()

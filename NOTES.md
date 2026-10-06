@@ -359,6 +359,26 @@ Left for the user: the R-05 sliders on the page.
   - stack: smoke PASS, `stack/load.py` turn p50 419 ms, `stack/load_ears.py` 885 ms at 1 conv;
   - `scripts/stop.sh` leaves the GPU free.
 
+**R-11: `config/`, and `stop.sh` next to `run.sh`** (the user's call: default.yaml, and the `engine_config` rename).
+- **Moves:**
+  - `config.yaml` → `config/default.yaml`, `config.fake.yaml` → `config/fake.yaml`;
+  - `prompts.yaml` → `config/prompts.yaml`, with overrides in `config/prompts/` (none exist);
+  - `deploy/voxcpm2.yaml` → `config/engines/voxcpm2.yaml`. That file is vLLM-Omni's own engine config for VoxCPM2
+    ("deploy config" is vLLM-Omni's term), resized for 4 conversations;
+  - `scripts/stop.sh` → `stop.sh`.
+- **The `engine_config` rename:** the voxcpm2 option `deploy_config` is now `engine_config`. Options gained
+  `RENAMED`: an old key is rejected at load as "`deploy_config` is now `engine_config`".
+- **Defaults:** `app/config.py` has `CONFIG_DIR` and `DEFAULT`. The prompts loader defaults to
+  `config/prompts.yaml` and `config/prompts/`. Paths inside a config stay repo-relative. The Dockerfile copies
+  `config/` and `stop.sh`.
+- **Tests:** `test_config.py` gained the renamed key and the files in `config/`.
+- **Checks:**
+  - GPU-free suite passes; lint is clean;
+  - `CONFIG=config/fake.yaml ./run.sh` starts on the fakes: `stack/load_ears.py` 2/2 endpoints;
+  - real stack: smoke PASS, turn p50 372 ms;
+  - VoxCPM2's engine ran with the config's `max_seq_len=2048` and eager mode (vLLM-Omni's default is 4096), so
+    `engine_config` is read.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

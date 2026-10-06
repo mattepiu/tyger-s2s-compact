@@ -1,4 +1,4 @@
-"""fake: an energy-threshold endpointer, no model (tests, CI, and running the stack without a GPU: config.fake.yaml).
+"""fake: an energy-threshold endpointer, no model (tests, CI, and running the stack without a GPU: config/fake.yaml).
 
 Per 80 ms frame of user audio: voiced if its RMS level is above `vad_db`. A turn that has at least `min_speech_ms`
 of voiced audio ends after `endpoint_silence_frames` silent frames: ENDPOINT with the fixed `transcript` from config

@@ -72,7 +72,7 @@ def test_bad_roles_and_plugins_rejected():
 
 
 def test_fake_config_loads():
-    cfg = load_config(str(ROOT / "config.fake.yaml"))
+    cfg = load_config(str(ROOT / "config/fake.yaml"))
     assert cfg["ears"]["plugin"] == "fake" and cfg["tts"]["plugin"] == "fake"
 
 
@@ -91,6 +91,22 @@ def test_plugin_options_checked_at_load():
     rejects(cfg, "`ears`", "`ep_thr` is not set")
     cfg = copy.deepcopy(BASE); cfg["ears"]["ep_deb"] = "two"
     rejects(cfg, "`ears`")
+
+
+def test_renamed_option_names_the_new_key():
+    """tts.deploy_config became tts.engine_config (R-11, with the engine configs in config/engines/)."""
+    cfg = copy.deepcopy(BASE); cfg["tts"]["deploy_config"] = cfg["tts"].pop("engine_config")
+    rejects(cfg, "`tts`", "`deploy_config` is now `engine_config`")
+
+
+def test_config_files_in_config_dir():
+    """config/: the default config, the fake one, the prompts and the engine config it names, all repo-relative."""
+    from app.config import DEFAULT, repo_path
+    from app.prompts import load_prompts
+    assert DEFAULT == ROOT / "config" / "default.yaml" and DEFAULT.is_file()
+    assert repo_path(BASE["tts"]["engine_config"]).is_file()
+    no_paths = {**BASE, "mouth": {k: v for k, v in BASE["mouth"].items() if k not in ("prompts", "prompt_overrides_dir")}}
+    assert load_prompts(no_paths, ["x"])["x"].source == "prompts.yaml"          # the default: config/prompts.yaml
 
 
 def test_options_types():

@@ -1,7 +1,7 @@
 """GPU memory per module of a loaded LLM (the tyger plugins' engine args: 3 GiB KV, 8192 tokens, 8 seqs), and
 single-stream decode tok/s. Shows which towers / tables are on the GPU (e.g. Gemma's per-layer embeddings, NVFP4
 packed weights). Run with the stack stopped: .venv/bin/python scripts/bench/llm_weights.py <hf repo>
-Google checkpoints get on-the-fly FP8 like config.yaml; pre-quantized ones (NVFP4) keep their own. Prompts are
+Google checkpoints get on-the-fly FP8 like config/default.yaml; pre-quantized ones (NVFP4) keep their own. Prompts are
 synthetic; no text is printed."""
 import os, sys, time, collections
 os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")

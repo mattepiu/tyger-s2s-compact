@@ -7,7 +7,7 @@ A tool is either
   * answered by MOUTH itself (`handle(arguments, ctx)`; ask_expert, the task tools): the handler reads what it needs
     from the ToolContext and returns the result, or None when this context doesn't answer it (escalation or tasks
     off), and then it is an unknown tool, as for a name nobody registered.
-Schemas hold names, types and required keys; the descriptions are prompts and live in prompts.yaml (`tools:`), so
+Schemas hold names, types and required keys; the descriptions are prompts and live in config/prompts.yaml (`tools:`), so
 build_tools joins the two. Adding a tool: write its function in a module here and register it with @tool.
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ GROUPS = ("base", "expert", "tasks", "finish")   # which tool lists offer a tool
 @dataclass(frozen=True)
 class Tool:
     name: str
-    parameters: dict                       # JSON schema: types, required (descriptions: prompts.yaml)
+    parameters: dict                       # JSON schema: types, required (descriptions: config/prompts.yaml)
     group: str = "base"
     fn: Callable | None = None             # run for real: fn(**arguments) -> result
     handle: Callable | None = None         # answered by MOUTH: handle(arguments, ctx) -> result | None

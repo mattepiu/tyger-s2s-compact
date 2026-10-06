@@ -25,9 +25,9 @@ RUN uv venv /app/.venv --python 3.12 && \
 
 COPY app ./app
 COPY static ./static
-COPY deploy ./deploy
-COPY config.yaml prompts.yaml run.sh ./
-RUN chmod +x run.sh
+COPY config ./config
+COPY run.sh stop.sh ./
+RUN chmod +x run.sh stop.sh
 
 ENV HF_HOME=/hf HF_HUB_DISABLE_XET=1
 EXPOSE 7860

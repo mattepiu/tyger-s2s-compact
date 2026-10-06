@@ -74,7 +74,7 @@ def test_execute_tool_errors():
 
 
 def test_a_new_tool_is_one_registration():
-    """Adding a tool: register it (and give it a description in prompts.yaml); MOUTH's code doesn't change."""
+    """Adding a tool: register it (and give it a description in config/prompts.yaml); MOUTH's code doesn't change."""
     registry.tool("roll_die", {"type": "object", "properties": {"sides": {"type": "integer"}}, "required": []})(
         lambda sides=6: {"rolled": sides})
     try:

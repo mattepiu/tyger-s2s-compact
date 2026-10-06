@@ -44,7 +44,7 @@ I-11 before exposing it beyond an SSH tunnel).
 Built on one **NVIDIA RTX 5090** (32 GB, Blackwell sm_120), CUDA-13 driver (≥ 590) for the cu130 torch wheels.
 
 GPU memory in use ≈ **30.0 GB of 32 GB** with everything loaded, warm, and under a 4-conversation load: VoxCPM2
-~9.8 GB (2 GiB pinned KV, `deploy/voxcpm2.yaml`), Gemma 4 E4B ~14.9 GB with FP8 weights (3 GiB pinned KV,
+~9.8 GB (2 GiB pinned KV, `config/engines/voxcpm2.yaml`), Gemma 4 E4B ~14.9 GB with FP8 weights (3 GiB pinned KV,
 `llm.reply.kv_cache_gib`; bf16 weights would not fit), EARS ~7 GB. Both engines pin their KV budgets, so the total
 is predictable. With the `gemma-4-e4b-nvfp4` backup (pre-quantized, int8 per-layer embeddings) the peak is ~26.7 GB.
 
@@ -63,14 +63,14 @@ Copy `.env.example` to `.env` (gitignored) and fill in:
 
 - **`TAVILY_API_KEY`** — powers `web_search` and `get_weather`. Without it those tools return an error and the
   model says it couldn't look it up; it never invents a value.
-- **`HF_TOKEN`** — pulls the **private** turn-taking heads release (`ears.heads` in `config.yaml`). If a token
+- **`HF_TOKEN`** — pulls the **private** turn-taking heads release (`ears.heads` in `config/default.yaml`). If a token
   already exists at `$HF_HOME/token`, leave this blank.
 
 Never commit `.env`.
 
 ### 3. Voices
 
-Put one or more reference `.wav` clips in `voices/` (`voices.dir` in `config.yaml`; gitignored). The stem is the
+Put one or more reference `.wav` clips in `voices/` (`voices.dir` in `config/default.yaml`; gitignored). The stem is the
 voice name; `voices.default` picks the active one (falls back to the first clip). Optionally add
 `voices/<name>.txt` with the clip's exact transcript: VoxCPM2 then clones from audio + transcript (better
 quality, uses the whole clip); without it the clip is trimmed to `tts.ref_max_s` (10 s). `?debug=1` in the
@@ -79,18 +79,29 @@ never commit, upload, or redistribute them.**
 
 ### 4. Configure
 
-`config.yaml` holds model ids, engine memory budgets, endpoint thresholds, the voice directory, and runtime
-flags. No secrets live here. Worth knowing:
+Everything you edit to configure the stack is in `config/` (no secrets: those are in `.env`):
 
-- **Prompts** live in `prompts.yaml`, not in code: system prompts, few-shot turns, the small templates MOUTH
+```
+config/
+  default.yaml        # the stack: plugins and their options, thresholds, voices, MOUTH's limits (run.sh's default)
+  fake.yaml           # the stack on the fake plugins: no GPU, no downloads (CONFIG=config/fake.yaml ./run.sh)
+  prompts.yaml        # every prompt MOUTH sends to an LLM
+  prompts/            # optional per-model overrides: <llm instance name>.yaml
+  engines/
+    voxcpm2.yaml      # vLLM-Omni's own engine config for VoxCPM2 (batch, KV budget), named by tts.engine_config
+```
+
+Paths inside a config are relative to the repo root. `CONFIG=<file> ./run.sh` runs another config. Worth knowing:
+
+- **Prompts** live in `config/prompts.yaml`, not in code: system prompts, few-shot turns, the small templates MOUTH
   fills in, and the tool descriptions. It is checked at MOUTH start (a bad key or placeholder stops start-up with
-  the key named) and read once, so restart MOUTH after editing. `prompts/<llm instance>.yaml` (e.g.
-  `prompts/gemma-4-e4b.yaml`) overrides parts of it for one model. Keep few-shot examples synthetic: the file is
-  committed.
+  the key named) and read once, so restart MOUTH after editing. `config/prompts/<llm instance>.yaml` (e.g.
+  `config/prompts/gemma-4-e4b.yaml`) overrides parts of it for one model. Keep few-shot examples synthetic: the
+  file is committed.
 
 - **Endpoint thresholds** (`ears.ep_thr` etc.) ship at the training-time defaults and have **not** been
   retuned on a live browser mic — offline thresholds have been seen to run ~2× too high on real mic signal.
-  Expect to tune these live with `?debug=1`, then freeze the values back into `config.yaml`.
+  Expect to tune these live with `?debug=1`, then freeze the values back into `config/default.yaml`.
 - **Backchannels** are always **contextual LLM acks**: a short reaction the LLM generates from the running
   ASR partial ("oh nice", "wow, really?"). When you've said too little to react to (`mouth.bc_min_words`),
   it uses a neutral "mm-hm". How *often* they fire is EARS's `ears.bc_thr` (slider under `?debug=1`).
@@ -121,7 +132,7 @@ the voice picker. Browser DSP (echo cancellation, noise suppression, auto gain) 
 # tests/: no GPU, no network (each file runs on its own; all of them:)
 for t in tests/test_*.py tests/*/test_*.py; do .venv/bin/python $t; done
 .venv/bin/python tests/test_config.py                     # config shape + every block's Options; old shape rejected
-.venv/bin/python tests/test_prompts.py                    # prompts.yaml loader + checks
+.venv/bin/python tests/test_prompts.py                    # config/prompts.yaml loader + checks
 .venv/bin/python tests/test_tools.py                      # the tool registry: order, which context answers which call
 .venv/bin/python tests/mouth/test_session.py              # MOUTH turns / barge / tools / backchannels, fake plugins
 .venv/bin/python tests/mouth/test_parts.py                # MOUTH's History and Speaker on their own
@@ -139,8 +150,8 @@ for t in tests/test_*.py tests/*/test_*.py; do .venv/bin/python $t; done
 .venv/bin/python tests/plugins/test_hosted_openai.py      # the openai plugin on stubbed streams
 .venv/bin/python tests/plugins/test_hosted_anthropic.py   # the anthropic plugin on stubbed streams
 
-CONFIG=config.fake.yaml ./run.sh                          # the whole stack on the fake plugins: no GPU, no downloads
-scripts/stop.sh                                           # stop run.sh (and any stage worker it leaves behind)
+CONFIG=config/fake.yaml ./run.sh                          # the whole stack on the fake plugins: no GPU, no downloads
+./stop.sh                                                 # stop run.sh (and any stage worker it leaves behind)
 
 # scripts/stack/: the running stack (start run.sh first)
 .venv/bin/python scripts/stack/smoke.py                   # MOUTH tool turns + barge-in + EARS speech → audio
@@ -172,8 +183,8 @@ speech, so no test audio file is needed; pass `--wav` to use your own.
 
 ## Plugins
 
-The LLM, the TTS and the turn-taking model are **plugins chosen in `config.yaml`** (`app/plugins/`; the design is
-in `PLUGINS.md`). Each block names its `plugin:`; the rest of the block is that plugin's options.
+The LLM, the TTS and the turn-taking model are **plugins chosen in `config/default.yaml`** (`app/plugins/`; the
+design is in `PLUGINS.md`). Each block names its `plugin:`; the rest of the block is that plugin's options.
 
 | kind | plugin | runs | notes |
 |---|---|---|---|
@@ -183,7 +194,7 @@ in `PLUGINS.md`). Each block names its `plugin:`; the rest of the block is that 
 | LLM | `anthropic` | **hosted** | the Claude Messages API; default `claude-opus-5-5`, `effort: low`, server-side refusal fallback |
 | TTS | `voxcpm2` | local, vLLM-Omni in MOUTH | cloned voices from `voices/` |
 | EARS | `nemotron-tyger-1.0` | local, in EARS | nemotron ASR + the tyger 1.0 turn-taking heads |
-| all three | `fake` | no model, CPU | scripted / energy-based; tests and `CONFIG=config.fake.yaml ./run.sh` |
+| all three | `fake` | no model, CPU | scripted / energy-based; tests and `CONFIG=config/fake.yaml ./run.sh` |
 
 Other local responders were measured against E4B and removed: their numbers are in `NOTES.md` ("Gemma 4 memory",
 "NVFP4 responders", "unsloth NVFP4 Gemma 4", step 11), their plugins in git history.
@@ -204,7 +215,7 @@ Measured on the box (`NOTES.md` → step 6): a hosted `reply` adds ~0.35 s to fi
 (`filler: reply` on a hosted plugin) MOUTH never loads vLLM for the LLM, which frees ~12 GB of GPU memory. A hosted
 TTS was tried and removed: every text chunk paid a request's time to first audio (`NOTES.md` → step 8). A hosted
 request that fails (rate limit, timeout, network) ends the turn with a short spoken apology; a refusal with a short
-neutral line (both in `prompts.yaml` → `spoken`).
+neutral line (both in `config/prompts.yaml` → `spoken`).
 
 ### Adding a plugin
 
@@ -224,7 +235,7 @@ from app.plugins.options import PluginOptions
 class EchoLLM(LLMPlugin):
     @dataclass(frozen=True, kw_only=True)
     class Options(PluginOptions):
-        prefix: str = "You said:"             # llm.<role>.prefix in config.yaml
+        prefix: str = "You said:"             # llm.<role>.prefix in config/default.yaml
 
     def stream(self, messages, tools=None, max_new=192, stop_flag=None):
         last = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
@@ -240,7 +251,7 @@ class EchoLLM(LLMPlugin):
 ```
 
 ```yaml
-# config.yaml
+# config/default.yaml
 llm:
   reply: {plugin: echo, prefix: "I heard"}
 ```
@@ -272,13 +283,13 @@ What the base gives you, and what is yours to write:
 - **Tests.** Add a run to `tests/plugins/test_contract.py` (`llm_suite`, `tts_suite` or `ears_suite`). The fakes in
   `app/plugins/*/fake.py` are the smallest complete plugins of each kind.
 
-Per-model prompt changes go in `prompts/<instance name>.yaml`, never in code.
+Per-model prompt changes go in `config/prompts/<instance name>.yaml`, never in code.
 
 ### Adding a tool
 
 Tools are a registry too (`app/tools/`). Write the function in a module there (a new module goes on the import
 line in `app/tools/__init__.py`, before `agent`: the order there is the order the models see), give it its JSON
-schema with `@tool`, and add its description to `prompts.yaml` →
+schema with `@tool`, and add its description to `config/prompts.yaml` →
 `tools:`; `build_tools` offers it to the models, and `execute_tool` runs it. It returns a small dict, and
 `{"error": ...}` on failure:
 
@@ -352,9 +363,9 @@ for that data.
   conversations keep EARS real time (hop lag p50 ~90 / p90 ~200 ms); see `NOTES.md`.
 - `set_reminder` / `send_message` are **placeholders** — the model says they aren't connected yet.
 - The user waits **~1.0 s** from the end of their speech to the first reply audio at 1 conversation and
-  **~1.25 s** at 4 (`scripts/stack/load_ears.py`), and ~700–850 ms of that is endpoint detection. Live threshold tuning
-  should cut it (targets in `NOTES.md` → Response gap). MOUTH's part is small: first audio ~265 ms after the endpoint for a plain or a tool
-  turn (smoke test, cloned voice), ~410 ms p50 with 4 busy sessions.
+  **~1.25 s** at 4 (`scripts/stack/load_ears.py`), and ~700–850 ms of that is endpoint detection. Live threshold
+  tuning should cut it (targets in `NOTES.md` → Response gap). MOUTH's part is small: first audio ~265 ms after the
+  endpoint for a plain or a tool turn (smoke test, cloned voice), ~410 ms p50 with 4 busy sessions.
 - Endpoint thresholds are not yet live-tuned (see Configure).
 - The `Dockerfile` has not yet been built and run end to end (the box used so far is itself a container, with no
   Docker daemon). The non-Docker fresh-box path above has been run end to end on a clean box.

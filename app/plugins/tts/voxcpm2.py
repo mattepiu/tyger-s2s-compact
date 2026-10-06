@@ -61,8 +61,9 @@ class Voice:
 class VoxCPM2(TTSPlugin):
     @dataclass(frozen=True, kw_only=True)
     class Options(PluginOptions):
+        RENAMED = {"deploy_config": "engine_config"}     # R-11
         model: str = "openbmb/VoxCPM2"
-        deploy_config: str | None = None   # the vLLM-Omni stage config (repo-relative)
+        engine_config: str | None = None   # vLLM-Omni's engine (deploy) config, repo-relative: config/engines/
         out_sr: int = 24000                # VoxCPM2's 48 kHz is resampled to this
         ref_max_s: float = 10.0            # reference-only mode: the clip is trimmed to this
         allow_zero_shot: bool = False      # testing only: start without a voice clip
@@ -80,7 +81,7 @@ class VoxCPM2(TTSPlugin):
         super().__init__(conf, ctx)
         self.cfg = ctx.cfg; eloop = self.eloop
         model = self.opts.model
-        deploy_config = repo_path(self.opts.deploy_config)
+        engine_config = repo_path(self.opts.engine_config)
         self.out_sr = self.opts.out_sr
         self.ref_max_s = self.opts.ref_max_s
         names, default = scan_voices(self.cfg)
@@ -94,7 +95,7 @@ class VoxCPM2(TTSPlugin):
         self._voice_lock = threading.Lock()
 
         async def make():
-            kw = {"deploy_config": str(deploy_config)} if deploy_config else {}
+            kw = {"deploy_config": str(engine_config)} if engine_config else {}      # vLLM-Omni's name for it
             return AsyncOmni(model=model, **kw)
         self.engine = eloop.run(make())
         mc = self.engine.model_config
@@ -107,10 +108,10 @@ class VoxCPM2(TTSPlugin):
         vae = self.hf_config.audio_vae_config
         self.vae_sr = int(vae["sample_rate"])
         self.patch_samples = int(self.hf_config.patch_size * np.prod(vae["encoder_rates"]))
-        self.max_batch = 1                    # the deploy config's max_num_seqs: batch sizes warmup must cover
-        if deploy_config:
+        self.max_batch = 1                    # the engine config's max_num_seqs: batch sizes warmup must cover
+        if engine_config:
             import yaml
-            stages = (yaml.safe_load(Path(deploy_config).read_text()) or {}).get("stages") or [{}]
+            stages = (yaml.safe_load(Path(engine_config).read_text()) or {}).get("stages") or [{}]
             self.max_batch = int(stages[0].get("max_num_seqs", 1))
         self.caps = TTSCaps(cloning=True, max_batch=self.max_batch)
 

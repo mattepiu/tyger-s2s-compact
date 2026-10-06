@@ -6,7 +6,7 @@
 #   2. EARS   (app.ears): nemotron + endpoint head + the web app (:7860).
 # MOUTH starts first so its engines claim their (pinned) GPU memory before EARS loads. See NOTES.md.
 #
-# Reach it: the web app serves on :7860 (config.yaml server.port). The mic needs a secure context, so either
+# Reach it: the web app serves on :7860 (config/default.yaml server.port). The mic needs a secure context, so either
 #   - SSH port-forward 7860 to your localhost and open http://localhost:7860, or
 #   - put it behind an HTTPS proxy (see README.md).
 set -euo pipefail
@@ -20,8 +20,8 @@ export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
 
 VENV="${VENV:-.venv}"
 PY="$VENV/bin/python"
-CFG_ARGS=(); [ -n "${CONFIG:-}" ] && CFG_ARGS=(--config "$CONFIG")   # optional alternate config.yaml
-MOUTH_PORT="${MOUTH_PORT:-8770}"   # must match config.yaml server.mouth_port
+CFG_ARGS=(); [ -n "${CONFIG:-}" ] && CFG_ARGS=(--config "$CONFIG")   # another config (default: config/default.yaml)
+MOUTH_PORT="${MOUTH_PORT:-8770}"   # must match config/default.yaml server.mouth_port
 [ -x "$PY" ] || { echo "venv not found at $VENV (see README install)"; exit 1; }
 
 PIDS=()

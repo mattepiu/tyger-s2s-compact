@@ -1,7 +1,7 @@
 """Streaming sentence/clause chunker + sanitizer (copied/adapted from codebase/exp-12/server/mouth_cbx_server.py).
 As the LLM streams tokens, cut the reply at sentence/clause boundaries (capped length) and TTS each chunk as soon
 as it closes, so playback starts on chunk 1 while the rest render. The TTS has no paralinguistic tags, so the
-sanitizer strips all bracketed tags. The TTS-safe system prompt is in prompts.yaml (system.voice_tools)."""
+sanitizer strips all bracketed tags. The TTS-safe system prompt is in config/prompts.yaml (system.voice_tools)."""
 import re
 
 # Sanitizer: keep letters of ANY script (Cyrillic, CJK, Latin, ...) + digits + basic speakable punctuation,

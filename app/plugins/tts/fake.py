@@ -1,4 +1,4 @@
-"""fake: a scripted TTS, no model (tests, CI, and running the stack without a GPU: config.fake.yaml).
+"""fake: a scripted TTS, no model (tests, CI, and running the stack without a GPU: config/fake.yaml).
 
 Each request yields `n` chunks of `chunk_s` audio, `step_s` apart (after `onset_s`), polling stop_flag between
 chunks like the real engine loop. With `per_char_s` the length follows the text instead (n = text length x

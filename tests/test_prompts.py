@@ -1,5 +1,5 @@
-"""prompts.yaml loader (no GPU). The step-1b byte-identity gate against the pre-move constants (commit ddb1128) was
-deleted when the prompts were first edited on purpose (step 11: reply language, tool rules). Run:
+"""config/prompts.yaml loader (no GPU). The step-1b byte-identity gate against the pre-move constants (commit
+ddb1128) was deleted when the prompts were first edited on purpose (step 11: reply language, tool rules). Run:
 .venv/bin/python tests/test_prompts.py
 """
 import copy, os, sys

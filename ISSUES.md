@@ -244,7 +244,7 @@ tool turn keeps the assistant `tool_calls` message plus a compact result (no raw
 
 **What happened (box of 2026-10-05):** the first start downloaded VoxCPM2 + Gemma (~22 GB) slowly, and VoxCPM2's
 first compile was still running when `wait_tcp` gave up ("MOUTH did not come up"). `cleanup` killed MOUTH's PID,
-but Gemma's vLLM EngineCore (a child of MOUTH) survived with 14.7 GB of GPU memory. `scripts/stop.sh` finds stacks
+but Gemma's vLLM EngineCore (a child of MOUTH) survived with 14.7 GB of GPU memory. `stop.sh` finds stacks
 by their `run.sh` process, which had exited, so it said "not running"; the engine had to be killed by its process
 group by hand. The next start would have failed vLLM's free-memory check.
 

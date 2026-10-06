@@ -49,7 +49,7 @@ llm:                       # MOUTH's LLM roles; each block is one plugin instanc
 tts:                       # VoxCPM2, in-process vLLM-Omni AsyncOmni inside the MOUTH
   plugin: voxcpm2
   model: openbmb/VoxCPM2
-  deploy_config: deploy/voxcpm2.yaml   # sized for up to 4 sessions (repo-relative)
+  engine_config: config/engines/voxcpm2.yaml   # vLLM-Omni's engine config, sized for up to 4 sessions
   out_sr: 24000            # VoxCPM2 emits 48 kHz -> resampled to the 24 kHz wire / client / EARS 2nd ear
   ref_max_s: 10.0          # trim the voice clip (reference-only mode) to bound per-request prefill;
                            # with a transcript (voices/<name>.txt) the full clip is used
@@ -61,8 +61,8 @@ voices:
   default: ref             # active voice name (stem of the chosen wav); falls back to the first clip
 
 mouth:
-  prompts: prompts.yaml               # every prompt MOUTH sends to an LLM (app/prompts/)
-  prompt_overrides_dir: prompts       # optional <llm instance name>.yaml here, merged over prompts.yaml
+  prompts: config/prompts.yaml       # every prompt MOUTH sends to an LLM (loader: app/prompts/)
+  prompt_overrides_dir: config/prompts   # optional <llm instance name>.yaml here, merged over prompts.yaml
   max_gen: 192
   history_turns: 8                   # ~last 8 turns kept in the responder
   bc_max_new: 12                     # token budget for a backchannel (kept short for low latency)

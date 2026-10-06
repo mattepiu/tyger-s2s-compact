@@ -1,8 +1,9 @@
-"""Prompts: every piece of text MOUTH sends to an LLM lives in prompts.yaml (PLUGINS.md -> "Prompts in one file").
+"""Prompts: every piece of text MOUTH sends to an LLM lives in config/prompts.yaml (PLUGINS.md -> "Prompts in one
+file").
 
 Read once at MOUTH start and validated: required keys present, each template's placeholders exactly the ones the
 code passes, shots a list of [user, assistant] pairs, tool descriptions only for tools and parameters that exist.
-An invalid file stops start-up with the key named. Per-instance overrides: prompts/<instance>.yaml, deep-merged
+An invalid file stops start-up with the key named. Per-instance overrides: config/prompts/<instance>.yaml, deep-merged
 over the base file (dicts key by key; lists such as `shots` and scalars replaced whole) for the requests that LLM
 instance serves. Not reloaded live: restart MOUTH after editing.
 """
@@ -67,7 +68,7 @@ def deep_merge(base, over):
 
 class Prompts:
     """One LLM instance's prompts (the base file plus its override, if any), validated."""
-    def __init__(self, data: dict, source: str = "prompts.yaml"):
+    def __init__(self, data: dict, source: str = "config/prompts.yaml"):
         self.d = data; self.source = source
         self._validate()
 
@@ -200,12 +201,12 @@ def _read(path: Path) -> dict:
 
 
 def load_prompts(cfg: dict, names) -> dict[str, Prompts]:
-    """{instance name: Prompts}: the base file (mouth.prompts, default prompts.yaml), with
-    <mouth.prompt_overrides_dir>/<name>.yaml merged over it where one exists."""
-    from app.config import repo_path
+    """{instance name: Prompts}: the base file (mouth.prompts, default config/prompts.yaml), with
+    <mouth.prompt_overrides_dir>/<name>.yaml (default config/prompts/) merged over it where one exists."""
+    from app.config import CONFIG_DIR, repo_path
     m = cfg.get("mouth") or {}
-    base_path = repo_path(m.get("prompts") or "prompts.yaml")
-    over_dir = repo_path(m.get("prompt_overrides_dir") or "prompts")
+    base_path = repo_path(m.get("prompts")) or CONFIG_DIR / "prompts.yaml"
+    over_dir = repo_path(m.get("prompt_overrides_dir")) or CONFIG_DIR / "prompts"
     base = _read(base_path)
     out = {}
     for name in names:
@@ -218,6 +219,6 @@ def load_prompts(cfg: dict, names) -> dict[str, Prompts]:
 
 
 def default_prompts() -> Prompts:
-    """The repo's prompts.yaml with no overrides (tests and tools)."""
-    from app.config import ROOT
-    return Prompts(_read(ROOT / "prompts.yaml"))
+    """The repo's config/prompts.yaml with no overrides (tests and tools)."""
+    from app.config import CONFIG_DIR
+    return Prompts(_read(CONFIG_DIR / "prompts.yaml"))

@@ -75,7 +75,7 @@ class Turn:
         return content, calls, native, None, False
 
     def speak_line(self, key, transcript):
-        """End the turn with one of MOUTH's own lines (prompts.yaml `spoken`): the apology after a failed LLM
+        """End the turn with one of MOUTH's own lines (config/prompts.yaml `spoken`): the apology after a failed LLM
         request, or the neutral line after a refusal. The user's turn stays in history."""
         line = self.m.prompts["reply"].text("spoken", key)
         yield ("text", line)
@@ -88,8 +88,8 @@ class Turn:
 
     # ---- fillers: short lines spoken over tool latency, made on a helper thread ----
     def filler(self, section, user):
-        """Speak one filler line, made on a helper thread (prompts.yaml `section`: system prompt + few-shot turns,
-        then `user`). Yields its events as this turn's reply; returns the line (None if there was none)."""
+        """Speak one filler line, made on a helper thread (config/prompts.yaml `section`: system prompt + few-shot
+        turns, then `user`). Yields its events as this turn's reply; returns the line (None if there was none)."""
         return (yield from self._relay(spawn(lambda: self._make_filler(section, user))))
 
     def _make_filler(self, section, user):
@@ -124,7 +124,8 @@ class Turn:
 
     def cover(self, finished, section, transcript, fillers):
         """Until finished(): whenever the last line has played out FILLER_GAP_S ago, one more short line from
-        prompts.yaml `section` (still_looking or expert_still), up to MAX_STILL. Appends the lines to `fillers`."""
+        config/prompts.yaml `section` (still_looking or expert_still), up to MAX_STILL. Appends the lines to
+        `fillers`."""
         n = 0
         while not finished() and not self.stop():
             if n < MAX_STILL and self.speaker.played_out_for(FILLER_GAP_S):
