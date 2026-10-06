@@ -4,7 +4,7 @@
 plugins; the endpoint head is tied to nemotron, make them one plugin"). Implemented step by step on branch
 `plugins`, one commit per step (`R-NN: …` in the subject), each checked for parity before the next.
 
-**Progress:** R-00 plan, R-01, R-02, R-03 done (2026-10-06).
+**Progress:** R-00 plan, R-01, R-02, R-03, R-04a done (2026-10-06).
 
 **Goal:** a reader can find where a thing happens from its name, and a new plugin is one package plus one registry
 line, with no edits to MOUTH, EARS's server or the web page.
@@ -36,9 +36,11 @@ app/
     reply.py               #   ReplyTurn: plain reply, tool rounds (ToolRound), escalation
     speech.py              #   speech_audio (the one path to the TTS) + Speaker (one reply's audio book-keeping)
     threads.py             #   Prefetch, spawn: streams run on helper threads
-  ears/                    # the EARS process (python -m app.ears; app.server stays as an alias for run.sh)
-    __main__.py            #   aiohttp app, routes
+  ears/                    # the EARS process (python -m app.ears; run.sh starts it)
+    __main__.py            #   the process: load the plugin, run the web app
+    web.py                 #   EarsApp: the page, the voice list, one Conversation per WebSocket (no module globals)
     conversation.py        #   Conversation: the per-WebSocket state machine as a class with named states
+    playback.py            #   AgentPlayback: the reply as the browser plays it + the 2nd ear's audio
   tools/                   # tool registry: one Tool per name (schema + handler); MOUTH-handled tools are Tools too
   plugins/
     base.py                # ABC bases (LLMPlugin, TTSPlugin, EarsPlugin) with defaults; Options dataclasses

@@ -56,6 +56,24 @@ Stack on the no-smart config:
 - `load_test_ears.py` 873 / 1071 ms at 1 / 4 conv (2 reply texts at 4: batching, as before);
 - no tracebacks in the stack log.
 
+**R-04a, the `app/ears/` package** (`python -m app.ears`; `run.sh` starts it; `app/server.py` is gone). The parts:
+- `EarsApp` (`web.py`) holds the plugin, config and voices, and its handlers are methods: it replaces four module
+  globals.
+- `Conversation` (`conversation.py`) replaces the 230-line `_conversation` closure and its 16-key `st` dict: named
+  attributes, one method per plugin event and per browser command, and a dispatch table for MOUTH's messages.
+- `AgentPlayback` (`playback.py`) holds what always changed together: `play_until`, `sent_s` and the 2nd-ear
+  buffer. It also does the 24 → 16 kHz conversion, still the old per-chunk `np.interp` (R-04b changes that).
+- The unused `bc_t0` was dropped.
+- New `test_ears_parts.py` covers AgentPlayback's arithmetic, and the page / busy page / voices / slot release over
+  a real aiohttp test server.
+
+Stack on the no-smart config:
+- smoke PASS: 200 / 207 / 275 / 179 ms;
+- `load_test_ears.py` end of speech → first audio p50 879 ms at 1 conv, and 1066 / 1056 / 1078 ms at 4 (3 runs);
+- one reply text throughout;
+- `--full-speech` at 4 conv: the endpoint fired inside the utterance 9 / 16 times (the I-13 baseline: 8 / 12; O-01);
+- no tracebacks.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

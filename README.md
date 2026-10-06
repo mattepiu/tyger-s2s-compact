@@ -128,7 +128,8 @@ the voice picker. Browser DSP (echo cancellation, noise suppression, auto gain) 
                                                 #   local plugins (GPU free: stop run.sh first)
 .venv/bin/python tests/test_mouth_parts.py      # MOUTH's History and Speaker on their own (no GPU)
 .venv/bin/python tests/test_tasks.py            # background tasks + their announcement on a fake smart model (no GPU)
-.venv/bin/python tests/test_ears_floor.py       # EARS floor requests: server.py's state machine, fake EARS (no GPU)
+.venv/bin/python tests/test_ears_floor.py       # EARS floor requests: the Conversation state machine, fake EARS (no GPU)
+.venv/bin/python tests/test_ears_parts.py      # EARS's AgentPlayback and the web app (busy page, voices) (no GPU)
 .venv/bin/python tests/test_ears_asr_jobs.py    # EARS's ASR thread resolves endpoint / partial jobs, also on failure (no GPU)
 CONFIG=config.fake.yaml ./run.sh                 # the whole stack on the fake plugins: no GPU, no downloads
 .venv/bin/python scripts/smoke_test.py          # needs run.sh up: MOUTH tool turns + barge-in + EARS speech → audio

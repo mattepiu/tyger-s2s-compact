@@ -3,7 +3,7 @@
 Per 80 ms frame of user audio: voiced if its RMS level is above `vad_db`. A turn that has at least `min_speech_ms`
 of voiced audio ends after `endpoint_silence_frames` silent frames: ENDPOINT with the fixed `transcript` from config
 (there is no ASR). While the agent speaks, `barge_frames` voiced frames in a row are a BARGE. Never backchannels.
-Events have the real plugin's shape (FRAME / ENDPOINT / BARGE), so server.py's state machine runs unchanged.
+Events have the real plugin's shape (FRAME / ENDPOINT / BARGE), so EARS's Conversation state machine runs unchanged.
 """
 from __future__ import annotations
 import numpy as np

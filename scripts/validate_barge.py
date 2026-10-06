@@ -2,7 +2,7 @@
 
 Drives EarsEngine directly, with the server's protocol: the agent speaks (speaking mode, agent channel = a public
 LibriSpeech clip), the user starts another clip 1.5 s in; when BARGE fires the session resets and switches to
-listen (server.py), and the turn runs to its ENDPOINT. The endpoint transcript is scored against the user clip's
+listen (app/ears/conversation.py), and the turn runs to its ENDPOINT. The endpoint transcript is scored against the user clip's
 reference text: word recall overall and of its first 3 words. Prints numbers only, never words.
 Needs the GPU free (stop run.sh).
 

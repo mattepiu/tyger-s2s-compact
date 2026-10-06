@@ -3,7 +3,7 @@
 #   1. MOUTH  (app.mouth): the orchestrator + BOTH models in-process on vLLM engines -- the LLM (Gemma 4 E4B,
 #      vLLM AsyncLLM) and VoxCPM2 (vLLM-Omni AsyncOmni). Chunks the reply and streams TTS audio back to EARS
 #      over TCP (:8770).
-#   2. EARS   (app.server): nemotron + endpoint head + the web app (:7860).
+#   2. EARS   (app.ears): nemotron + endpoint head + the web app (:7860).
 # MOUTH starts first so its engines claim their (pinned) GPU memory before EARS loads. See NOTES.md.
 #
 # Reach it: the web app serves on :7860 (config.yaml server.port). The mic needs a secure context, so either
@@ -49,6 +49,6 @@ wait_tcp "$MOUTH_PORT" "MOUTH" "${PIDS[-1]}"
 
 echo "=== starting EARS + web app ==="
 # expandable segments: EARS encodes windows of many lengths; without it the allocator cache fragments and grows
-PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}" "$PY" -m app.server "${CFG_ARGS[@]}" &
+PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}" "$PY" -m app.ears "${CFG_ARGS[@]}" &
 PIDS+=($!)
 wait "${PIDS[-1]}"

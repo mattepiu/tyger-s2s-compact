@@ -1,14 +1,15 @@
-"""EARS floor requests (PLUGINS.md step 13), GPU-free: server.py's conversation state machine on the `fake` EARS
-plugin (energy endpointer), a fake browser WebSocket and a fake MOUTH over real TCP. Covers: F -> silence -> G, a user
-turn winning over a waiting request, silence counted only while both sides are quiet, a backchannel holding the
-grant, barge-in during an announcement. Audio is synthetic (zeros / a tone). Run: .venv/bin/python tests/test_ears_floor.py
+"""EARS floor requests (PLUGINS.md step 13), GPU-free: the Conversation state machine (app/ears/conversation.py)
+on the `fake` EARS plugin (energy endpointer), a fake browser WebSocket and a fake MOUTH over real TCP. Covers:
+F -> silence -> G, a user turn winning over a waiting request, silence counted only while both sides are quiet, a
+backchannel holding the grant, barge-in during an announcement, a lost MOUTH. Audio is synthetic (zeros / a tone).
+Run: .venv/bin/python tests/test_ears_floor.py
 """
 import os, sys, json, asyncio, copy
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np  # noqa: E402
 from aiohttp import WSMsgType  # noqa: E402
-from app import server as S  # noqa: E402
+from app.ears.conversation import Conversation  # noqa: E402
 from app.config import load_config  # noqa: E402
 from app.plugins.ears.fake import EnergyEars  # noqa: E402
 from app.plugins.base import PluginContext  # noqa: E402
@@ -16,6 +17,8 @@ from app.wire import async_send_msg, async_recv_msg  # noqa: E402
 
 SIL_MS = 480                                   # announce_after_silence_ms here: 6 frames
 HOP = 5120
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+EARS = None                                    # the fake EARS plugin of the running test
 
 
 class Msg:
@@ -98,15 +101,15 @@ async def settle(s=0.05):
 
 
 async def setup():
-    cfg = load_config(os.path.join(S.HERE.parent, "config.fake.yaml"))
+    global EARS
+    cfg = load_config(os.path.join(ROOT, "config.fake.yaml"))
     cfg = copy.deepcopy(cfg)
     cfg["mouth"]["tasks"] = {"announce_after_silence_ms": SIL_MS}
     mouth = FakeMouth(); port = await mouth.start()
     cfg["server"]["mouth_port"] = port
-    S.CFG = cfg; S.VOICES, S.DEFAULT_VOICE = [], None
-    S.EARS = EnergyEars(cfg["ears"], PluginContext(None, cfg, "fake"))
-    ws = FakeWS(); ears = S.EARS.open()
-    conv = asyncio.create_task(S._conversation(ws, ears))
+    EARS = EnergyEars(cfg["ears"], PluginContext(None, cfg, "fake"))
+    ws = FakeWS()
+    conv = asyncio.create_task(Conversation(ws, EARS, EARS.open(), cfg).run())
     await asyncio.wait_for(mouth.connected.wait(), 2)
     return ws, mouth, conv
 
@@ -163,12 +166,12 @@ def test_silence_while_the_agent_speaks_does_not_count():
     """A plugin that reports `idle` frames while the agent talks: they still don't count as silence."""
     async def go():
         ws, mouth, conv = await setup()
-        orig = S.EARS.feed
+        orig = EARS.feed
 
         async def feed(sess, uh, ah, mode, more=False):
             evs = await orig(sess, uh, ah, mode, more)
             return [{**e, "state": "idle"} if e["kind"] == "FRAME" and mode == "speaking" else e for e in evs]
-        S.EARS.feed = feed
+        EARS.feed = feed
         ws.push(speech(3)); ws.push(silence(2)); await settle()           # a user turn -> a long reply
         assert b"T" in mouth.kinds()
         await mouth.send(b"A", np.zeros(int(24000 * 1.0), np.float32).tobytes())
@@ -187,7 +190,7 @@ def test_silence_while_the_agent_speaks_does_not_count():
 def test_backchannel_holds_the_grant():
     async def go():
         ws, mouth, conv = await setup()
-        orig = S.EARS.feed
+        orig = EARS.feed
         fired = []
 
         async def feed(sess, uh, ah, mode, more=False):         # one backchannel cue on the first hop
@@ -195,7 +198,7 @@ def test_backchannel_holds_the_grant():
             if not fired:
                 fired.append(1); evs = evs + [{"kind": "BACKCHANNEL", "bc_prob": 0.9, "partial": "so"}]
             return evs
-        S.EARS.feed = feed
+        EARS.feed = feed
         await mouth.send(b"F", {"task": 3}); await settle()
         ws.push(silence(3)); await settle()
         assert b"C" in mouth.kinds() and b"G" not in mouth.kinds()   # the ack is still out
