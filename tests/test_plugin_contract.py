@@ -158,10 +158,17 @@ def test_tts_local():
 def ears_suite(ears, speech):
     """speech: 16 kHz float32 with silence after it. Fed hop by hop, it must yield an ENDPOINT."""
     th = ears.thresholds(s := ears.open())
-    assert s is not None and ears.active() == 1 and set(th) >= {"ep_thr", "ep_deb", "barge_thr", "fallback_frames"}
-    assert ears.set_threshold(s, "ep_deb", "3") == 3
-    ears.set_threshold(s, "ep_deb", th["ep_deb"])
-    for bad in (("nope", 1), ("ep_thr", "x")):
+    assert s is not None and ears.active() == 1
+    names = [t.name for t in ears.THRESHOLDS]                 # the plugin's own thresholds, whatever they're called
+    assert names and len(set(names)) == len(names) and set(th) == set(names), (names, sorted(th))
+    for t in ears.THRESHOLDS:
+        assert t.type in (int, float) and isinstance(th[t.name], t.type), t.name
+        assert ears.set_threshold(s, t.name, str(th[t.name])) == th[t.name]     # as the page sends it: text
+        if t.slider is not None:
+            sl = t.slider
+            assert sl.lo < sl.hi and sl.step > 0 and sl.meter in (None, "p_end", "yield", "bc"), t.name
+            assert sl.off is None or sl.off > sl.hi / sl.scale, t.name               # "off" is outside the range
+    for bad in (("nope", 1), (names[0], "x")):
         try:
             ears.set_threshold(s, *bad)
         except (KeyError, ValueError):

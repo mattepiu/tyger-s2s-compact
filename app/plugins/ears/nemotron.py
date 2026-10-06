@@ -4,21 +4,33 @@ turn-taking heads (exp-12 arm C: LoRA + state / hazard / yield / backchannel / e
 one batched step per 320 ms hop for every conversation with a hop ready.
 
 Per hop, feed() returns FRAME / ENDPOINT / BARGE / BACKCHANNEL events. A session is an EarsSession: reset() starts
-a new turn (applied before its next hop); its thresholds are per conversation (the ?debug=1 sliders).
+a new turn (applied before its next hop); its thresholds are per conversation (the page's live-tuning sliders).
 """
 from __future__ import annotations
 import logging
 
+from app.ears_core.labeling import FRAME_S                  # one decision frame: the fallback slider's unit
+from app.plugins.base import Slider, Threshold, find_threshold
+
 log = logging.getLogger("ears")
 
-# per-conversation thresholds: name -> (type, config key)
-THRESHOLDS = {"ep_thr": (float, "ep_thr"), "ep_deb": (int, "ep_deb"), "barge_thr": (float, "barge_thr"),
-              "barge_deb": (int, "barge_deb"), "bc_thr": (float, "bc_thr"), "bc_deb": (int, "bc_deb"),
-              "fallback_frames": (int, "fallback_sil_frames")}
+# per-conversation thresholds; defaults from the `ears:` config block
+THRESHOLDS = (
+    Threshold("ep_thr", float, slider=Slider("endpoint p_end τ", 0.30, 0.99, 0.005, decimals=3, meter="p_end")),
+    Threshold("ep_deb", int, slider=Slider("endpoint deb", 1, 5, 1, decimals=0)),
+    Threshold("barge_thr", float, slider=Slider("barge (yield)", 0.20, 1.00, 0.01, meter="yield")),
+    Threshold("barge_deb", int),
+    Threshold("bc_thr", float, slider=Slider("backchannel", 0.20, 1.00, 0.01, meter="bc")),
+    Threshold("bc_deb", int),
+    Threshold("fallback_frames", int, config_key="fallback_sil_frames", default=15,
+              slider=Slider("silence fallback", 0.4, 2.5, 0.1, decimals=1, scale=FRAME_S, unit="s", off=100000)),
+)
 _ATTR = {"fallback_frames": "FALLBACK_SIL_FRAMES"}           # EarsSession's attribute name, where it differs
 
 
 class NemotronTyger:
+    THRESHOLDS = THRESHOLDS
+
     def __init__(self, conf: dict, ctx):
         import torch
         from app import weights
@@ -27,8 +39,7 @@ class NemotronTyger:
         torch.set_num_threads(int(conf.get("cpu_threads", 4)))   # default 48 threads mostly spin-wait
         self.sr = ENC_SR
         self.hop_samples = HOP_N                                 # 320 ms @ 16 kHz = 5120
-        conf = {"fallback_sil_frames": 15, **conf}
-        self.defaults = {k: typ(conf[key]) for k, (typ, key) in THRESHOLDS.items()}
+        self.defaults = {t.name: t.from_config(conf) for t in THRESHOLDS}
         heads = weights.ensure_heads(conf["heads_repo"], conf["heads_file"])
         self.slots = int(ctx.cfg["server"].get("max_sessions", 4))
         model_id = conf.get("nemotron") or MODEL_ID
@@ -56,11 +67,11 @@ class NemotronTyger:
         return self.service.active()
 
     def thresholds(self, session) -> dict:
-        return {k: getattr(session, _ATTR.get(k, k)) for k in THRESHOLDS}
+        return {t.name: getattr(session, _ATTR.get(t.name, t.name)) for t in THRESHOLDS}
 
     def set_threshold(self, session, name, value):
         """Set one of THRESHOLDS for this conversation; returns the value now in effect. KeyError for an unknown
         name, ValueError for a bad value."""
-        typ = THRESHOLDS[name][0]
-        setattr(session, _ATTR.get(name, name), typ(value))
-        return getattr(session, _ATTR.get(name, name))
+        v = find_threshold(THRESHOLDS, name).parse(value)
+        setattr(session, _ATTR.get(name, name), v)
+        return v

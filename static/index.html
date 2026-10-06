@@ -76,11 +76,7 @@
     </div>
     <div class="tune" id="tune" hidden>
       <h2>thresholds &mdash; live tuning (?nodebug to hide) &middot; orange line = current</h2>
-      <div class="trow"><span>endpoint p_end &tau;</span><input type="range" id="s_ep_thr" min="0.30" max="0.99" step="0.005"><span class="tval" id="v_ep_thr">&mdash;</span></div>
-      <div class="trow"><span>endpoint deb</span><input type="range" id="s_ep_deb" min="1" max="5" step="1"><span class="tval" id="v_ep_deb">&mdash;</span></div>
-      <div class="trow"><span>barge (yield)</span><input type="range" id="s_barge_thr" min="0.20" max="1.00" step="0.01"><span class="tval" id="v_barge_thr">&mdash;</span></div>
-      <div class="trow"><span>backchannel</span><input type="range" id="s_bc_thr" min="0.20" max="1.00" step="0.01"><span class="tval" id="v_bc_thr">&mdash;</span></div>
-      <div class="trow"><span><label><input type="checkbox" id="c_fallback"> silence fallback</label></span><input type="range" id="s_fallback" min="0.4" max="2.5" step="0.1"><span class="tval" id="v_fallback">&mdash;</span></div>
+      <div id="trows"><div class="empty">Start a conversation to tune this turn-taking model's thresholds.</div></div>
     </div>
     <div class="barge-banner" id="barge">&perp; BARGE &mdash; user took the floor</div>
   </div>
@@ -98,29 +94,36 @@ function setStatus(t,on){ $('status').textContent=t; $('dot').classList.toggle('
 function setState(s){ const p=$('pill'); p.className='state-pill state-'+s; $('stateTxt').textContent=s; }
 function bar(id,v){ $(id).style.width=(Math.max(0,Math.min(1,v))*100).toFixed(1)+'%'; }
 
-// live tuning (debug only)
-const THR = {ep_thr:['epthr','s_ep_thr','v_ep_thr',0.30,0.99],
-             barge_thr:['ythr','s_barge_thr','v_barge_thr',0.2,1.0],
-             bc_thr:['bcthr','s_bc_thr','v_bc_thr',0.2,1.0]};
-const DEC3 = a => (a==='ep_thr');
-function placeMarker(mk,val,lo,hi){ $(mk).style.left=(Math.max(0,Math.min(1,(val-lo)/(hi-lo)))*100).toFixed(1)+'%'; }
-function setThresholdUI(attr,val){ if(!THR[attr])return; const [mk,sl,vl,lo,hi]=THR[attr];
-  if($(sl)) $(sl).value=val; if($(vl)) $(vl).textContent=(+val).toFixed(DEC3(attr)?3:2); placeMarker(mk,val,lo,hi); }
-function wireSliders(){
-  for(const attr in THR){ const [mk,sl,vl,lo,hi]=THR[attr];
-    if(!$(sl))continue;
-    $(sl).oninput=()=>{ const v=+$(sl).value; $(vl).textContent=v.toFixed(DEC3(attr)?3:2); placeMarker(mk,v,lo,hi);
-      if(ws&&ws.readyState===1) ws.send('set:'+attr+':'+v); }; }
+// Live tuning. The EARS plugin declares its tunable thresholds: `ready` carries their sliders (label, range,
+// step, display scale / unit, the meter they mark, an optional "off" value behind a checkbox) and this
+// conversation's values. One row per slider; a change is sent as set:<name>:<value> and echoed back.
+const MARKS = {p_end:'epthr', yield:'ythr', bc:'bcthr'};       // the meters' threshold marks (0..1)
+let SLIDERS = {};
+const isOff = (s,v) => s.off!=null && v>=s.off;
+function showValue(s,v){ $('v_'+s.name).textContent = isOff(s,v) ? 'off' : (v*s.scale).toFixed(s.decimals)+s.unit;
+  if(s.meter && MARKS[s.meter]) $(MARKS[s.meter]).style.left=(Math.max(0,Math.min(1,v))*100).toFixed(1)+'%'; }
+function sliderValue(s){ if(s.off!=null && !$('c_'+s.name).checked) return s.off;
+  const v=+$('s_'+s.name).value/s.scale; return s.type==='int' ? Math.round(v) : v; }
+function sendThreshold(s){ const v=sliderValue(s); showValue(s,v);
+  if(ws&&ws.readyState===1) ws.send('set:'+s.name+':'+v); }
+function setThresholdUI(name,v){ const s=SLIDERS[name]; if(!s) return;
+  if(s.off!=null) $('c_'+name).checked=!isOff(s,v);
+  if(!isOff(s,v)) $('s_'+name).value=v*s.scale;
+  showValue(s,v); }
+function buildTuning(sliders, values){
+  const box=$('trows'); box.innerHTML=''; SLIDERS={};
+  for(const s of sliders||[]){ SLIDERS[s.name]=s;
+    const label = s.off!=null ? `<label><input type="checkbox" id="c_${s.name}"> ${escapeHtml(s.label)}</label>` : escapeHtml(s.label);
+    const row=document.createElement('div'); row.className='trow';
+    row.innerHTML=`<span>${label}</span><input type="range" id="s_${s.name}" min="${s.lo}" max="${s.hi}" step="${s.step}">`+
+                  `<span class="tval" id="v_${s.name}">&mdash;</span>`;
+    box.appendChild(row);
+    $('s_'+s.name).oninput=()=>{ if(s.off!=null && !$('c_'+s.name).checked) showValue(s,s.off); else sendThreshold(s); };
+    if(s.off!=null) $('c_'+s.name).onchange=()=>sendThreshold(s);
+    if(values && s.name in values) setThresholdUI(s.name, values[s.name]);
+  }
 }
-const FPS=12.5, OFF_FRAMES=100000;
-function fbDisplay(){ $('v_fallback').textContent = $('c_fallback').checked ? (+$('s_fallback').value).toFixed(1)+'s':'off'; }
-function sendFallback(){ const on=$('c_fallback').checked, s=+$('s_fallback').value; fbDisplay();
-  if(ws&&ws.readyState===1) ws.send('set:fallback_frames:'+(on?Math.round(s*FPS):OFF_FRAMES)); }
-function setFallbackUI(fr){ const on=fr<1000; $('c_fallback').checked=on; $('s_fallback').value=on?(fr/FPS).toFixed(1):1.2; fbDisplay(); }
-if(DEBUG){ $('tune').hidden=false; wireSliders();
-  $('c_fallback').onchange=sendFallback; $('s_fallback').oninput=()=>{ fbDisplay(); if($('c_fallback').checked) sendFallback(); };
-  $('s_ep_deb').oninput=()=>{ const v=+$('s_ep_deb').value; $('v_ep_deb').textContent=v; if(ws&&ws.readyState===1) ws.send('set:ep_deb:'+v); };
-}
+if(DEBUG){ $('tune').hidden=false; }
 function applyVoice(){ const v=$('voice').value; try{localStorage.setItem('tyger_voice',v);}catch(e){}
   if(ws&&ws.readyState===1) ws.send('voice:'+v); }
 $('voice').onchange=applyVoice;
@@ -181,14 +184,12 @@ function onEvent(ev){
     // against EARS's config default (m.voice) could leave it on a stale voice while the picker shows another
     if(m.voices && m.voices.length && DEBUG){ populateVoices(m.voices, m.voice);
       if($('voice').value) applyVoice(); }
-    if(m.thresholds){ for(const a in THR){ if(a in m.thresholds && m.thresholds[a]!=null) setThresholdUI(a,m.thresholds[a]); }
-      if(DEBUG){ if(m.thresholds.ep_deb!=null){ $('s_ep_deb').value=m.thresholds.ep_deb; $('v_ep_deb').textContent=m.thresholds.ep_deb; }
-                 if('fallback_frames' in m.thresholds) setFallbackUI(m.thresholds.fallback_frames); } } }
+    buildTuning(m.sliders, m.thresholds); }   // built even when hidden (?nodebug): the meters' marks still show
   else if(m.type==='state'){ setState(m.state);
     bar('pefill',m.p_end||0); $('peval').textContent=(m.p_end||0).toFixed(2);
     bar('yfill',m.yield||0); $('yval').textContent=(m.yield||0).toFixed(2);
     bar('bcfill',m.bc||0); $('bcval').textContent=(m.bc||0).toFixed(2); }
-  else if(m.type==='threshold'){ setThresholdUI(m.attr,m.value); if(m.attr==='ep_deb'&&$('v_ep_deb')) $('v_ep_deb').textContent=m.value; }
+  else if(m.type==='threshold'){ setThresholdUI(m.attr,m.value); }
   else if(m.type==='endpoint'){ stopPlayback(); replyDiv=null; }  // never let a new reply overlap an old one
   else if(m.type==='reply'){ setState('SPEAK'); showReply(m.text); }
   else if(m.type==='turn_done'){ setState('idle'); replyDiv=null; taskTag=''; }

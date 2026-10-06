@@ -78,6 +78,8 @@ def test_page_busy_page_and_voices():
             ws1 = await client.ws_connect("/ws")
             ready = await ws1.receive_json()
             assert ready["type"] == "ready" and ready["mouth"] is False and ready["hop_ms"] == 320
+            assert [x["name"] for x in ready["sliders"]] == ["endpoint_silence_frames"]   # the plugin's own spec
+            assert ready["thresholds"] == {"endpoint_silence_frames": 6}
             assert (await client.get("/")).status == 503                    # the one slot is taken
             ws2 = await client.ws_connect("/ws")
             assert (await ws2.receive_json()) == {"type": "busy"}

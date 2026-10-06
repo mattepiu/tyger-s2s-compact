@@ -4,16 +4,21 @@ Per 80 ms frame of user audio: voiced if its RMS level is above `vad_db`. A turn
 of voiced audio ends after `endpoint_silence_frames` silent frames: ENDPOINT with the fixed `transcript` from config
 (there is no ASR). While the agent speaks, `barge_frames` voiced frames in a row are a BARGE. Never backchannels.
 Events have the real plugin's shape (FRAME / ENDPOINT / BARGE), so EARS's Conversation state machine runs unchanged.
+Its one tunable threshold is the endpoint silence.
 """
 from __future__ import annotations
 import numpy as np
+
+from app.plugins.base import Slider, Threshold, find_threshold
 
 SR = 16000
 FRAME_N = 1280                         # 80 ms
 HOP_N = 4 * FRAME_N                    # 320 ms, as nemotron-tyger-1.0
 
-THRESHOLDS = {"ep_thr": float, "ep_deb": int, "barge_thr": float, "barge_deb": int, "bc_thr": float, "bc_deb": int,
-              "fallback_frames": int}
+THRESHOLDS = (
+    Threshold("endpoint_silence_frames", int, default=6,
+              slider=Slider("endpoint silence", 0.16, 2.0, 0.08, scale=FRAME_N / SR, unit="s")),
+)
 
 
 class FakeEarsSession:
@@ -31,18 +36,15 @@ class FakeEarsSession:
 class EnergyEars:
     hop_samples = HOP_N
     sr = SR
+    THRESHOLDS = THRESHOLDS
 
     def __init__(self, conf: dict, ctx):
         self.transcript = str(conf.get("transcript", "hello there"))
         self.vad_db = float(conf.get("vad_db", -45.0))
         self.min_speech_ms = float(conf.get("min_speech_ms", 350.0))
-        self.silence_frames = int(conf.get("endpoint_silence_frames", 6))
         self.barge_frames = int(conf.get("barge_frames", 4))
         self.slots = int(ctx.cfg["server"].get("max_sessions", 4)) if ctx else 4
-        self.defaults = {"ep_thr": float(conf.get("ep_thr", 0.5)), "ep_deb": int(conf.get("ep_deb", 2)),
-                         "barge_thr": float(conf.get("barge_thr", 0.5)), "barge_deb": int(conf.get("barge_deb", 2)),
-                         "bc_thr": float(conf.get("bc_thr", 0.5)), "bc_deb": int(conf.get("bc_deb", 2)),
-                         "fallback_frames": int(conf.get("fallback_sil_frames", self.silence_frames))}
+        self.defaults = {t.name: t.from_config(conf) for t in THRESHOLDS}
         self.free = list(range(self.slots)); self.sessions = set()
 
     def open(self, **thresholds):
@@ -65,7 +67,7 @@ class EnergyEars:
         return dict(session.th)
 
     def set_threshold(self, session, name, value):
-        session.th[name] = THRESHOLDS[name](value)
+        session.th[name] = find_threshold(THRESHOLDS, name).parse(value)
         return session.th[name]
 
     async def feed(self, session, user_hop, agent_hop, mode, more=False):
@@ -86,12 +88,12 @@ class EnergyEars:
                 s.sil_run += 1
             if s.in_turn:
                 s.turn_s += 0.08
-            if s.in_turn and s.voiced_ms >= self.min_speech_ms and s.sil_run >= s.th["fallback_frames"]:
+            if s.in_turn and s.voiced_ms >= self.min_speech_ms and s.sil_run >= s.th["endpoint_silence_frames"]:
                 events.append(dict(kind="ENDPOINT", transcript=self.transcript, turn_s=round(s.turn_s, 2),
                                    segments=0, by="energy", p_end=1.0))
                 s._clear()
                 events.append(dict(kind="FRAME", state="idle", yield_prob=0.0, hazard=0.0, bc_prob=0.0, p_end=1.0))
                 continue
             events.append(dict(kind="FRAME", state="LISTEN" if s.in_turn or voiced else "idle", yield_prob=0.0, hazard=0.0, bc_prob=0.0,
-                               p_end=round(min(1.0, s.sil_run / max(1, s.th["fallback_frames"])), 3)))
+                               p_end=round(min(1.0, s.sil_run / max(1, s.th["endpoint_silence_frames"])), 3)))
         return events

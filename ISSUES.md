@@ -25,7 +25,7 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | I-12 | MOUTH | high | **fixed** | Tool calls never enter history, so later turns stop calling tools and invent answers |
 | I-13 | metrics | medium | **fixed** | `load_test_ears.py` runs don't compare: LLM-made speech and replies, random hop phase |
 | I-14 | ops | low | confirmed on the box | `run.sh` giving up on a slow first start orphans the LLM engine on the GPU |
-| I-15 | tests | low | confirmed on the box | Local contract test aborts at exit after VoxCPM2 + EARS ran in one process |
+| I-15 | tests | low | confirmed on the box | Local contract test aborts at exit after the EARS engine ran in the process |
 | L-01 | perf | lever | **partly done** | Encoder re-encodes the full 8 s window, twice, every hop, in fp32 |
 | L-02 | latency | lever | — | Decisions quantised to 320 ms hops |
 | L-03 | latency | lever | **done** | Per-request voice encode (precomputed voice profile) |
@@ -252,7 +252,7 @@ group by hand. The next start would have failed vLLM's free-memory check.
 `run.sh` leads its own group), the way `stop.sh` does; raise or drop the timeout while MOUTH is still alive (its
 log shows progress), since `wait_tcp` already fails fast when MOUTH exits.
 
-### I-15 — Local contract test aborts at exit after VoxCPM2 + EARS ran in one process (low, confirmed on the box)
+### I-15 — Local contract test aborts at exit after the EARS engine ran in the process (low, confirmed on the box)
 **Where:** `TYGER_CONTRACT_LOCAL=1 tests/test_plugin_contract.py`, at interpreter exit.
 
 **What happens (box of 2026-10-06):** every check passes (`ok` for all six suites), then the process prints
@@ -261,6 +261,11 @@ a failure. Isolated: `test_tts_local` alone, `test_ears_local` alone and `test_l
 `test_tts_local` then `test_ears_local` in one process aborts. So it is VoxCPM2 (vLLM-Omni stage pool) and EARS
 (nemotron + head CUDA graphs) torn down together, not the LLM plugins: a native thread still joinable when the
 interpreter exits. The served stack runs them in separate processes and is not affected.
+
+**Update (2026-10-06, R-05):** it is the EARS engine alone. `test_ears_local` by itself aborts at exit 4 / 4
+times, on the code before R-01 too (the one clean run above was luck). The likely cause is EarsEngine's two daemon
+threads (`ears-gpu`, `ears-asr`), with CUDA streams and graphs, still alive when the interpreter tears down.
+VoxCPM2 is not involved.
 
 **Fix options:** find the thread. VoxCPM2 is already shut down before EARS loads (the stage pool logs it), so
 look at what that shutdown leaves running in-process (no ptrace in this container, so no gdb / py-spy; try

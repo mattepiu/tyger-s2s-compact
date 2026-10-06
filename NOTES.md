@@ -105,6 +105,31 @@ Stack (no-smart config):
 New test: `test_second_ear_does_not_depend_on_chunk_edges` (the same audio cut differently gives the same ear; it
 fails on the old code).
 
+**R-05, plugin-owned thresholds.**
+- An EARS plugin declares `THRESHOLDS`: `Threshold(name, type, config_key, default, slider)` with an optional
+  `Slider` (label, range, step, decimals, display scale and unit, the meter it marks, an "off" value behind a
+  checkbox), in `app/plugins/base.py`.
+- `Conversation` sends the plugin's values and slider specs in `ready`, and the page builds its tuning rows from
+  them. EARS's server and the page no longer know any plugin's threshold names.
+- nemotron-tyger keeps its thresholds exactly as they were (the user's ask): the same five sliders, ranges, steps,
+  labels and config defaults, with fallback shown in seconds (frames × 0.08) and "off" = 100000.
+  `test_nemotron_tyger_sliders_unchanged` guards that.
+- The fake plugin drops its six unused dummy thresholds and declares the one it has (`endpoint_silence_frames`).
+- The contract suite checks every plugin against its own spec, not against nemotron's names.
+
+One display fix on the page: the orange threshold mark sat at the value's position inside the slider's range
+(`(v − lo) / (hi − lo)`), but the meters show 0..1. So τ = 0.9146 was drawn at 89%, and barge / bc 0.5 at 37.5%. The
+mark now sits at the value itself (91.5% / 50%).
+
+Checked:
+- the page logic in jsdom with nemotron's real spec (12 checks: decimals, frames ↔ seconds, off / on, preview-only
+  while off, echoes);
+- live, a WebSocket client read `ready` (the config values unchanged) and got the echoes for `set:` commands, with
+  unknown names and bad values ignored as before;
+- smoke PASS; `load_test_ears.py` 880 / 1089 ms at 1 / 4 conv.
+
+I-15 corrected: the EARS engine alone aborts at exit (4 / 4 runs, on the code before R-01 too), not VoxCPM2 + EARS.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

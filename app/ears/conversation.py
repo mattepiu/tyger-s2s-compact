@@ -86,12 +86,12 @@ class Conversation:
             log.warning("no MOUTH: %s", e)
 
     def _ready_message(self):
-        th = self.ears.thresholds(self.session)
+        """The page's start-up info: audio format, MOUTH there or not, voices, and the plugin's tunable thresholds
+        (their sliders and this conversation's values: the page builds its tuning panel from them)."""
         return {"type": "ready", "hop_ms": int(self.hop_n / self.ears.sr * 1e3), "sr": self.ears.sr,
                 "mouth": self.have_mouth, "voices": self.voices, "voice": self.default_voice,
-                "thresholds": {"barge_thr": th["barge_thr"], "bc_thr": th["bc_thr"],
-                               "ep_thr": th["ep_thr"], "ep_deb": th["ep_deb"],
-                               "endpoint": "ep", "fallback_frames": th["fallback_frames"]}}
+                "thresholds": self.ears.thresholds(self.session),
+                "sliders": [t.slider_spec() for t in self.ears.THRESHOLDS if t.slider is not None]}
 
     # ---- the browser ----
     async def _on_browser(self, msg):
