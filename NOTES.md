@@ -257,6 +257,36 @@ plugin.
 The local plugins (gemma, fake) still don't check arguments: `execute_tool` catches a TypeError. Checking every
 plugin's calls in one place belongs in R-08's tool registry.
 
+**R-08, the tool registry** (`app/tools/`, was `app/tools.py`). One `Tool` per name, registered where it is
+implemented, in the order the models see them:
+- `lookups.py`: get_weather, web_search, get_current_time;
+- `stubs.py`: set_reminder, send_message;
+- `agent.py`: the tools MOUTH answers itself, i.e. ask_expert, start_task, cancel_task, and finish_task, which the
+  task loop reads.
+
+A lookup or action registers `fn(**arguments)` with `@tool`, and `execute_tool` runs it as before. MOUTH's own
+tools register `handle(arguments, ctx)` with `@agent_tool`. A `ToolContext` carries the prompts, transcript,
+language, task runner and the escalation flag. A handler returns None where its feature is off, and the call is
+then an unknown tool, as before. `run_call` / `run_round` replace the name switch in `ReplyTurn.run_calls` (now 3
+lines) and the executor branch in the task loop. The task loop still ends on finish_task by name: that is its
+control flow, not a dispatch. The schemas sit next to the code; `build_tools` and the prompts.yaml checks read the
+registry.
+
+Behaviour unchanged:
+- `build_tools` output is byte-identical to the old module's for all 8 flag combinations;
+- `execute_tool` gives identical results.
+
+Tests: new `tests/test_tools.py` (7) covers order and groups, flagged calls, the expert and task tools on and off,
+errors, and adding a tool by one registration. `stub_tools` now patches `execute_tool` where it lives
+(`app.tools.registry`).
+
+Checks:
+- the GPU-free suite passes;
+- stack (no-smart config): smoke PASS; `load_test.py --tools --fresh` turn p50 382 ms, 0 errors (before: 381);
+  plain p50 420 ms.
+
+Per the user, there is still no argument check for local plugins' calls.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

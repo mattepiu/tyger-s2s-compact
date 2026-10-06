@@ -10,7 +10,7 @@ plugin; the startup log says which roles are remote. Bodies are never logged; AN
     at low; the model's default is medium). Thinking blocks stream with empty text by default and are never
     spoken: they only show up as time before the first text. `max_tokens` covers thinking + text, so it comes from
     config per role, not from MOUTH's max_new. No temperature / top_p / top_k (rejected); tool_choice stays auto.
-  * Tools: {name, description, input_schema, eager_input_streaming: true}, in the fixed order of app/tools.py.
+  * Tools: {name, description, input_schema, eager_input_streaming: true}, in the fixed order of app/tools/.
     With eager streaming the server doesn't validate inputs, so every input is checked against its schema here
     (_toolparse.check_arguments, as in openai); a bad one comes back with "error" set and MOUTH never runs it.
     stop_reason max_tokens: no call is run.

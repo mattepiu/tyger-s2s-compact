@@ -5,7 +5,7 @@ Neutral formats, owned by MOUTH:
     call {"role": "assistant", "content": str | None, "tool_calls": [{"id", "name", "arguments": dict}],
     "native": opaque (optional, written and read by the same plugin)}; a tool result {"role": "tool",
     "tool_call_id", "content": str}. Tool-call IDs come from the plugin and are unique for the session.
-  * tools: the OpenAI function schema of app/tools.py; plugins convert it.
+  * tools: the OpenAI function schemas of app/tools/ (build_tools); plugins convert it.
   * LLM events, yielded by LLMPlugin.stream:
       ("text", delta)                               speakable text, never tool-call or thinking markup
       ("tool_start", {"name": str | None})          the model committed to a tool call (MOUTH starts the filler)

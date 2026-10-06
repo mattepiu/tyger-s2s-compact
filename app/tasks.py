@@ -178,8 +178,7 @@ class TaskRunner:
                 limit = rnd >= self.max_steps
                 log.info("task #%d round %d: %s", task.id, task.steps, [c["name"] for c in calls])
                 results = [{"error": p.text("tasks", "limit")} if limit or c["name"] == FINISH else
-                           {"error": c["error"]} if c.get("error") else
-                           tools.execute_tool(c["name"], c.get("arguments", {})) for c in calls]
+                           tools.run_call(c, tools.ToolContext(prompts=p)) for c in calls]
                 msgs = msgs + round_messages(text, calls, native, results,
                                                note=None if limit else p.result_note(task.lang_text))
             return self._end(task, "failed", why="max_steps")

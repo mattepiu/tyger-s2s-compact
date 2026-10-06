@@ -19,7 +19,7 @@ from app.messages import reply_prefix, with_status, smart_messages, round_messag
 from app.mouth.threads import Prefetch
 from app.mouth.turns import Turn
 from app.plugins.base import LLMError
-from app.tools import EXPERT, START, CANCEL
+from app.tools import EXPERT
 
 log = logging.getLogger("mouth")
 
@@ -151,34 +151,11 @@ class ReplyTurn(Turn):
                                                            stop_flag=self.stop), self.stop)
 
     def run_calls(self, calls, expert=False, transcript=""):
-        """Run one round of tool calls at once; results in call order. A call the plugin flagged (bad arguments)
-        is never run; with `expert`, ask_expert isn't run either: the smart model answers it. start_task /
-        cancel_task go to this conversation's task runner."""
-        results = [None] * len(calls)
-        p = self.m.prompts["reply"]
-        tasks = self.session.tasks
-
-        def run(i, c):
-            args = c.get("arguments") or {}
-            if c.get("error"):
-                results[i] = {"error": c["error"]}
-            elif expert and c["name"] == EXPERT:
-                results[i] = {"result": p.text("escalation", "tool_result")}
-            elif tasks is not None and c["name"] == START:
-                results[i] = tasks.start(args.get("goal"), transcript, self.lang)
-            elif tasks is not None and c["name"] == CANCEL:
-                try:
-                    results[i] = tasks.cancel(int(args.get("task_id")))
-                except (TypeError, ValueError):
-                    results[i] = {"error": p.text("tasks", "unknown_task")}
-            else:
-                results[i] = tools.execute_tool(c["name"], c.get("arguments", {}))
-        workers = [threading.Thread(target=run, args=(i, c), daemon=True) for i, c in enumerate(calls)]
-        for w in workers:
-            w.start()
-        for w in workers:
-            w.join()
-        return results
+        """Run one round of tool calls at once; results in call order (app/tools). With `expert`, ask_expert gets a
+        note (the smart model answers the turn); start_task / cancel_task go to this conversation's task runner."""
+        ctx = tools.ToolContext(prompts=self.m.prompts["reply"], transcript=transcript, lang=self.lang,
+                                tasks=self.session.tasks, expert=expert)
+        return tools.run_round(calls, ctx)
 
     # ---- escalation: the smart model answers, with its own tool rounds ----
     def _expert_answer(self, rnd, fillers):

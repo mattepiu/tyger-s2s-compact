@@ -6,7 +6,7 @@ from contextlib import contextmanager
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app import mouth as M  # noqa: E402
-from app import tools as T  # noqa: E402
+from app.tools import registry as T  # noqa: E402
 from app.prompts import default_prompts  # noqa: E402
 from app.tools import build_tools  # noqa: E402
 from app.plugins.llm.fake import FakeLLM, wait_or_stop  # noqa: E402,F401
@@ -18,7 +18,8 @@ PROMPTS = default_prompts()     # the repo's prompts.yaml; FakeLLM routes reques
 
 @contextmanager
 def stub_tools(fn):
-    """Every tool call (MOUTH's and background tasks') goes to fn(name, args) instead of the real executors."""
+    """Every tool run for real (MOUTH's and background tasks') goes to fn(name, args) instead (execute_tool, patched
+    where it lives: app/tools/registry.py)."""
     orig = T.execute_tool
     T.execute_tool = fn
     try:

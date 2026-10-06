@@ -81,7 +81,7 @@ class Prompts:
         return node.get(key) if isinstance(node, dict) else None
 
     def _validate(self):
-        from app.tools import ALL_SCHEMAS
+        from app.tools import CANCEL, START, TOOLS, names
         if self.d.get("version") != 1:
             self._fail("version", "must be 1")
         for sec, key in TEXTS:
@@ -110,18 +110,16 @@ class Prompts:
                  set(t) == {"user", "expert", "answer"} and isinstance(t["expert"], str) and isinstance(t["answer"], str))
                 for t in shots):
             self._fail("escalation.shots", "must be a list of {user, reply} or {user, expert, answer} turns (text)")
-        from app.tools import TOOL_SCHEMAS as _TS
-        names = {t["function"]["name"] for t in _TS}
+        lookups = set(names("base"))
         ts = self.d.get("reply_shots")
         if not isinstance(ts, list) or not all(
                 isinstance(t, dict) and isinstance(t.get("user"), str) and (
                     set(t) == {"user", "reply"} and isinstance(t["reply"], str) or
                     set(t) == {"user", "call", "result", "answer"} and isinstance(t["answer"], str)
-                    and isinstance(t["call"], dict) and t["call"].get("name") in names
+                    and isinstance(t["call"], dict) and t["call"].get("name") in lookups
                     and isinstance(t["call"].get("arguments"), dict)) for t in ts):
             self._fail("reply_shots", "must be a list of {user, reply} or {user, call: {name, arguments}, result, "
-                                      "answer} turns (calls to tools of app/tools.py)")
-        from app.tools import START, CANCEL
+                                      "answer} turns (calls to the lookup / action tools of app/tools/)")
         ts = self._get("tasks", "shots")
         if not isinstance(ts, list) or not all(
                 isinstance(t, dict) and isinstance(t.get("user"), str) and (
@@ -137,8 +135,8 @@ class Prompts:
         tools = self.d.get("tools")
         if not isinstance(tools, dict):
             self._fail("tools", "is missing")
-        names = {t["function"]["name"]: t["function"]["parameters"]["properties"] for t in ALL_SCHEMAS}
-        for name, props in names.items():
+        props_of = {n: t.parameters["properties"] for n, t in TOOLS.items()}
+        for name, props in props_of.items():
             entry = tools.get(name)
             if not isinstance(entry, dict) or not isinstance(entry.get("description"), str):
                 self._fail(f"tools.{name}.description", "is missing")
@@ -146,8 +144,8 @@ class Prompts:
                 if p not in props or not isinstance(desc, str):
                     self._fail(f"tools.{name}.params.{p}", "is not a text description of a parameter of the tool")
         for name in tools:
-            if name not in names:
-                self._fail(f"tools.{name}", "is not a tool in app/tools.py")
+            if name not in props_of:
+                self._fail(f"tools.{name}", "is not a tool in app/tools/")
 
     def text(self, section, key) -> str:
         return self.d[section][key]

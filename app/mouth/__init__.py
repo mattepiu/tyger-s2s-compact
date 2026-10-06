@@ -15,7 +15,7 @@ Architecture:
     acks) on its own thread, and within a Session turns and backchannels run on separate workers, each as
     their own engine requests (vLLM batches them; llm.max_num_seqs, deploy/voxcpm2.yaml max_num_seqs).
   * Barge-in (B on the wire) stops the session's current turn; its live LLM/TTS request is aborted.
-  * reminder/message tools return a "not connected" demo marker (tools.py) and the model says so.
+  * reminder/message tools return a "not connected" demo marker (app/tools/stubs.py) and the model says so.
   * Escalation (only with an `llm.smart` block): the reply model gets the ask_expert tool. Its lead-in fits the
     tool (the plugins name it at tool_start), the smart request starts as soon as the call parses, and the smart
     model's answer streams straight to the TTS (its own lookups covered by still-looking lines). Only escalated

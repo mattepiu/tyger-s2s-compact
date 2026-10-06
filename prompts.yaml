@@ -317,7 +317,7 @@ warmup:
 spoken:
   error: Sorry, I couldn't get an answer just now. Could you say that again?
   refusal: Sorry, I can't help with that one.
-# tool and parameter descriptions; the schemas (names, types, required) stay in app/tools.py
+# tool and parameter descriptions; the schemas (names, types, required) live with each tool in app/tools/
 tools:
   get_weather:
     description: "Get the current weather or the forecast for a location."
