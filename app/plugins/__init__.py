@@ -4,16 +4,8 @@ from __future__ import annotations
 import importlib
 
 REGISTRY = {
-    "llm": {"qwen3-4b-2507": "app.plugins.llm.qwen3_2507:Qwen3Instruct2507",
-            "qwen3.5-4b": "app.plugins.llm.qwen35:Qwen35",
-            "gemma-4-e4b": "app.plugins.llm.gemma4:Gemma4E4B",
-            "gemma-4-e2b": "app.plugins.llm.gemma4:Gemma4E2B",
-            "gemma-4-26b-a4b-nvfp4": "app.plugins.llm.gemma4:Gemma4_26B_A4B",
-            "gemma-4-e4b-nvfp4": "app.plugins.llm.gemma4:Gemma4E4B_NVFP4",
-            "gemma-4-12b-nvfp4": "app.plugins.llm.gemma4:Gemma4_12B_NVFP4",
-            "qwen3-8b-nvfp4": "app.plugins.llm.qwen3_hybrid:Qwen3_8B",
-            "qwen3-14b-nvfp4": "app.plugins.llm.qwen3_hybrid:Qwen3_14B",
-            "nemotron-nano-9b-v2-nvfp4": "app.plugins.llm.nemotron_nano:NemotronNano9B",
+    "llm": {"gemma-4-e4b": "app.plugins.llm.gemma4:Gemma4E4B",                # the responder (FP8 at load)
+            "gemma-4-e4b-nvfp4": "app.plugins.llm.gemma4:Gemma4E4B_NVFP4",    # its backup: 3.6 GB less GPU
             "openai": "app.plugins.llm.openai_compat:OpenAICompatLLM",     # hosted: transcripts leave the box
             "anthropic": "app.plugins.llm.anthropic:AnthropicLLM",         # hosted: transcripts leave the box
             "fake": "app.plugins.llm.fake:FakeLLM"},

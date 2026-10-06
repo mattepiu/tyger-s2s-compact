@@ -2,6 +2,13 @@
 
 **Status:** design, 2026-10-04. To be implemented by the GPU-box agent on branch `plugins`; see `HANDOFF.md`.
 
+> **Note, 2026-10-06:** steps 0–14 are done. The local LLM plugins now are `gemma-4-e4b` (the responder since
+> step 11, FP8 at load) and `gemma-4-e4b-nvfp4` (its backup), next to `openai`, `anthropic` and `fake`. The Qwen
+> plugins this design was written around (`qwen3-4b-2507`, `qwen3.5-4b`), and the later trial plugins, were
+> removed after losing to Gemma, together with the tool-call formats only they used (Qwen XML, Nemotron
+> `<TOOLCALL>`). The text below is the design record as written; only the registry snippet and the package layout
+> show the code as it is now. Trial numbers: `NOTES.md`; removed code: git history.
+
 **Goal:** swap the LLM, TTS and turn-taking (EARS) models through config, without touching the orchestration.
 
 **First set of plugins:**
@@ -120,11 +127,11 @@ EARS imports the plugin class but never constructs it, so the import must stay l
 
 ```python
 REGISTRY = {
-  "llm":  {"qwen3-4b-2507": "app.plugins.llm.qwen3_2507:Qwen3Instruct2507",
-           "qwen3.5-4b":    "app.plugins.llm.qwen35:Qwen35",
-           "openai":        "app.plugins.llm.openai_compat:OpenAICompatLLM",
-           "anthropic":     "app.plugins.llm.anthropic:AnthropicLLM",
-           "fake":          "app.plugins.llm.fake:FakeLLM"},
+  "llm":  {"gemma-4-e4b":       "app.plugins.llm.gemma4:Gemma4E4B",
+           "gemma-4-e4b-nvfp4": "app.plugins.llm.gemma4:Gemma4E4B_NVFP4",
+           "openai":            "app.plugins.llm.openai_compat:OpenAICompatLLM",
+           "anthropic":         "app.plugins.llm.anthropic:AnthropicLLM",
+           "fake":              "app.plugins.llm.fake:FakeLLM"},
   "tts":  {"voxcpm2": "app.plugins.tts.voxcpm2:VoxCPM2",
            "fake": "app.plugins.tts.fake:FakeTTS"},
   "ears": {"nemotron-tyger-1.0": "app.plugins.ears.nemotron:NemotronTyger", "fake": "app.plugins.ears.fake:EnergyEars"},
@@ -213,15 +220,13 @@ app/plugins/
   __init__.py
   llm/
     vllm_base.py
-    qwen3_2507.py
-    qwen35.py
+    gemma4.py
     openai_compat.py
     anthropic.py
     fake.py
-    _toolparse.py        # hermes_json + qwen_xml + <tool_call> splitting
+    _toolparse.py        # gemma4 + hermes_json calls, call-tag splitting, <think> guard
   tts/
     voxcpm2.py
-    openai_compat.py
     fake.py
   ears/
     nemotron.py          # wraps ears_core/batched.py

@@ -3,7 +3,7 @@
 Architecture:
   * The models are plugins (app/plugins, PLUGINS.md), chosen in config. LLM roles: `reply` (turns and the tool
     phase-B answer) and `filler` (backchannels, tool lead-ins, still-looking lines), the same instance unless
-    configured apart. Local plugins run in-process on a shared asyncio loop (app/engines.py): the Qwen LLMs on
+    configured apart. Local plugins run in-process on a shared asyncio loop (app/engines.py): the local LLMs on
     vLLM AsyncLLM, VoxCPM2 on vLLM-Omni AsyncOmni. No HTTP between MOUTH and the models.
     They can't be one vLLM-Omni pipeline: MOUTH has to sit between them (chunking, tools + lead-in,
     backchannels, barge-in).

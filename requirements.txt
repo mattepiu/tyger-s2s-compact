@@ -1,4 +1,4 @@
-# tyger v1 — ONE venv for both processes (MOUTH: Qwen3-4B + VoxCPM2 on vLLM / vLLM-Omni; EARS: nemotron +
+# tyger v1 — ONE venv for both processes (MOUTH: Gemma 4 E4B + VoxCPM2 on vLLM / vLLM-Omni; EARS: nemotron +
 # endpoint head). transformers comes in via vllm (5.14.x) and satisfies nemotron's >= 5.13.
 #
 #   uv venv .venv --python 3.12

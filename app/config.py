@@ -52,7 +52,7 @@ def _old_shape(cfg: dict) -> list[str]:
     llm = cfg.get("llm")
     if isinstance(llm, dict) and "model" in llm:
         found.append("`llm.model` and the other flat `llm:` keys -> move them under `llm.reply:` with "
-                     "`plugin: qwen3.5-4b` (or qwen3-4b-2507); enable_thinking / language_model_only are now "
+                     "`plugin: gemma-4-e4b`; enable_thinking / language_model_only are now "
                      "part of the plugin")
     if "temperature" in (cfg.get("mouth") or {}):
         found.append("`mouth.temperature` -> `llm.reply.temperature`")

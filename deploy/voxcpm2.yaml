@@ -1,4 +1,4 @@
-# VoxCPM2 deploy config for tyger: up to 4 live conversations sharing the GPU with Qwen3-4B (+ EARS).
+# VoxCPM2 deploy config for tyger: up to 4 live conversations sharing the GPU with the LLM (+ EARS).
 # Based on vllm_omni/deploy/voxcpm2.yaml (vllm-omni 0.30.0); changes: max_num_seqs 8->4, KV 6GiB->2GiB,
 # gpu_memory_utilization 0.9->0.35 (start-up check only; KV is pinned by kv_cache_memory_bytes),
 # max_model_len 4096->2048 (ref clip + one text chunk), unified decode graph batch 8->4.

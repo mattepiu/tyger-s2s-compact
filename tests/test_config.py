@@ -27,9 +27,9 @@ def test_repo_config_loads():
 
 def test_old_shape_rejected_with_new_keys():
     old = {"server": BASE["server"], "models": {"nemotron": "x", "heads_repo": "r", "heads_file": "f"},
-           "ears": {"ep_thr": 0.9}, "llm": {"model": "Qwen/Qwen3.5-4B", "enable_thinking": False},
+           "ears": {"ep_thr": 0.9}, "llm": {"model": "some/old-model", "enable_thinking": False},
            "tts": {"model": "openbmb/VoxCPM2"}, "mouth": {"temperature": 0.7}}
-    rejects(old, "`models:`", "`ears:`", "`llm.reply:`", "plugin: qwen3.5-4b", "`llm.reply.temperature`",
+    rejects(old, "`models:`", "`ears:`", "`llm.reply:`", "plugin: gemma-4-e4b", "`llm.reply.temperature`",
             "plugin: voxcpm2", "plugin: nemotron-tyger-1.0")
 
 
@@ -42,7 +42,7 @@ def test_filler_defaults_to_reply_instance():
 
 def test_separate_filler_block_and_name():
     cfg = copy.deepcopy(BASE)
-    cfg["llm"]["filler"] = {"plugin": "qwen3-4b-2507", "name": "small", "kv_cache_gib": 1.0}
+    cfg["llm"]["filler"] = {"plugin": "gemma-4-e4b-nvfp4", "name": "small", "kv_cache_gib": 1.0}
     roles = llm_roles(validate_config(cfg))
     assert roles["filler"][0] == "small" and roles["filler"] is not roles["reply"]
 
@@ -68,7 +68,7 @@ def test_registry_unknown_name():
     try:
         plugin_class("llm", "nope")
     except KeyError as e:
-        assert "qwen3.5-4b" in str(e)
+        assert "gemma-4-e4b" in str(e)
     else:
         raise AssertionError("resolved an unknown plugin")
 

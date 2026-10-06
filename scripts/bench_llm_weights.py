@@ -46,8 +46,6 @@ def main():
         kw["quantization"] = "fp8"                     # on-the-fly FP8 (the NVFP4 checkpoints carry their own)
     if "gemma" in model.lower():
         kw["language_model_only"] = True
-    if "Nemotron" in model:
-        kw["mamba_ssm_cache_dtype"] = "float32"
     llm = LLM(model=model, gpu_memory_utilization=0.5, kv_cache_memory_bytes=3 * 2**30, max_model_len=8192,
               max_num_seqs=8, **kw)
     groups, towers = llm.apply_model(sizes)[0]

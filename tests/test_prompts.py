@@ -54,8 +54,8 @@ def test_load_prompts_per_instance(tmp=None):
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, "small.yaml"), "w") as f:
             yaml.safe_dump({"warmup": {"user": "Hello."}}, f)
-        got = load_prompts({"mouth": {"prompt_overrides_dir": d}}, ["qwen3.5-4b", "small"])
-    assert got["qwen3.5-4b"].text("warmup", "user") == P.text("warmup", "user")
+        got = load_prompts({"mouth": {"prompt_overrides_dir": d}}, ["gemma-4-e4b", "small"])
+    assert got["gemma-4-e4b"].text("warmup", "user") == P.text("warmup", "user")
     assert got["small"].text("warmup", "user") == "Hello."
 
 

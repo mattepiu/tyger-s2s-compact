@@ -46,7 +46,7 @@ Built on one **NVIDIA RTX 5090** (32 GB, Blackwell sm_120), CUDA-13 driver (≥ 
 GPU memory in use ≈ **30.0 GB of 32 GB** with everything loaded, warm, and under a 4-conversation load: VoxCPM2
 ~9.8 GB (2 GiB pinned KV, `deploy/voxcpm2.yaml`), Gemma 4 E4B ~14.9 GB with FP8 weights (3 GiB pinned KV,
 `llm.reply.kv_cache_gib`; bf16 weights would not fit), EARS ~7 GB. Both engines pin their KV budgets, so the total
-is predictable. With the Qwen3.5-4B rollback the peak is ~27.7 GB.
+is predictable. With the `gemma-4-e4b-nvfp4` backup (pre-quantized, int8 per-layer embeddings) the peak is ~26.7 GB.
 
 ## Setup
 
@@ -85,7 +85,7 @@ flags. No secrets live here. Worth knowing:
 - **Prompts** live in `prompts.yaml`, not in code: system prompts, few-shot turns, the small templates MOUTH
   fills in, and the tool descriptions. It is checked at MOUTH start (a bad key or placeholder stops start-up with
   the key named) and read once, so restart MOUTH after editing. `prompts/<llm instance>.yaml` (e.g.
-  `prompts/qwen3.5-4b.yaml`) overrides parts of it for one model. Keep few-shot examples synthetic: the file is
+  `prompts/gemma-4-e4b.yaml`) overrides parts of it for one model. Keep few-shot examples synthetic: the file is
   committed.
 
 - **Endpoint thresholds** (`ears.ep_thr` etc.) ship at the training-time defaults and have **not** been
@@ -102,10 +102,9 @@ flags. No secrets live here. Worth knowing:
 CONFIG=/path/to/other.yaml ./run.sh   # alternate config for both processes
 ```
 
-Startup from a warm cache is ~2.5 min (VoxCPM2 ~55 s, Qwen3-4B ~30 s, TTS warmup incl. batch sizes 2–4
-~40 s, EARS ~15 s). The very
-first start also downloads the models and pays one-time compiles (VoxCPM2's first warmup ~2 min, Qwen's
-CUDA-graph capture), which are cached for later starts.
+Startup from a warm cache is ~2.1 min (VoxCPM2 ~45 s, Gemma 4 E4B ~40 s, TTS warmup incl. batch sizes 2–4
+~25 s, EARS ~15 s). The very first start also downloads the models (~25 GB) and pays one-time compiles (VoxCPM2's
+first warmup ~2 min, Gemma's torch.compile + CUDA-graph capture ~1.5 min), which are cached for later starts.
 
 Browsers only allow the mic over **HTTPS or localhost**, so either:
 
@@ -160,19 +159,15 @@ in `PLUGINS.md`). Each block names its `plugin:`; the rest of the block is that 
 | kind | plugin | runs | notes |
 |---|---|---|---|
 | LLM | `gemma-4-e4b` | local, vLLM in MOUTH | the default responder (`quantization: fp8`): thinking off, text only, Gemma tool-call tokens |
-| LLM | `gemma-4-e2b` | local, vLLM in MOUTH | E4B's smaller sibling: ~3.5 GB less GPU, ~90 ms faster, but fails the routing eval (`NOTES.md`) |
-| LLM | `qwen3-8b-nvfp4`, `qwen3-14b-nvfp4` | local, vLLM in MOUTH | NVIDIA NVFP4 checkpoints; fit, but fail the routing eval (lean local) |
-| LLM | `nemotron-nano-9b-v2-nvfp4` | local, vLLM in MOUTH | NVFP4, Mamba-2 hybrid, `<TOOLCALL>` calls; fails the routing eval, no Russian |
-| LLM | `gemma-4-e4b-nvfp4` | local, vLLM in MOUTH | unsloth NVFP4 E4B (int8 per-layer embeddings): routes like E4B FP8, 3.6 GB less GPU, same latency |
-| LLM | `gemma-4-12b-nvfp4` | local, vLLM in MOUTH | unsloth NVFP4 dense 12B; fits, but fails the routing eval and leaks its thought channel |
-| LLM | `gemma-4-26b-a4b-nvfp4` | local, vLLM in MOUTH | NVFP4 MoE; passes the routing eval but 17 GiB of weights: doesn't fit next to VoxCPM2 + EARS on 32 GB |
-| LLM | `qwen3.5-4b` | local, vLLM in MOUTH | the previous responder (XML tool calls); rollback = a few lines in `config.yaml` |
-| LLM | `qwen3-4b-2507` | local, vLLM in MOUTH | the one before (Hermes JSON tool calls) |
+| LLM | `gemma-4-e4b-nvfp4` | local, vLLM in MOUTH | the backup: unsloth NVFP4 E4B (int8 per-layer embeddings), routes like E4B FP8, 3.6 GB less GPU, same latency; no `quantization` |
 | LLM | `openai` | **hosted** | any OpenAI-compatible chat endpoint (`base_url`: OpenAI, Groq, Cerebras, a vLLM server) |
 | LLM | `anthropic` | **hosted** | the Claude Messages API; default `claude-opus-5-5`, `effort: low`, server-side refusal fallback |
 | TTS | `voxcpm2` | local, vLLM-Omni in MOUTH | cloned voices from `voices/` |
 | EARS | `nemotron-tyger-1.0` | local, in EARS | nemotron ASR + the tyger 1.0 turn-taking heads |
 | all three | `fake` | no model, CPU | scripted / energy-based; tests and `CONFIG=config.fake.yaml ./run.sh` |
+
+Other local responders were measured against E4B and removed: their numbers are in `NOTES.md` ("Gemma 4 memory",
+"NVFP4 responders", "unsloth NVFP4 Gemma 4", step 11), their plugins in git history.
 
 **LLM roles.** `llm.reply` answers turns (and the tool phase-B answer); `llm.filler` makes backchannels, tool
 lead-ins and still-looking lines. `filler: reply` (the default) shares one instance. Any role can use any LLM
@@ -182,7 +177,7 @@ plugin; two blocks with the same plugin need a `name:` each. Keys live in `.env`
 ```yaml
 llm:
   reply: {plugin: openai, model: gpt-4.1-nano, api_key_env: OPENAI_API_KEY, max_tokens: 256}
-  filler: {plugin: qwen3.5-4b, kv_cache_gib: 3.0, max_num_seqs: 8, temperature: 0.7}
+  filler: {plugin: gemma-4-e4b, quantization: fp8, kv_cache_gib: 3.0, max_num_seqs: 8, temperature: 0.7}
 ```
 
 Measured on the box (`NOTES.md` → step 6): a hosted `reply` adds ~0.35 s to first audio (OpenAI first text

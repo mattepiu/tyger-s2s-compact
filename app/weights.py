@@ -1,5 +1,5 @@
 """Weights: warm the HF cache for public models and fetch the private endpoint-head checkpoint. All downloads
-go to HF_HOME (mounted cache); nothing is baked into the image. The MOUTH's models (Qwen3-4B, VoxCPM2) are
+go to HF_HOME (mounted cache); nothing is baked into the image. The MOUTH's models (the LLM, VoxCPM2) are
 downloaded by the vLLM engines themselves on first start."""
 from __future__ import annotations
 import os, logging

@@ -1,10 +1,11 @@
-"""Text-level LLM helpers (no GPU): speakable splitting at <tool_call>, the two tool-call formats, the <think>
-guard, and the neutral -> chat-template history conversion. Run: .venv/bin/python tests/test_llm_parse.py"""
+"""Text-level LLM helpers (no GPU): speakable splitting at a call tag, the two tool-call formats (Gemma 4, Hermes
+JSON), the <think> guard, and the neutral -> chat-template history conversion.
+Run: .venv/bin/python tests/test_llm_parse.py"""
 import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.plugins.llm._toolparse import split_speakable, parse_calls, strip_think, new_call_id, tool_start, \
-    NAME_WAIT, GEMMA_TAG, NEMO_TAG, gemma_normalize, names_tool  # noqa: E402
+    NAME_WAIT, TAG, GEMMA_TAG, gemma_normalize, names_tool  # noqa: E402
 from app.plugins.llm.vllm_base import to_template_messages  # noqa: E402
 
 
@@ -34,7 +35,7 @@ def test_partial_tag_held_back():
     assert split_speakable("Okay <b") == ("Okay <b", False)
 
 
-# ---- Hermes JSON (qwen3-4b-2507) ---------------------------------------------------------------------------
+# ---- Hermes JSON (the fake LLM; the openai plugin's fallback for calls returned as text) -------------------
 HERMES = '<tool_call>\n{"name": "get_weather", "arguments": {"location": "Paris"}}\n</tool_call>'
 
 
@@ -56,31 +57,6 @@ def test_hermes_unparseable_dropped():
         [{"name": "get_weather", "arguments": {"location": "Paris"}}]
 
 
-# ---- Qwen XML (qwen3.5-4b) ---------------------------------------------------------------------------------
-XML = ('<tool_call>\n<function=get_weather>\n<parameter=location>\nSan Francisco\n</parameter>\n'
-       '<parameter=unit>\ncelsius\n</parameter>\n</function>\n</tool_call>')
-
-
-def test_xml_never_spoken_and_parsed():
-    assert parse_calls(XML, "qwen_xml") == \
-        [{"name": "get_weather", "arguments": {"location": "San Francisco", "unit": "celsius"}}]
-    for step in (1, 3, 7):
-        assert stream_speakable(XML, step) == ("", True)
-
-
-def test_xml_values_and_multiple():
-    raw = ('<tool_call>\n<function=web_search>\n<parameter=query>\nbtc price\n</parameter>\n</function>\n</tool_call>\n'
-           '<tool_call>\n<function=x>\n<parameter=n>\n3\n</parameter>\n<parameter=s>\n"quoted"\n</parameter>\n'
-           '</function>\n</tool_call>')
-    assert parse_calls(raw, "qwen_xml") == [{"name": "web_search", "arguments": {"query": "btc price"}},
-                                            {"name": "x", "arguments": {"n": 3, "s": '"quoted"'}}]
-
-
-def test_other_format_still_parses():
-    assert parse_calls(HERMES, "qwen_xml") == parse_calls(HERMES, "hermes_json")
-    assert parse_calls(XML, "hermes_json") == parse_calls(XML, "qwen_xml")
-
-
 # ---- Gemma 4 (gemma-4-e4b): special-token tags, <|"|>-quoted strings --------------------------------------
 GEMMA = 'Sure.<|tool_call>call:get_weather{location:<|"|>San Francisco, CA<|"|>,unit:<|"|>celsius<|"|>}<tool_call|>'
 
@@ -98,7 +74,7 @@ def test_gemma_parsed_named_never_spoken():
     while not got:
         i += 1; got = tool_start(GEMMA[:i], GEMMA_TAG)
     assert got == {"name": "get_weather"} and i < len(GEMMA) - 30
-    assert tool_start(GEMMA, "<tool_call>") is None                  # Qwen's tag is not Gemma's
+    assert tool_start(GEMMA, TAG) is None                            # Hermes's tag is not Gemma's
 
 
 def test_gemma_values_and_multiple():
@@ -132,53 +108,7 @@ def test_gemma_normalize_leaves_speech_alone():
     assert gemma_normalize("set_reminder{x}", []) == "set_reminder{x}"  # no tools offered: plain text
 
 
-# ---- Nemotron (nemotron-nano-9b-v2-nvfp4): <TOOLCALL>[...]</TOOLCALL> -----------------------------------------
-NEMO = '<TOOLCALL>[{"name": "get_weather", "arguments": {"location": "Paris"}}]</TOOLCALL>'
-
-
-def test_nemotron_never_spoken_parsed_named():
-    for step in (1, 2, 5):
-        said, saw = stream_speakable_tag(NEMO, NEMO_TAG, step)
-        assert said == "" and saw
-    assert parse_calls(NEMO, "nemotron_json") == [{"name": "get_weather", "arguments": {"location": "Paris"}}]
-    assert tool_start('<TOOLCALL>[{"name": "get_wea', NEMO_TAG) is None
-    assert tool_start('<TOOLCALL>[{"name": "get_weather", "argu', NEMO_TAG) == {"name": "get_weather"}
-
-
-def test_nemotron_values_multiple_and_cut_off():
-    raw = ('Let me look.\n<TOOLCALL>[{"name": "web_search", "arguments": {"query": "a, b: c"}}, '
-           '{"name": "set_reminder", "arguments": "{\\"text\\": \\"call mom\\", \\"when\\": \\"6 pm\\"}"}]</TOOLCALL>')
-    said, saw = stream_speakable_tag(raw, NEMO_TAG, 3)
-    assert said.strip() == "Let me look." and saw
-    assert parse_calls(raw, "nemotron_json") == [
-        {"name": "web_search", "arguments": {"query": "a, b: c"}},
-        {"name": "set_reminder", "arguments": {"text": "call mom", "when": "6 pm"}}]           # string arguments
-    assert parse_calls('<TOOLCALL>[{"name": "get_weather", "arguments": {"location": "Oslo"}}',
-                       "nemotron_json") == [{"name": "get_weather", "arguments": {"location": "Oslo"}}]  # no "]"
-    assert parse_calls("<TOOLCALL>[{not json</TOOLCALL>", "nemotron_json") == []
-
-
-def stream_speakable_tag(raw, tag, step):
-    said, buf, saw = "", "", False
-    for i in range(0, len(raw), step):
-        buf += raw[i:i + step]
-        if not saw:
-            speak, saw = split_speakable(buf, tag)
-            assert speak.startswith(said); said = speak
-    return said, saw
-
-
-def test_nemotron_no_think_in_system_prompt():
-    from app.plugins.llm.nemotron_nano import NemotronNano9B
-    p = NemotronNano9B.__new__(NemotronNano9B)
-    assert p.prepare_messages([{"role": "system", "content": "Be brief."}, {"role": "user", "content": "hi"}]) == \
-        [{"role": "system", "content": "Be brief.\n/no_think"}, {"role": "user", "content": "hi"}]
-    assert p.prepare_messages([{"role": "user", "content": "hi"}])[0] == {"role": "system", "content": "/no_think"}
-    call = {"role": "assistant", "content": None, "tool_calls": []}
-    assert p.prepare_messages([call])[1]["content"] == ""                # the template can't take a None content
-
-
-# ---- <think> guard (qwen3.5-4b) ----------------------------------------------------------------------------
+# ---- <think> guard (the openai plugin's strip_think: true) -------------------------------------------------
 def test_think_never_spoken():
     raw = "<think>\nthe user wants a joke\n</think>\n\nWhy did the chicken cross the road? To get across."
     for step in (1, 2, 5):
@@ -194,26 +124,34 @@ def test_think_unclosed_and_stray():
 
 
 def test_think_then_tool_call():
-    raw = "<think>need weather</think>" + XML
+    raw = "<think>need weather</think>" + HERMES
     assert stream_speakable(raw, 3, strip_think) == ("", True)
-    assert parse_calls(strip_think(raw, True), "qwen_xml")[0]["name"] == "get_weather"
+    assert parse_calls(strip_think(raw, True), "hermes_json")[0]["name"] == "get_weather"
+
+
+def test_unknown_format_rejected():
+    try:
+        parse_calls(HERMES, "xml")
+    except ValueError:
+        return
+    raise AssertionError("an unknown format name must not parse silently")
 
 
 # ---- tool_start names the tool (the filler is picked by it) -------------------------------------------------
-def first_start(raw, step=1):
+def first_start(raw, tag=TAG, step=1):
     """The first tool_start payload while raw streams in, and how many characters had arrived by then."""
     for i in range(step, len(raw) + step, step):
-        got = tool_start(raw[:i])
+        got = tool_start(raw[:i], tag)
         if got:
             return got, min(i, len(raw))
     return None, len(raw)
 
 
 def test_tool_start_waits_for_the_whole_name():
-    for raw, fmt in ((HERMES, "hermes"), (XML, "xml")):
-        got, at = first_start(raw)
-        assert got == {"name": "get_weather"}, (fmt, got)
-        assert raw[:at].endswith('"get_weather"' if fmt == "hermes" else "<function=get_weather>"), raw[:at]
+    for raw, tag, named in ((HERMES, TAG, '"get_weather"'), (GEMMA, GEMMA_TAG, "call:get_weather{")):
+        got, at = first_start(raw, tag)
+        assert got == {"name": "get_weather"}, (tag, got)
+        assert raw[:at].endswith(named), raw[:at]
         assert at < len(raw) - 20, "named well before the call finished decoding"
     assert tool_start('Okay. <tool_call>\n{"name": "get_wea') is None
     assert tool_start("no call here") is None

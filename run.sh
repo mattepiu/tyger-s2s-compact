@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Start tyger v1 without Docker. Two processes, one venv (.venv, see requirements.txt):
-#   1. MOUTH  (app.mouth): the orchestrator + BOTH models in-process on vLLM engines -- Qwen3-4B-Instruct-2507
-#      (vLLM AsyncLLM) and VoxCPM2 (vLLM-Omni AsyncOmni). Chunks the reply and streams TTS audio back to EARS
+#   1. MOUTH  (app.mouth): the orchestrator + BOTH models in-process on vLLM engines -- the LLM (Gemma 4 E4B,
+#      vLLM AsyncLLM) and VoxCPM2 (vLLM-Omni AsyncOmni). Chunks the reply and streams TTS audio back to EARS
 #      over TCP (:8770).
 #   2. EARS   (app.server): nemotron + endpoint head + the web app (:7860).
 # MOUTH starts first so its engines claim their (pinned) GPU memory before EARS loads. See NOTES.md.
@@ -42,7 +42,7 @@ PY
   echo "$2 did not come up on :$1"; exit 1
 }
 
-echo "=== starting MOUTH (Qwen3-4B + VoxCPM2, in-process) ==="
+echo "=== starting MOUTH (LLM + VoxCPM2, in-process) ==="
 "$PY" -m app.mouth "${CFG_ARGS[@]}" &
 PIDS+=($!)
 wait_tcp "$MOUTH_PORT" "MOUTH" "${PIDS[-1]}"

@@ -16,8 +16,8 @@ expert, or call markup leaking into speech. For tool-route samples it also runs 
 result (phase B), with fixed English stub results (the real reminder / message stubs; a canned answer for
 lookups), and scores that answer's speech the same way: English tool output must not pull the reply language.
 
-  .venv/bin/python scripts/eval_escalation.py [--plugin qwen3-4b-2507] [--samples 3] [--split heldout]
-      [--prompts prompts.yaml,/path/candidate.yaml]      several prompt files are compared on one model load
+  .venv/bin/python scripts/eval_escalation.py [--plugin gemma-4-e4b-nvfp4 --opt quantization=null] [--samples 3]
+      [--split heldout] [--prompts prompts.yaml,/path/candidate.yaml]   several prompt files: one model load
 """
 import sys, re, json, argparse, logging, collections
 from concurrent.futures import ThreadPoolExecutor
@@ -180,7 +180,7 @@ def report(results, title):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
-    ap.add_argument("--plugin", default=None, help="override llm.reply.plugin (e.g. qwen3-4b-2507)")
+    ap.add_argument("--plugin", default=None, help="override llm.reply.plugin (e.g. gemma-4-e4b-nvfp4)")
     ap.add_argument("--prompts", default=None, help="comma-separated prompt files to compare (default: config's)")
     ap.add_argument("--set", default=str(HERE / "escalation_set.yaml"))
     ap.add_argument("--split", choices=("all", "tune", "heldout", "fresh"), default="all")

@@ -1,14 +1,13 @@
 """In-process chat LLM on a vLLM AsyncLLM engine (no server, no HTTP), on MOUTH's EngineLoop. Shared by the local
-Qwen plugins, which override only the hooks: default_model, engine_kwargs, template_kwargs, tool_format,
-sampling, filter_text.
+plugins (the Gemma 4 ones, gemma4.py), which override only the hooks: default_model, tool_format, engine_kwargs,
+template_kwargs, sampling, normalize_calls.
 
 stream(messages, tools=...) yields ("text", delta) for speakable text as it decodes; ("tool_start", {"name": ...})
-once a <tool_call> tag has appeared: with ask_expert offered, only after the tool's name has decoded (a few tokens;
-the arguments are still decoding) so MOUTH can pick a lead-in that fits the tool, otherwise at the bare tag
-({"name": None}); then at most one ("tool_calls", [{"id", "name",
-"arguments"}], None) at the end. Text from the first <tool_call> on is
-never yielded as speech (a trailing partial "<tool_c" is held back until it resolves). The KV budget is pinned
-(kv_cache_gib), so GPU memory doesn't depend on what else is loaded.
+once the format's call tag (TAGS) has appeared: with ask_expert offered, only after the tool's name has decoded (a
+few tokens; the arguments are still decoding) so MOUTH can pick a lead-in that fits the tool, otherwise at the bare
+tag ({"name": None}); then at most one ("tool_calls", [{"id", "name", "arguments"}], None) at the end. Text from the
+first call tag on is never yielded as speech (a trailing partial tag is held back until it resolves). The KV budget
+is pinned (kv_cache_gib), so GPU memory doesn't depend on what else is loaded.
 """
 from __future__ import annotations
 import asyncio, threading, uuid, logging
@@ -19,7 +18,7 @@ log = logging.getLogger("llm")
 
 
 def to_template_messages(messages):
-    """Neutral history -> what the Qwen chat templates read: an assistant tool call in the OpenAI nested shape
+    """Neutral history -> what the HF chat templates read: an assistant tool call in the OpenAI nested shape
     ({"id", "type": "function", "function": {"name", "arguments"}}); `native` dropped (local models have none)."""
     out = []
     for m in messages:
@@ -35,7 +34,7 @@ def to_template_messages(messages):
 class VLLMChatPlugin:
     remote = False
     default_model: str = ""
-    tool_format: str = "hermes_json"            # _toolparse.FORMATS key the model writes
+    tool_format: str = "hermes_json"            # _toolparse.TAGS key: the call format the model writes
 
     def __init__(self, conf: dict, ctx):
         from vllm import AsyncEngineArgs
@@ -60,6 +59,8 @@ class VLLMChatPlugin:
         self._tok_lock = threading.Lock()
 
     # ---- hooks ----
+    # The plugin API. prepare_messages and filter_text have no override now (the plugins that used them are gone);
+    # a new model may need them: a think filter, a template that reads a switch from the system prompt.
     def engine_kwargs(self) -> dict:
         return {}
 

@@ -1,4 +1,4 @@
-# tyger v1 — one GPU, one conversation, one venv (MOUTH: Qwen3-4B + VoxCPM2 on vLLM/vLLM-Omni; EARS:
+# tyger v1 — one GPU, up to 4 conversations, one venv (MOUTH: Gemma 4 E4B + VoxCPM2 on vLLM/vLLM-Omni; EARS:
 # nemotron + endpoint head). See NOTES.md.
 #
 # torch cu130 wheels bundle the CUDA 13 runtime, so a plain python base works on a host with an sm_120

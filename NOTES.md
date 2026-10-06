@@ -1,5 +1,38 @@
 # tyger v1 — build notes
 
+## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
+NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
+clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README
+step 1) went through unchanged. Downloads were fast (Gemma E4B 123 s, its NVFP4 backup 71 s, VoxCPM2 40 s). The
+first `./run.sh` (models cached by the contract test) took 3.4 min, 83 s of it Gemma's first compile. A warm restart
+takes 2.1 min: VoxCPM2 ~45 s, Gemma ~40 s, TTS warmup ~25 s, EARS ~13 s.
+
+**The cleanup (user, 2026-10-06):** the responder stays `gemma-4-e4b` (FP8 at load), and `gemma-4-e4b-nvfp4` stays
+registered as its backup. The other local LLM plugins were removed: the two earlier responders, the NVFP4 trials,
+and the other Gemma 4 sizes. So were the tool-call formats only they used (Qwen XML, Nemotron `<TOOLCALL>`, and the
+"other format" fallback). Their numbers stay in this file, and their code in git history.
+
+**Contract test, both Gemma plugins (`TYGER_CONTRACT_LOCAL=1`):** this is the first time the suite ran on them (it
+had still run the removed plugins). FP8 E4B passed as it stood. The NVFP4 backup failed the plain-question check:
+"Tell me one short fun fact about otters." went to `web_search` 8 / 8, where FP8 E4B answered aloud 8 / 8. The call
+itself was well-formed and parsed, so the plugin contract held; this is a routing difference. It fits the routing
+eval's slightly lower no-smart score for NVFP4 (98.6 vs 99.6% right). The check now asks for a short joke, which has
+nothing to look up (8 / 8 spoken on both models). Routing stays `eval_escalation.py`'s job. **If the backup is ever
+switched in, expect more trivia lookups**, each paying a tool round (and failing while Tavily is off). Separately,
+the test process aborts at exit after every suite has passed (I-15).
+
+**Production config (with `llm.smart`), this box:**
+
+| test | result |
+|---|---|
+| `smoke_test.py` | plain / weather / reminder / backchannel first-audio 279 / 275 / 316 / 160 ms; barge, EARS: PASS. The barge test's tool turn called `ask_expert` once (one synthetic prompt to OpenAI) |
+| `load_test_ears.py`, 1 conv | end of speech → endpoint p50 / p90 641 / 753 ms; endpoint → first audio p50 263 ms; **end of speech → first audio p50 904 ms**; hop lag p50 / p90 39 / 64 ms |
+| `load_test_ears.py`, 4 conv | 749 / 915 ms; 399 ms; **1109 ms**; hop lag 69 / 152 ms |
+
+These are single runs. Gemma gave the same "count to ten" reply text in every turn (4 at 1 conv, 16 at 4 conv).
+Detection at 1 conversation is 641 ms p50, against 803–883 on the last box and 684–686 on the box before. So the
+last box's slow detection was the box, not the code (L-02).
+
 ## Box (2026-10-05) — another new RTX 5090, healthy
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 7C13, 256 threads. **Not throttled**: under
 load P1, memory 13 801 MHz. Fresh-box install (README step 1) went through unchanged. The first `./run.sh` gave up

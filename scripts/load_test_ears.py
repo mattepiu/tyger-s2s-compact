@@ -27,7 +27,9 @@ HOP = 5120          # 320 ms @ 16 kHz, the EARS hop
 CHUNK = 1600        # client sends 100 ms at a time, like the page
 VOICED_DB = -45.0   # a 20 ms frame above this RMS level counts as speech (TTS tails are near-silent)
 # The user's utterance: one sentence (no inner pause for the endpoint to fire at) whose reply is fixed: 8/8 fresh
-# sessions and 3/3 turns with history gave the same reply, 9.76 s of audio (Qwen3.5-4B at temperature 0.7).
+# sessions and 3/3 turns with history gave the same reply, 9.76 s of audio (I-13); with Gemma 4 E4B at temperature
+# 0.7 too: one reply text over 4 turns alone and 16 at 4 conversations (2026-10-06), though under 4-way batching it
+# has varied now and then (the test warns).
 UTTERANCE = "Could you please count from one to ten for me?"
 # --full-speech: three sentences with pauses between them, to count endpoints that fire inside an utterance
 # (the guard rail for live threshold tuning, O-01). Same request at the end, so the reply is the same.

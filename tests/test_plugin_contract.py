@@ -1,8 +1,9 @@
 """Plugin contract (PLUGINS.md -> Tests): one suite per kind, run against every plugin that can run here.
 
   * the `fake` plugins always run (no GPU);
-  * the local model plugins (qwen3.5-4b, qwen3-4b-2507, voxcpm2, nemotron-tyger-1.0) run with TYGER_CONTRACT_LOCAL=1,
-    on the GPU box with the GPU free (stop run.sh first): they load the real models, one at a time.
+  * the local model plugins (gemma-4-e4b, gemma-4-e4b-nvfp4, voxcpm2, nemotron-tyger-1.0) run with
+    TYGER_CONTRACT_LOCAL=1, on the GPU box with the GPU free (stop run.sh first): they load the real models, one at
+    a time.
 
 Checks: events in a valid order; stop_flag ends a stream within one item; tool-call IDs unique; text never carries
 tool-call or thinking markup; TTS audio is 1-D float32 at out_sr; EARS sessions open / close / reset and return
@@ -70,7 +71,8 @@ def check_llm_events(evs):
 
 def llm_suite(llm, plain=True, tool_turn=True):
     msgs = [{"role": "system", "content": P.text("system", "voice_tools")},
-            {"role": "user", "content": "Tell me one short fun fact about otters."}]
+            {"role": "user", "content": "Can you tell me a short joke?"}]     # nothing to look up: routing is
+    # eval_escalation.py's job (a trivia question went to web_search 8 / 8 on gemma-4-e4b-nvfp4, NOTES.md)
     text = check_llm_events(list(llm.stream(msgs, tools=TOOLS, max_new=64)))
     assert text.strip() or not plain, "no text for a plain question"
     n = 0                                                    # stop after the first item: at most one more
@@ -105,10 +107,11 @@ def test_llm_fake():
 
 def test_llm_local():
     if not LOCAL:
-        raise Skip("TYGER_CONTRACT_LOCAL=1 to run the Qwen plugins")
+        raise Skip("TYGER_CONTRACT_LOCAL=1 to run the Gemma plugins")
     base = dict(CFG["llm"]["reply"])
-    for name in ("qwen3.5-4b", "qwen3-4b-2507"):
-        llm = plugin_class("llm", name)({**base, "plugin": name}, ctx(name, eloop()))
+    # the backup's checkpoint is pre-quantized: no `quantization` at load (config.yaml's backup comment)
+    for name, over in (("gemma-4-e4b", {}), ("gemma-4-e4b-nvfp4", {"quantization": None})):
+        llm = plugin_class("llm", name)({**base, **over, "plugin": name}, ctx(name, eloop()))
         try:
             llm.warmup(); llm_suite(llm)
         finally:

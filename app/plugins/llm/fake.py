@@ -5,7 +5,7 @@ backchannel / the expert lead-in and still-looking lines / the smart model's ans
 tool result is in) / a background task on the smart model (`task`, `task_b`; by default it calls finish_task) /
 phase B (a tool result present) / the main reply, and streams the scripted text for that kind a
 few characters at a time, polling stop_flag between items like the real engine loop. `reply` and `smart` may contain
-Hermes <tool_call>s, which go through the same splitting, naming (tool_start) and parsing as the local Qwen plugins. For tests of hosted
+Hermes <tool_call>s, which go through the same splitting, naming (tool_start) and parsing as a local plugin's calls. For tests of hosted
 behaviour, `fail` maps a request kind to an LLMError kind raised for it (after `fail_after` items), and `refuse`
 lists kinds answered with a refusal. Every request is recorded in `calls` (kind, messages); nothing is logged.
 """
