@@ -46,6 +46,19 @@ def test_plain_turn_remembered():
     assert s.history.messages[0]["content"] == "first question"
 
 
+def test_first_chunk_rule():
+    """mouth.first_chunk: `clause` sends the first sentence's start as its own TTS request (audio sooner), `sentence`
+    waits for the whole sentence (pipecat's rule), so VoxCPM2's intonation doesn't restart mid-sentence."""
+    reply = "It is 3.5 km away, about ten minutes on foot, and the road is fine today. Take the coast path then."
+    for rule, want in (("clause", ["It is 3.5 km away, about ten minutes on foot,",      # < MIN_CHARS: merged
+                                   "and the road is fine today. Take the coast path then."]),
+                       ("sentence", ["It is 3.5 km away, about ten minutes on foot, and the road is fine today.",
+                                     "Take the coast path then."])):
+        s, m = make_session(FakeLLM(reply=reply), first_chunk=rule)
+        evs, _ = run_turn(s, "how far is the beach")
+        assert evs[-1][0] == "done" and m.tts.requests == want, (rule, m.tts.requests)
+
+
 def test_barged_plain_turn_remembered():
     llm = FakeLLM(reply="Here is the first part of a long answer, which goes on. Then the second sentence comes. "
                         "And a third sentence that nobody will ever hear because they cut in.")

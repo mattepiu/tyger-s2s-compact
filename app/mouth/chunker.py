@@ -41,6 +41,12 @@ _WEAK_FW = "，；：、"
 _ABBREV = {"mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "approx", "mt", "ft", "no", "fig"}
 _ACRONYM = re.compile(r"^(?:\w\.)+$")
 
+# mouth.first_chunk: how the FIRST chunk of a reply may end.
+#   clause    at any boundary (sentence or clause: , ; : dash), or after FIRST_MAX_WORDS words: audio starts sooner,
+#             but VoxCPM2 starts the rest of that sentence as a new request, so its intonation restarts mid-sentence
+#   sentence  a whole sentence, like every later chunk (pipecat's rule): natural intonation, first audio later
+FIRST_CHUNK_RULES = ("clause", "sentence")
+
 MIN_CHARS = 40         # never cut a chunk shorter than this: short replies / short sentences go out whole
                        # (merged with what follows), which reads more naturally than many tiny TTS calls
 FIRST_MAX_WORDS = 12   # first chunk: cut at a word boundary if no punctuation shows up by this many words

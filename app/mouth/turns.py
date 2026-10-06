@@ -40,13 +40,14 @@ class Turn:
         much had played)."""
         self.session.history.add_barged(user, self.speaker.heard(self.session.barge_played_s), tool_msgs)
 
-    # ---- speak an LLM text stream: a short first chunk (clause), then whole sentences ----
+    # ---- speak an LLM text stream: the first chunk by mouth.first_chunk, then whole sentences ----
     def speak_stream(self, events):
         """Speak the text of an LLM event stream as it arrives. Yields MOUTH events; returns (text, calls, native,
         started, refused). Returns at "tool_start" (started = its payload, {"name": ...}) without consuming the
         rest: the call is still decoding, and the caller finishes `events` itself. Text before the tag that didn't
         close a chunk is never spoken. A refusal (hosted models) returns refused=True with nothing more spoken."""
         content = ""; calls = None; native = None; done = 0
+        early = self.m.first_chunk == "clause"          # the first chunk may end at a clause (chunker.py)
         for ev in events:
             kind, val = ev[0], ev[1]
             if kind == "tool_start":
@@ -59,7 +60,7 @@ class Turn:
                 yield ("text", content)
                 safe = content[done:]
                 while True:
-                    chunk, rest = next_chunk(safe, first=done == 0)
+                    chunk, rest = next_chunk(safe, first=early and done == 0)
                     if chunk is None:
                         break
                     done += len(safe) - len(rest); safe = rest

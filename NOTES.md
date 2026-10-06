@@ -388,6 +388,25 @@ there. Also: VoxCPM2 isn't eager in practice. `enforce_eager` turns off only vLL
 the model captures its own CUDA graphs (scaffold and residual LMs, batch 1–4) and `torch.compile`s LocDiT,
 feat_encoder and AudioVAE (startup log). The user chose to keep the engine options as they are.
 
+**`mouth.first_chunk: clause | sentence`** (2026-10-06, the user: intonation changes mid-sentence; pipecat's rule).
+- **Why:** each TTS chunk is its own VoxCPM2 request, and the reply's first chunk was cut at a clause (or after 12
+  words), so the rest of the first sentence started with fresh intonation.
+- **pipecat:** its default mode cuts only at sentence ends, with the `sentencex` tokenizer and a one-word lookahead;
+  it never cuts at a comma and has no length cap. Its docs give the cost as ~200–300 ms per sentence. With
+  streaming TTS (Cartesia, ElevenLabs) it keeps one context per turn (`continue`), so prosody carries across
+  sentences; local VoxCPM2 has no equivalent (the user: we won't try one).
+- **The option:** `sentence` makes the first chunk a whole sentence, like every later one (the 40-character minimum
+  and the 220-character cap for run-ons stay). `clause` stays the default. It is checked at config load.
+- **Tests:** `test_first_chunk_rule` (the TTS requests under each rule) and a config test.
+- **Measured** (no-smart config, the same box, one run each):
+
+  | | `clause` | `sentence` |
+  |---|---|---|
+  | `stack/load.py`, 1 conv: turn first-audio p50 | 232 ms | 262 ms (+30) |
+  | `stack/load.py`, 4 conv, 2 runs | 418 / 379 ms | 474 / 515 ms (≈ +95) |
+  | smoke turns (short first sentences) | 145–266 ms | 170–282 ms |
+  | `stack/load_ears.py`, endpoint → first audio (fixed short reply) | 232 ms | 229 ms |
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

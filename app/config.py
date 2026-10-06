@@ -97,8 +97,16 @@ def validate_config(cfg: dict) -> dict:
                                   f"`name:`, or write `{role}: reply` to share the reply instance")
             seen[name] = role
     _check_block(REGISTRY, "tts", "tts", cfg.get("tts"))
+    _check_mouth(cfg.get("mouth") or {})
     _check_block(REGISTRY, "ears", "ears", cfg.get("ears"))
     return cfg
+
+
+def _check_mouth(mouth: dict):
+    from app.mouth.chunker import FIRST_CHUNK_RULES
+    rule = mouth.get("first_chunk", "clause")
+    if rule not in FIRST_CHUNK_RULES:
+        raise ConfigError(f"`mouth.first_chunk: {rule}` is not one of {', '.join(FIRST_CHUNK_RULES)}")
 
 
 def _check_block(registry, kind, where, block):

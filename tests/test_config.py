@@ -93,6 +93,13 @@ def test_plugin_options_checked_at_load():
     rejects(cfg, "`ears`")
 
 
+def test_first_chunk_rule_checked():
+    cfg = copy.deepcopy(BASE); cfg["mouth"]["first_chunk"] = "word"
+    rejects(cfg, "`mouth.first_chunk: word`", "clause", "sentence")
+    cfg["mouth"]["first_chunk"] = "sentence"
+    validate_config(cfg)
+
+
 def test_renamed_option_names_the_new_key():
     """tts.deploy_config became tts.engine_config (R-11, with the engine configs in config/engines/)."""
     cfg = copy.deepcopy(BASE); cfg["tts"]["deploy_config"] = cfg["tts"].pop("engine_config")

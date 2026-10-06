@@ -37,10 +37,11 @@ class FakeMouth:
     """`smart`: a FakeLLM for the smart role, which turns escalation on (ask_expert offered), as an llm.smart block
     does in Mouth; `tasks`: a mouth.tasks dict, which with `smart` turns background tasks on. `slots`: share one
     TaskSlots between FakeMouths to test the global cap."""
-    def __init__(self, llm=None, tts=None, smart=None, context_turns=4, max_steps=3, tasks=None, slots=None):
+    def __init__(self, llm=None, tts=None, smart=None, context_turns=4, max_steps=3, tasks=None, slots=None,
+                 first_chunk="clause"):
         self.llm = llm or FakeLLM(); self.tts = tts or FakeTTS()
         self.max_gen = 192; self.history_turns = 8; self.bc_min_words = 4; self.bc_max_new = 12
-        self.temperature = 0.7; self.sr = self.tts.out_sr
+        self.temperature = 0.7; self.sr = self.tts.out_sr; self.first_chunk = first_chunk
         self.prompts = {"reply": PROMPTS, "filler": PROMPTS}
         self.llms = {"reply": self.llm, "filler": self.llm}
         self.expert = smart is not None
