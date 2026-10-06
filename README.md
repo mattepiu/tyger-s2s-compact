@@ -141,6 +141,7 @@ CONFIG=config.fake.yaml ./run.sh                 # the whole stack on the fake p
 .venv/bin/python scripts/validate_ears_batched.py        # GPU free: batched EARS == single-session reference
 .venv/bin/python scripts/validate_rnnt.py                # GPU free: graphed RNN-T == nemotron generate()
 .venv/bin/python scripts/validate_barge.py               # GPU free: a barge-in keeps the start of the utterance
+.venv/bin/python scripts/validate_second_ear.py          # GPU free: the 2nd ear's 24->16 kHz step, old vs new, on the heads
 .venv/bin/python scripts/validate_long_turn.py           # GPU free: > 20 s turns transcribed whole
 .venv/bin/python scripts/bench_tts_voice.py              # GPU free: cloned-voice TTS first-audio per request
 .venv/bin/python scripts/eval_escalation.py --samples 8  # GPU free: routing (local / tool / expert / background) and

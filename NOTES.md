@@ -74,6 +74,37 @@ Stack on the no-smart config:
 - `--full-speech` at 4 conv: the endpoint fired inside the utterance 9 / 16 times (the I-13 baseline: 8 / 12; O-01);
 - no tracebacks.
 
+**R-04b, the 2nd ear's resampler** (a model-input change, so measured on its own). MOUTH streams reply audio at
+24 kHz in chunks, and EARS converts it to 16 kHz for the agent channel of the turn-taking heads. The old code ran
+`np.interp` on each chunk separately, with `linspace(0, len-1, n)`: it dropped a fraction of a sample at every chunk
+edge, stretched each chunk slightly, and had no anti-alias filter. `AgentPlayback` now uses one
+`StreamingAudioResampler(24000 → 16000)` per reply, reset at the reply's start and at its end or barge.
+`scripts/validate_second_ear.py` compares both paths on the EARS engine. Setup: a LibriSpeech clip as the agent
+(16 → 24 kHz → chunks of 40 / 80 / 160 ms ± 50% → the 2nd ear), and another clip as the user cutting in 1.5 s in.
+
+| 80 ms chunks, 36 trials | old (per-chunk interp) | new (stateful polyphase) |
+|---|---|---|
+| 2nd ear vs the original clip, SNR | **−0.9 dB** (−2.9 to +0.3 over chunk sizes) | **29.7 dB** (any chunk size) |
+| agent alone: false barges / mean yield prob | 0 / 0.000 | 0 / 0.000 |
+| user cuts in: barges / median latency | 29 / 36, 1.38 s | 28 / 36, 1.70 s |
+
+Paired over the 28 trials where both barged: 24 fire in the same hop, 3 one hop later with the new ear, and 1 much
+earlier (mean shift −0.18 hops). One trial barged only with the old ear. The medians differ by one hop because they
+straddle a hop boundary. So barge detection is unchanged within this test's resolution, and the agent channel now
+carries the actual reply audio instead of a drifting, aliased copy. This synthetic test has no echo of the agent in
+the mic; a time-aligned 2nd ear is what would let the heads match echo against it.
+
+Stack (no-smart config):
+- smoke PASS;
+- `load_test_ears.py` at 1 conv: 942, 892 and 870 ms. The first run's detection was 708 ms, and the repeats 653 /
+  644 (R-04a: 641);
+- at 4 conv: 1097 / 1093 ms, against 1056–1078 in R-04a;
+- hop lag p50 / p90 unchanged; one ~590 ms max in the first run after a fresh start only;
+- no tracebacks.
+
+New test: `test_second_ear_does_not_depend_on_chunk_edges` (the same audio cut differently gives the same ear; it
+fails on the old code).
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

@@ -29,12 +29,36 @@ def test_playback_estimate():
 
 def test_second_ear_hops():
     pb = AgentPlayback(16000)
-    pb.add(np.ones(2400, np.float32))                           # 0.1 s at 24 kHz -> 1600 samples at 16 kHz
+    pb.add(np.ones(2400, np.float32))                           # 0.1 s at 24 kHz -> ~1600 samples at 16 kHz
     hop = pb.take_hop(5120)
-    assert hop.shape == (5120,) and hop[:1600].min() == 1.0 and not hop[1600:].any()
+    n = int(np.count_nonzero(hop))
+    assert hop.shape == (5120,) and 1580 <= n <= 1600, n        # a few held back for the filter's future input
+    assert np.allclose(hop[40:n - 40], 1.0, atol=1e-3)          # the level is kept inside the clip
     assert not pb.take_hop(5120).any()                          # nothing left: zeros
     pb.add(np.ones(2400, np.float32)); pb.clear_ear()
     assert not pb.take_hop(16).any()
+
+
+def ear_audio(chunks):
+    pb = AgentPlayback(16000); pb.start()
+    for c in chunks:
+        pb.add(c)
+    return pb.take_hop(len(pb.ear))
+
+
+def test_second_ear_does_not_depend_on_chunk_edges():
+    """The same reply audio, cut into chunks differently, gives the same 2nd-ear audio (R-04b: the old per-chunk
+    interpolation dropped a fractional sample at every chunk edge, so the ear drifted)."""
+    rng = np.random.default_rng(0)
+    a24 = (0.3 * np.sin(2 * np.pi * 300 * np.arange(24000 * 2) / 24000) + 0.01 * rng.standard_normal(48000)) \
+        .astype(np.float32)
+    whole = ear_audio([a24])
+    cuts = np.sort(rng.choice(np.arange(1, len(a24)), 60, replace=False))
+    pieces = ear_audio(np.split(a24, cuts))
+    assert len(whole) == len(pieces) and np.allclose(whole, pieces, atol=1e-5)
+    pb = AgentPlayback(16000); pb.add(a24[:24000]); pb.clear_ear(); pb.start()   # a new reply starts clean
+    pb.add(a24)
+    assert np.allclose(pb.take_hop(len(pb.ear)), whole, atol=1e-5)
 
 
 def app(max_sessions=1):
