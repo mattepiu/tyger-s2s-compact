@@ -20,7 +20,9 @@ from datasets import load_dataset  # noqa: E402
 from app import weights  # noqa: E402
 from app.config import load_config  # noqa: E402
 from app.ears.playback import AgentPlayback  # noqa: E402
-from app.ears_core.batched import EarsEngine, EarsSession, HOP_N  # noqa: E402
+from app.plugins.ears.nemotron_tyger.constants import HOP_N  # noqa: E402
+from app.plugins.ears.nemotron_tyger.engine import EarsEngine  # noqa: E402
+from app.plugins.ears.nemotron_tyger.session import EarsSession  # noqa: E402
 from app.plugins.tts import WIRE_SR  # noqa: E402
 from app.resample import StreamingAudioResampler  # noqa: E402
 

@@ -16,8 +16,9 @@ logging.basicConfig(level=logging.WARNING)
 from datasets import load_dataset
 from app.config import load_config
 from app import weights
-from app.ears_core.batched import EarsEngine, EarsSession
-from app.ears_core.batched import HOP_N
+from app.plugins.ears.nemotron_tyger.constants import HOP_N
+from app.plugins.ears.nemotron_tyger.engine import EarsEngine
+from app.plugins.ears.nemotron_tyger.session import EarsSession
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--double-reset", action="store_true", help="emulate the old finish_turn reset after the barge")
@@ -55,7 +56,7 @@ for t in range(a.trials):
             if a.double_reset:
                 second_reset_at = h + 2                       # MOUTH's barged D lands ~1 hop later
         if finals:
-            text = eng.transcribe([w for _, w in finals])[0]; break
+            text = eng.asr.transcribe([w for _, w in finals])[0]; break
     if text is None:
         continue
     got = set(words(text))

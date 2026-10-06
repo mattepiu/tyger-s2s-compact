@@ -1,7 +1,8 @@
-"""nemotron-tyger-1.0: the nemotron streaming ASR encoder (nvidia/nemotron-3.5-asr-streaming-0.6b) + the tyger 1.0
-turn-taking heads (exp-12 arm C: LoRA + state / hazard / yield / backchannel / endpoint heads; private weights,
-`heads_repo` / `heads_file`). Wraps EarsEngine + EarsService (app/ears_core/batched.py, unchanged): one GPU thread,
-one batched step per 320 ms hop for every conversation with a hop ready.
+"""nemotron-tyger-1.0, the EarsPlugin surface: nemotron-3.5-asr (`ears.nemotron`, default
+nvidia/nemotron-3.5-asr-streaming-0.6b) + the tyger 1.0 turn-taking heads (exp-12 arm C: LoRA + state / hazard /
+yield / backchannel / endpoint heads; private weights, `heads_repo` / `heads_file`). Builds EarsEngine + EarsService:
+one GPU thread, one batched step per 320 ms hop for every conversation with a hop ready. The class stays light to
+import (EARS's page and tests read THRESHOLDS); the models load in the constructor.
 
 Per hop, feed() returns FRAME / ENDPOINT / BARGE / BACKCHANNEL events. A session is an EarsSession: reset() starts
 a new turn (applied before its next hop); its thresholds are per conversation (the page's live-tuning sliders).
@@ -9,8 +10,8 @@ a new turn (applied before its next hop); its thresholds are per conversation (t
 from __future__ import annotations
 import logging
 
-from app.ears_core.labeling import FRAME_S                  # one decision frame: the fallback slider's unit
 from app.plugins.base import Slider, Threshold, find_threshold
+from .constants import FRAME_S, HOP_N, MODEL_ID, SR
 
 log = logging.getLogger("ears")
 
@@ -25,7 +26,6 @@ THRESHOLDS = (
     Threshold("fallback_frames", int, config_key="fallback_sil_frames", default=15,
               slider=Slider("silence fallback", 0.4, 2.5, 0.1, decimals=1, scale=FRAME_S, unit="s", off=100000)),
 )
-_ATTR = {"fallback_frames": "FALLBACK_SIL_FRAMES"}           # EarsSession's attribute name, where it differs
 
 
 class NemotronTyger:
@@ -34,10 +34,10 @@ class NemotronTyger:
     def __init__(self, conf: dict, ctx):
         import torch
         from app import weights
-        from app.ears_core.batched import EarsEngine, EarsService, HOP_N, MODEL_ID
-        from app.ears_core.encoder_stream import ENC_SR
+        from .engine import EarsEngine
+        from .service import EarsService
         torch.set_num_threads(int(conf.get("cpu_threads", 4)))   # default 48 threads mostly spin-wait
-        self.sr = ENC_SR
+        self.sr = SR
         self.hop_samples = HOP_N                                 # 320 ms @ 16 kHz = 5120
         self.defaults = {t.name: t.from_config(conf) for t in THRESHOLDS}
         heads = weights.ensure_heads(conf["heads_repo"], conf["heads_file"])
@@ -67,11 +67,11 @@ class NemotronTyger:
         return self.service.active()
 
     def thresholds(self, session) -> dict:
-        return {t.name: getattr(session, _ATTR.get(t.name, t.name)) for t in THRESHOLDS}
+        return {t.name: getattr(session, t.name) for t in THRESHOLDS}
 
     def set_threshold(self, session, name, value):
         """Set one of THRESHOLDS for this conversation; returns the value now in effect. KeyError for an unknown
         name, ValueError for a bad value."""
         v = find_threshold(THRESHOLDS, name).parse(value)
-        setattr(session, _ATTR.get(name, name), v)
+        setattr(session, name, v)
         return v

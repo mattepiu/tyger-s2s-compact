@@ -68,7 +68,7 @@ def test_threshold_spec():
 
 def test_nemotron_tyger_sliders_unchanged():
     """R-05 moved the sliders into the plugin; the user asked to keep nemotron-tyger's as they were on the page."""
-    from app.plugins.ears.nemotron import THRESHOLDS
+    from app.plugins.ears.nemotron_tyger.plugin import THRESHOLDS
     got = {t.name: t.slider_spec() for t in THRESHOLDS if t.slider}
     want = {"ep_thr": ("endpoint p_end τ", 0.30, 0.99, 0.005, 3, 1.0, "", "p_end", None),
             "ep_deb": ("endpoint deb", 1, 5, 1, 0, 1.0, "", None, None),

@@ -134,7 +134,7 @@ REGISTRY = {
            "fake":              "app.plugins.llm.fake:FakeLLM"},
   "tts":  {"voxcpm2": "app.plugins.tts.voxcpm2:VoxCPM2",
            "fake": "app.plugins.tts.fake:FakeTTS"},
-  "ears": {"nemotron-tyger-1.0": "app.plugins.ears.nemotron:NemotronTyger", "fake": "app.plugins.ears.fake:EnergyEars"},
+  "ears": {"nemotron-tyger-1.0": "app.plugins.ears.nemotron_tyger:NemotronTyger", "fake": "app.plugins.ears.fake:EnergyEars"},
 }
 ```
 
@@ -229,7 +229,7 @@ app/plugins/
     voxcpm2.py
     fake.py
   ears/
-    nemotron.py          # wraps ears_core/batched.py
+    nemotron_tyger/      # nemotron-3.5-asr + the tyger 1.0 heads: one plugin package (REFACTOR.md R-06)
     fake.py
 ```
 `app/llm.py`, `app/tts_voxcpm.py` and the direct engine construction in `mouth.py` / `server.py` go away. Their

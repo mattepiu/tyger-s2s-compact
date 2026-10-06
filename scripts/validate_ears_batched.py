@@ -1,5 +1,5 @@
-"""Validate the batched multi-session EARS (app/ears_core/batched.py) against the single-session reference
-(EndpointEars): per-frame head outputs and events, alone and 4 sessions with staggered starts, plus tick timing.
+"""Validate the batched multi-session EARS (app/plugins/ears/nemotron_tyger) against the single-session research
+reference (scripts/reference/ears_ref EndpointEars): per-frame head outputs and events, alone and 4 sessions with staggered starts, plus tick timing.
 Mic input = public LibriSpeech test clips (hf-internal-testing/librispeech_asr_dummy), in memory; prints numbers
 and event kinds only. Needs the GPU free (stop run.sh) and `datasets` (pip install datasets).
 
@@ -12,9 +12,10 @@ logging.basicConfig(level=logging.WARNING)
 from datasets import load_dataset
 from app.config import load_config
 from app import weights
-from app.ears_core.endpoint_ears import EndpointEars
-from app.ears_core.batched import EarsEngine, EarsSession, SEG_S
-from app.ears_core.batched import HOP_N
+from scripts.reference.ears_ref.endpoint_ears import EndpointEars
+from app.plugins.ears.nemotron_tyger.constants import HOP_N, SEG_S
+from app.plugins.ears.nemotron_tyger.engine import EarsEngine
+from app.plugins.ears.nemotron_tyger.session import EarsSession
 
 ap = argparse.ArgumentParser(); ap.add_argument("--no-merge", action="store_true"); ap.add_argument("--no-graph", action="store_true")
 a = ap.parse_args()
@@ -77,7 +78,7 @@ def run_eng(sessions, hop_lists, offsets):
         for s, *_ in items:
             events, finals = res[s]
             if finals:                                 # a long turn's earlier segments come from the ASR thread
-                for (ev, wav), txt in zip(finals, eng.transcribe([w for _, w in finals])):
+                for (ev, wav), txt in zip(finals, eng.asr.transcribe([w for _, w in finals])):
                     deadline = time.time() + 10
                     while any(t is None for t in ev.get("seg_texts", [])) and time.time() < deadline:
                         time.sleep(0.01)
@@ -108,7 +109,7 @@ def compare(name, ref_tr, got_tr, ref_ev, got_ev):
             print(f"    {src}: {kind} at frame {fi} | yield ref {[round(x[1],3) for x in ref_tr[lo:fi]]} got {[round(x[2],3) for x in got_tr[lo:fi]]}")
 
 print("== single session vs reference ==")
-s0 = EarsSession(0, **thr); s0.FALLBACK_SIL_FRAMES = int(e.get("fallback_sil_frames", 15))
+s0 = EarsSession(0, **thr); s0.fallback_frames = int(e.get("fallback_sil_frames", 15))
 (got,), ticks1 = run_eng([s0], [scen[0]], [0])
 compare("session 0", refs[0][0], got[0], refs[0][1], got[1])
 print(f"  tick ms p50 {np.median([t for t,_ in ticks1[3:]]):.0f}  p90 {np.percentile([t for t,_ in ticks1[3:]],90):.0f}")
@@ -116,7 +117,7 @@ print(f"  tick ms p50 {np.median([t for t,_ in ticks1[3:]]):.0f}  p90 {np.percen
 print(f"== {S} sessions together (staggered starts) vs reference ==")
 sess = [EarsSession(k, **thr) for k in range(S)]
 for s in sess:
-    s.FALLBACK_SIL_FRAMES = int(e.get("fallback_sil_frames", 15))
+    s.fallback_frames = int(e.get("fallback_sil_frames", 15))
 gots, ticksN = run_eng(sess, scen, [0, 3, 7, 11])
 for k in range(S):
     compare(f"session {k}", refs[k][0], gots[k][0], refs[k][1], gots[k][1])

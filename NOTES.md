@@ -130,6 +130,30 @@ Checked:
 
 I-15 corrected: the EARS engine alone aborts at exit (4 / 4 runs, on the code before R-01 too), not VoxCPM2 + EARS.
 
+**R-06a, the `nemotron_tyger` plugin package** (`app/plugins/ears/nemotron_tyger/`; its `__init__` lists the
+modules). nemotron-3.5-asr and the tyger 1.0 heads are now one plugin package, and `app/ears_core/` is gone:
+- `asr.py`: `NemotronAsr`, everything specific to that checkpoint: GPU features, the layer-15 encode with its hook
+  and all-zero cache, transcription. It is split out of `EarsEngine`, and the model id comes from `ears.nemotron`.
+- `rnnt.py`: that model's decoder, moved unchanged.
+- `constants.py`: every fixed number in one place. Before they sat in five modules: `STATE_NAMES` twice, the model
+  id four times, and `FRAME_S` alone in a 3-line `labeling.py`.
+- `head_batch.py` (RingKV, HeadBatch), `session.py`, `engine.py` and `service.py`: `batched.py` split by job.
+- `heads.py`: for R-06a, the three research model classes, verbatim. R-06b replaces it.
+- The research reference (LiveEars, EndpointEars, EncoderStream, the policy, the model classes) moved unchanged to
+  `scripts/reference/ears_ref/`, still used by `validate_ears_batched.py`. The live path keeps only the state-head
+  decision it uses, as `state_decision`, for the page's state name.
+- `EarsSession.FALLBACK_SIL_FRAMES` is now `fallback_frames` (the threshold's name), so the plugin's attribute
+  mapping is gone.
+
+Parity, all on this box:
+- `validate_ears_batched.py`: the same max diffs as the baseline to the last digit, events and transcripts match in
+  all 5 sessions. Tick p50 at 4 sessions 67 / 58 / 52 ms over 3 runs, baseline 60;
+- `validate_rnnt.py`: 40 / 40 identical, twice;
+- `validate_barge.py`: 12 / 12, recall 0.94, first 3 words 0.83, 1.22 s;
+- `validate_long_turn.py`: recall 1.00 / 0.97 / 0.94;
+- the EARS contract passes;
+- stack: smoke PASS, `load_test_ears.py` 874 / 1086 ms at 1 / 4 conv.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

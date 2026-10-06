@@ -1,11 +1,12 @@
-"""EARS's ASR thread job handling (app/ears_core/batched.py), GPU-free: transcription is stubbed, so this checks only
-how finals (an endpoint waits on them) and partials (backchannels) are resolved, especially when transcription
-fails. Run: .venv/bin/python tests/test_ears_asr_jobs.py"""
+"""EARS's ASR thread job handling (app/plugins/ears/nemotron_tyger/engine.py), GPU-free: transcription is stubbed, so
+this checks only how finals (an endpoint waits on them) and partials (backchannels) are resolved, especially when
+transcription fails. Run: .venv/bin/python tests/test_ears_asr_jobs.py"""
 import os, sys, logging
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np  # noqa: E402
-from app.ears_core.batched import EarsEngine, _Job  # noqa: E402
+from app.plugins.ears.nemotron_tyger.engine import EarsEngine, Job  # noqa: E402
 
 logging.disable(logging.CRITICAL)                  # the failure paths log tracebacks on purpose
 
@@ -18,16 +19,16 @@ class Sess:
 def engine(transcribe):
     """An EarsEngine with no models: only the ASR job handling runs."""
     e = EarsEngine.__new__(EarsEngine)
-    e.transcribe = transcribe
+    e.asr = SimpleNamespace(transcribe=transcribe)
     return e
 
 
 def final(sess, got):
-    return _Job("final", sess, sess.turn_gen, np.zeros(16, np.float32), done=got.append)
+    return Job("final", sess, sess.turn_gen, np.zeros(16, np.float32), done=got.append)
 
 
 def partial(sess, gen=None):
-    return _Job("partial", sess, sess.turn_gen if gen is None else gen, np.zeros(16, np.float32))
+    return Job("partial", sess, sess.turn_gen if gen is None else gen, np.zeros(16, np.float32))
 
 
 def test_finals_and_partials_resolved():

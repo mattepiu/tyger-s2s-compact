@@ -12,7 +12,7 @@ REGISTRY = {
     "tts": {"voxcpm2": "app.plugins.tts.voxcpm2:VoxCPM2",
             "fake": "app.plugins.tts.fake:FakeTTS"},
     # nemotron ASR encoder + the tyger 1.0 turn-taking heads (exp-12 arm C: endpoint / barge / backchannel)
-    "ears": {"nemotron-tyger-1.0": "app.plugins.ears.nemotron:NemotronTyger",
+    "ears": {"nemotron-tyger-1.0": "app.plugins.ears.nemotron_tyger:NemotronTyger",
              "fake": "app.plugins.ears.fake:EnergyEars"},
 }
 
