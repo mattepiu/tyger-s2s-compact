@@ -4,7 +4,7 @@ call ask_expert, or start a background task, on the labelled synthetic set in sc
 Routes: local (no call), tool (any lookup / action, cancel_task included), expert (ask_expert), background
 (start_task). A case may list `also` routes that count as right too (planning: answered now by the expert, or
 researched as a task). The decision is the reply model's alone, so only that model runs: no smart model, no
-remote calls, no cost. Each case is sent exactly as MOUTH would send it (mouth.reply_prefix for the mode, then the
+remote calls, no cost. Each case is sent exactly as MOUTH would send it (messages.reply_prefix for the mode, then the
 case's history, then the user turn, with the case's `status` note in front as MOUTH prepends it), at the model's
 configured temperature, `--samples` times. The mode follows config.yaml (tasks on if mouth.tasks.enabled);
 --no-tasks / --no-expert evaluate the prompts without them (cases needing the missing route are skipped). Needs the GPU free (stop run.sh). Prints routes and rates;
@@ -31,7 +31,7 @@ from app.plugins import plugin_class
 from app.plugins.base import PluginContext
 from app.prompts import load_prompts
 from app.tools import build_tools, execute_tool, EXPERT, START, CANCEL
-from app.mouth import reply_prefix, turns_messages, round_messages, with_status
+from app.messages import reply_prefix, turns_messages, round_messages, with_status
 from app.lang import guess_language, language_text
 
 ROUTES = ("local", "tool", "expert", "background")

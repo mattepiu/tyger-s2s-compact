@@ -4,25 +4,13 @@ cancelled by a turn (I-07). Run: .venv/bin/python tests/test_mouth_session.py
 import os, sys, json, socket, threading, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fakes import FakeLLM, FakeTTS, FakeMouth, PROMPTS, make_session, run_turn  # noqa: E402
+from fakes import FakeLLM, FakeTTS, FakeMouth, PROMPTS, make_session, run_turn, stub_tools, slow_tools  # noqa: E402
 from app import mouth as M  # noqa: E402
-from app import tools as T  # noqa: E402
+from app.messages import reply_prefix  # noqa: E402
 from app.wire import send_msg, recv_msg  # noqa: E402
 
 TOOL_REPLY = '<tool_call>\n{"name": "get_weather", "arguments": {"location": "Paris"}}\n</tool_call>'
 
-
-class SlowTool:
-    """Patch execute_tool with one that sleeps (polling nothing: a real blocking HTTP call)."""
-    def __init__(self, seconds):
-        self.seconds = seconds; self.orig = M.execute_tool
-
-    def __enter__(self):
-        M.execute_tool = lambda name, args: (time.sleep(self.seconds), {"answer": "sunny"})[1]
-        return self
-
-    def __exit__(self, *a):
-        M.execute_tool = self.orig
 
 
 def live_session(llm=None, tts=None):
@@ -100,7 +88,7 @@ def test_barge_before_any_audio_keeps_user():
 def test_barge_during_slow_tool_returns_fast():
     llm = FakeLLM(reply=TOOL_REPLY)
     s, m = make_session(llm, FakeTTS(n=3))
-    with SlowTool(10.0):
+    with slow_tools(10.0):
         stop = threading.Event(); t_stop = None; t_done = None
         for kind, val in s.stream_turn("weather in Paris?", stop.is_set):
             if kind == "audio" and t_stop is None:          # filler is playing -> barge
@@ -115,7 +103,7 @@ def test_barge_during_slow_tool_returns_fast():
 def test_tool_turn_completes():
     llm = FakeLLM(reply=TOOL_REPLY)
     s, m = make_session(llm, FakeTTS(n=3))
-    with SlowTool(0.05):
+    with slow_tools(0.05):
         evs, _ = run_turn(s, "weather in Paris?")
     kinds = [k for k, _, _ in evs]
     assert kinds[-1] == "done" and kinds.count("audio") >= 6, kinds      # filler + answer
@@ -127,13 +115,9 @@ def test_tool_turn_completes():
 def test_tool_exchange_kept_in_history():
     llm = FakeLLM(reply=TOOL_REPLY)
     s, m = make_session(llm, FakeTTS(n=2))
-    orig = M.execute_tool
-    M.execute_tool = lambda n, a: {"location": "Paris", "answer": "sunny, 20 C",
-                                   "sources": [{"content": "x" * 2000}]}
-    try:
+    with stub_tools(lambda n, a: {"location": "Paris", "answer": "sunny, 20 C",
+                                   "sources": [{"content": "x" * 2000}]}):
         run_turn(s, "weather in Paris?")
-    finally:
-        M.execute_tool = orig
     assert [h["role"] for h in s.history] == ["user", "assistant", "tool", "assistant"]
     assert s.history[1]["tool_calls"][0]["name"] == "get_weather"   # neutral format: {"id", "name", "arguments"}
     tool = s.history[2]["content"]
@@ -147,7 +131,7 @@ def test_tool_call_ids_unique_and_matched():
     """Plugin-issued IDs: each tool result answers its own call, and IDs never repeat across turns."""
     llm = FakeLLM(reply=TOOL_REPLY)
     s, m = make_session(llm, FakeTTS(n=2))
-    with SlowTool(0):
+    with slow_tools(0):
         for q in ("weather in Paris?", "and in Rome?", "and in Oslo?"):
             run_turn(s, q)
     calls = [c for h in s.history if h.get("tool_calls") for c in h["tool_calls"]]
@@ -159,7 +143,7 @@ def test_tool_call_ids_unique_and_matched():
 def test_history_trimmed_by_whole_turns():
     llm = FakeLLM(reply=TOOL_REPLY)
     s, m = make_session(llm, FakeTTS(n=1))
-    with SlowTool(0.0):
+    with slow_tools(0.0):
         for i in range(m.history_turns + 3):
             run_turn(s, f"weather question {i}")
     assert len(s.turns) == m.history_turns
@@ -186,13 +170,9 @@ def test_filler_starts_before_call_finishes_decoding():
     llm = FakeLLM(reply=LONG_CALL, step_s=0.01, chars=2)     # named at ~0.15 s, decoded at ~0.75 s
     s, m = make_session(llm, FakeTTS(n=3))
     t_tool = []
-    orig = M.execute_tool
-    M.execute_tool = lambda n, a: (t_tool.append(time.perf_counter()), {"answer": "sunny"})[1]
-    try:
+    with stub_tools(lambda n, a: (t_tool.append(time.perf_counter()), {"answer": "sunny"})[1]):
         t0 = time.perf_counter()
         evs, _ = run_turn(s, "weather in Paris?")
-    finally:
-        M.execute_tool = orig
     first_audio = next(t for k, _, t in evs if k == "audio") - t0
     assert len(t_tool) == 1 and 0.6 < t_tool[0] - t0 < 1.1, "tool should start as soon as the call is parsed"
     assert first_audio < t_tool[0] - t0 - 0.2, \
@@ -204,7 +184,7 @@ def test_still_filler_covers_slow_tool():
     llm = FakeLLM(reply=TOOL_REPLY)
     tts = FakeTTS(n=5, chunk_s=0.08, step_s=0.01)           # each line: 0.4 s of audio
     s, m = make_session(llm, tts)
-    with SlowTool(3.0):
+    with slow_tools(3.0):
         evs, _ = run_turn(s, "weather in Paris?")
     kinds = [c[0] for c in llm.calls]
     assert kinds.count("still") == M.MAX_STILL, kinds
@@ -217,7 +197,7 @@ def test_still_filler_covers_slow_tool():
 def test_no_still_filler_for_fast_tool():
     llm = FakeLLM(reply=TOOL_REPLY)
     s, m = make_session(llm, FakeTTS(n=3))
-    with SlowTool(0.05):
+    with slow_tools(0.05):
         run_turn(s, "weather in Paris?")
     assert "still" not in [c[0] for c in llm.calls]
 
@@ -226,7 +206,7 @@ def test_barge_during_filler_halts_within_a_chunk():
     llm = FakeLLM(reply=TOOL_REPLY)
     tts = FakeTTS(n=20, step_s=0.02)
     s, m = make_session(llm, tts)
-    with SlowTool(3.0):
+    with slow_tools(3.0):
         stop = threading.Event(); t_stop = None; after = 0
         t_done = None
         for kind, val in s.stream_turn("weather in Paris?", stop.is_set):
@@ -246,7 +226,7 @@ def test_barge_during_filler_halts_within_a_chunk():
 def test_model_words_before_tag_replace_filler():
     llm = FakeLLM(reply="Sure, let me look up the current weather in Paris for you right now. " + TOOL_REPLY)
     s, m = make_session(llm, FakeTTS(n=3))
-    with SlowTool(0.05):
+    with slow_tools(0.05):
         run_turn(s, "weather in Paris?")
     assert "leadin" not in [c[0] for c in llm.calls], "spoke both the model's own lead-in and a filler"
 
@@ -330,12 +310,8 @@ def test_flagged_tool_call_never_runs():
                 yield ev
     ran = []
     s, m = make_session(Flagging(reply=TOOL_REPLY), FakeTTS(n=2))
-    orig = M.execute_tool
-    M.execute_tool = lambda n, a: ran.append(n) or {"answer": "sunny"}
-    try:
+    with stub_tools(lambda n, a: ran.append(n) or {"answer": "sunny"}):
         run_turn(s, "weather?")
-    finally:
-        M.execute_tool = orig
     assert ran == [] and "invalid arguments" in s.history[2]["content"]
 
 
@@ -354,7 +330,7 @@ def test_no_expert_without_smart():
     run_turn(s, "hello")
     msgs = s.m.llm.calls[0][1]
     assert msgs[0]["content"] == PROMPTS.text("system", "voice_tools") and msgs[-1]["content"] == "hello"
-    assert msgs[:-1] == M.reply_prefix(PROMPTS, False)                # system + the lookup few-shot turns
+    assert msgs[:-1] == reply_prefix(PROMPTS, False)                # system + the lookup few-shot turns
     assert not any(c["name"] == "ask_expert" for x in msgs if x.get("tool_calls") for c in x["tool_calls"])
     assert "ask_expert" not in [t["function"]["name"] for t in m.tools]
 
@@ -425,12 +401,8 @@ def test_smart_tool_round():
     smart = FakeLLM(smart="Let me check that. " + TOOL_REPLY)
     s, m = make_session(llm, FakeTTS(n=2), smart=smart)
     ran = []
-    orig = M.execute_tool
-    M.execute_tool = lambda n, a: ran.append(n) or {"answer": "sunny"}
-    try:
+    with stub_tools(lambda n, a: ran.append(n) or {"answer": "sunny"}):
         evs, _ = run_turn(s, "should I bike to work in Paris tomorrow?")
-    finally:
-        M.execute_tool = orig
     assert ran == ["get_weather"] and kinds(smart) == ["smart", "smart_b"]
     second = smart.calls[1][1]
     assert second[-2]["tool_calls"][0]["name"] == "get_weather" and "sunny" in second[-1]["content"]
@@ -442,7 +414,7 @@ def test_smart_tool_rounds_capped():
     llm = FakeLLM(reply=ASK)
     smart = FakeLLM(smart=TOOL_REPLY, smart_b=TOOL_REPLY)         # never stops calling tools
     s, m = make_session(llm, FakeTTS(n=2), smart=smart, max_steps=1)
-    with SlowTool(0):
+    with slow_tools(0):
         evs, _ = run_turn(s, "keep checking")
     limit = PROMPTS.text("smart", "limit")
     assert kinds(smart) == ["smart", "smart_b", "smart_b"], kinds(smart)
@@ -455,12 +427,8 @@ def test_other_tool_results_go_to_smart():
     both = ('<tool_call>\n{"name": "get_weather", "arguments": {"location": "Rome"}}\n</tool_call>\n' + ASK)
     llm, smart = FakeLLM(reply=both), FakeLLM()
     s, m = make_session(llm, FakeTTS(n=2), smart=smart)
-    orig = M.execute_tool
-    M.execute_tool = lambda n, a: {"answer": "rainy, 14 C"}
-    try:
+    with stub_tools(lambda n, a: {"answer": "rainy, 14 C"}):
         run_turn(s, "is Rome nice for a walk tomorrow, and what should I see?")
-    finally:
-        M.execute_tool = orig
     last = smart.calls[0][1][-1]["content"]
     assert "get_weather" in last and "rainy, 14 C" in last
     assert [c["name"] for c in s.history[1]["tool_calls"]] == ["get_weather", "ask_expert"]
@@ -469,7 +437,7 @@ def test_other_tool_results_go_to_smart():
 def test_smart_context_is_recent_plain_turns():
     llm, smart = FakeLLM(), FakeLLM()
     s, m = make_session(llm, FakeTTS(n=1), smart=smart, context_turns=2)
-    with SlowTool(0):
+    with slow_tools(0):
         for q in ("first question", "second question"):
             run_turn(s, q)
         llm.text["reply"] = TOOL_REPLY; run_turn(s, "weather in Paris?")

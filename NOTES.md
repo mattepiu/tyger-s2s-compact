@@ -25,6 +25,14 @@ New tests: `test_ears_asr_jobs.py` (4 tests), `test_lost_mouth_ends_the_conversa
 - `load_test_ears.py` end of speech → first audio p50 860 ms at 1 conv and 1071 ms at 4, no endpoint inside an
   utterance, one reply text.
 
+**R-02, `app/messages.py`:** the message builders moved out of `mouth.py` unchanged. The two private helpers became
+the module's public `with_shots` / `compact_result`. `tasks.py` imports them and `app.tools` at the top: before, it
+imported `app.mouth` inside its functions, so that tests patching `mouth.execute_tool` reached tasks too. Both
+modules now call `tools.execute_tool`, and tests stub it in one place (`tests/fakes.py` `stub_tools` /
+`slow_tools`, replacing nine copied save / patch / restore blocks). `test_tasks_never_imports_mouth` reads
+tasks.py's imports, inside functions too, and fails on the old file. Pure move: every GPU-free test passes with the
+same counts.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

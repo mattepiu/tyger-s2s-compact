@@ -2,9 +2,11 @@
 fake.py); FakeMouth carries the attributes Session reads from Mouth. Test text is synthetic.
 """
 import os, sys, threading, time
+from contextlib import contextmanager
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app import mouth as M  # noqa: E402
+from app import tools as T  # noqa: E402
 from app.prompts import default_prompts  # noqa: E402
 from app.tools import build_tools  # noqa: E402
 from app.plugins.llm.fake import FakeLLM, wait_or_stop  # noqa: E402,F401
@@ -12,6 +14,22 @@ from app.plugins.tts.fake import FakeTTS  # noqa: E402
 from app.tasks import TaskSlots  # noqa: E402
 
 PROMPTS = default_prompts()     # the repo's prompts.yaml; FakeLLM routes requests by their system prompt
+
+
+@contextmanager
+def stub_tools(fn):
+    """Every tool call (MOUTH's and background tasks') goes to fn(name, args) instead of the real executors."""
+    orig = T.execute_tool
+    T.execute_tool = fn
+    try:
+        yield
+    finally:
+        T.execute_tool = orig
+
+
+def slow_tools(seconds, result=None):
+    """Tools that block for `seconds` (polling nothing, like a real HTTP call), then answer `result`."""
+    return stub_tools(lambda name, args: (time.sleep(seconds), result or {"answer": "sunny"})[1])
 
 
 class FakeMouth:

@@ -15,6 +15,8 @@ goals, results or summaries.
 from __future__ import annotations
 import logging, threading, time
 
+from app import tools
+from app.messages import plain_context, round_messages
 from app.plugins.base import LLMError
 from app.tools import FINISH
 
@@ -136,7 +138,6 @@ class TaskRunner:
 
     # ---- the agentic loop, on its own thread ----
     def _messages(self, task, turns):
-        from app.mouth import plain_context
         p = self.m.prompts["smart"]
         user = p.fill("tasks", "user", goal=task.goal, transcript=task.transcript or task.goal,
                       language=p.language_or_unknown(task.lang_text))
@@ -144,7 +145,6 @@ class TaskRunner:
             [{"role": "user", "content": user}]
 
     def _run(self, task, turns):
-        from app import mouth as M
         m = self.m; smart = m.llms["smart"]; p = m.prompts["smart"]
         deadline = task.t0 + self.max_wall_s
         stop = lambda: task.stop.is_set() or time.monotonic() > deadline   # noqa: E731
@@ -179,8 +179,8 @@ class TaskRunner:
                 log.info("task #%d round %d: %s", task.id, task.steps, [c["name"] for c in calls])
                 results = [{"error": p.text("tasks", "limit")} if limit or c["name"] == FINISH else
                            {"error": c["error"]} if c.get("error") else
-                           M.execute_tool(c["name"], c.get("arguments", {})) for c in calls]
-                msgs = msgs + M.round_messages(text, calls, native, results,
+                           tools.execute_tool(c["name"], c.get("arguments", {})) for c in calls]
+                msgs = msgs + round_messages(text, calls, native, results,
                                                note=None if limit else p.result_note(task.lang_text))
             return self._end(task, "failed", why="max_steps")
         except LLMError as e:

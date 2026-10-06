@@ -228,8 +228,7 @@ def test_mouth_tool_turn_through_the_plugin():
     """A whole MOUTH tool turn on the plugin (stub client): the lead-in, the tool, phase B with the round's own
     thinking blocks sent back unchanged, then a next turn whose history carries no thinking at all."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from fakes import FakeTTS, PROMPTS, make_session, run_turn
-    import app.mouth as M
+    from fakes import FakeTTS, PROMPTS, make_session, run_turn, stub_tools
     p = make_plugin(); sent = []
     round_content = [THINK, {"type": "tool_use", "id": "toolu_w", "name": "get_weather", "input": {"location": "Oslo"}}]
 
@@ -247,13 +246,9 @@ def test_mouth_tool_turn_through_the_plugin():
                           final(round_content, stop="tool_use"))
     p.client.beta.messages.stream = stream
     s, m = make_session(p, FakeTTS(n=2))
-    orig = M.execute_tool
-    M.execute_tool = lambda n, a: {"location": a["location"], "answer": "sunny, 20 C"}
-    try:
+    with stub_tools(lambda n, a: {"location": a["location"], "answer": "sunny, 20 C"}):
         evs, _ = run_turn(s, "weather in Oslo?")
         run_turn(s, "and tomorrow?")
-    finally:
-        M.execute_tool = orig
     phase_b = next(k for k in sent if isinstance(k["messages"][-1]["content"], list))
     assert phase_b["messages"][-2] == {"role": "assistant", "content": round_content}      # native, unchanged
     assert phase_b["messages"][-1]["content"][0]["tool_use_id"] == "toolu_w"

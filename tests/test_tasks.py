@@ -5,7 +5,7 @@ close, and nothing about a task's content is logged. Run: .venv/bin/python tests
 import os, sys, json, logging, socket, threading, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fakes import FakeLLM, FakeTTS, FakeMouth, PROMPTS, make_session, run_turn  # noqa: E402
+from fakes import FakeLLM, FakeTTS, FakeMouth, PROMPTS, make_session, run_turn, stub_tools  # noqa: E402
 from app import mouth as M  # noqa: E402
 from app.tasks import TaskSlots  # noqa: E402
 from app.wire import send_msg, recv_msg  # noqa: E402
@@ -79,13 +79,9 @@ def test_task_tool_rounds():
     smart = FakeLLM(task=SEARCH)
     s, m, llm, done = session(smart=smart)
     ran = []
-    orig = M.execute_tool
-    M.execute_tool = lambda n, a: ran.append(n) or {"answer": "three good laptops"}
-    try:
+    with stub_tools(lambda n, a: ran.append(n) or {"answer": "three good laptops"}):
         run_turn(s, "research budget laptops")
         assert wait(lambda: done)
-    finally:
-        M.execute_tool = orig
     assert ran == ["web_search"] and [c[0] for c in smart.calls] == ["task", "task_b"]
     assert done[0].status == "done" and done[0].steps == 1 and done[0].result
     second = smart.calls[1][1]
@@ -159,13 +155,9 @@ def test_session_close_cancels_tasks():
 def test_max_steps_then_limit_note():
     smart = FakeLLM(task=SEARCH, task_b=SEARCH)                       # never finishes
     s, m, llm, done = session(smart=smart, tasks={"max_steps": 2})
-    orig = M.execute_tool
-    M.execute_tool = lambda n, a: {"answer": "x"}
-    try:
+    with stub_tools(lambda n, a: {"answer": "x"}):
         run_turn(s, "research laptops")
         assert wait(lambda: done)
-    finally:
-        M.execute_tool = orig
     assert done[0].status == "failed" and done[0].why == "max_steps" and len(smart.calls) == 4
     limit = PROMPTS.text("tasks", "limit")
     assert limit not in json.dumps(smart.calls[1][1]) and limit in json.dumps(smart.calls[3][1], ensure_ascii=False)
@@ -193,13 +185,9 @@ def test_logs_carry_no_task_content():
     logging.getLogger().setLevel(logging.INFO)
     try:
         s, m, llm, done = session(smart=FakeLLM(task=SEARCH))
-        orig = M.execute_tool
-        M.execute_tool = lambda n, a: {"answer": "x"}
-        try:
+        with stub_tools(lambda n, a: {"answer": "x"}):
             run_turn(s, "research budget laptops please")
             assert wait(lambda: done)
-        finally:
-            M.execute_tool = orig
     finally:
         logging.getLogger().removeHandler(h); logging.getLogger().setLevel(old)
     text = "\n".join(records)
@@ -311,6 +299,26 @@ def test_escalation_gets_the_full_result():
     assert "The full result of the task, in plain text." in req[-1]["content"]
     assert any("[Background task #1" in x["content"] for x in req if x["role"] == "user")   # the note, as context
     peer.close()
+
+
+def tasks_imports(source):
+    """Every module app/tasks.py imports, at the top or inside a function."""
+    import ast
+    out = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            out |= {a.name for a in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            out |= {node.module} | {f"{node.module}.{a.name}" for a in node.names}
+    return out
+
+
+def test_tasks_never_imports_mouth():
+    """tasks.py gets the message builders from app.messages and tools from app.tools: no import cycle with MOUTH
+    (it used to import app.mouth inside its functions)."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "app", "tasks.py")) as f:
+        assert "app.mouth" not in tasks_imports(f.read())
 
 
 if __name__ == "__main__":

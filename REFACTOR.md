@@ -4,6 +4,8 @@
 plugins; the endpoint head is tied to nemotron, make them one plugin"). Implemented step by step on branch
 `plugins`, one commit per step (`R-NN: …` in the subject), each checked for parity before the next.
 
+**Progress:** R-00 plan, R-01, R-02 done (2026-10-06).
+
 **Goal:** a reader can find where a thing happens from its name, and a new plugin is one package plus one registry
 line, with no edits to MOUTH, EARS's server or the web page.
 
