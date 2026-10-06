@@ -50,15 +50,15 @@ def test_tools_offered_only_with_tasks():
 def test_start_chat_done_status():
     s, m, llm, done = session()
     run_turn(s, "can you research budget laptops for programming and get back to me?")
-    assert [h["role"] for h in s.history] == ["user", "assistant", "tool", "assistant"]
-    assert json.loads(s.history[2]["content"]) == {"task_id": 1, "status": "started"}
+    assert [h["role"] for h in s.history.messages] == ["user", "assistant", "tool", "assistant"]
+    assert json.loads(s.history.messages[2]["content"]) == {"task_id": 1, "status": "started"}
     assert wait(lambda: done) and done[0].status == "done" and done[0].summary.startswith("About your task")
     llm.text["reply"] = "Not yet, I'm still on it."
     run_turn(s, "so how's it going?")
     user = last_user(llm)
     assert user.startswith("[Background tasks") and "not told to the user yet" in user and done[0].summary in user
     assert user.endswith("\n\nso how's it going?")
-    assert s.history[-2]["content"] == "so how's it going?"           # history keeps the words only
+    assert s.history.messages[-2]["content"] == "so how's it going?"           # history keeps the words only
 
 
 def test_status_while_running_and_request():
@@ -93,13 +93,13 @@ def test_caps_concurrent_and_per_session():
     s, m, llm, done = session(smart=smart)
     run_turn(s, "research laptops")
     run_turn(s, "and research phones too")
-    assert json.loads(s.history[-2]["content"]) == {"error": PROMPTS.text("tasks", "cap_concurrent")}
+    assert json.loads(s.history.messages[-2]["content"]) == {"error": PROMPTS.text("tasks", "cap_concurrent")}
     s.tasks.close()
     s, m, llm, done = session(tasks={"max_per_session": 2, "max_concurrent": 2})
     for i in range(3):
         run_turn(s, f"research thing {i}")
         wait(lambda: len(done) == min(i + 1, 2))
-    assert json.loads(s.history[-2]["content"]) == {"error": PROMPTS.text("tasks", "cap_session")}
+    assert json.loads(s.history.messages[-2]["content"]) == {"error": PROMPTS.text("tasks", "cap_session")}
 
 
 def test_global_cap_across_sessions():
@@ -109,7 +109,7 @@ def test_global_cap_across_sessions():
     b, _, _, done_b = session(smart=FakeLLM(), slots=slots)
     run_turn(a, "research laptops")
     run_turn(b, "research phones")
-    assert json.loads(b.history[-2]["content"]) == {"error": PROMPTS.text("tasks", "cap_global")}
+    assert json.loads(b.history.messages[-2]["content"]) == {"error": PROMPTS.text("tasks", "cap_global")}
     assert wait(lambda: done_a) and wait(lambda: slots.used == 0)          # the slot comes back when it ends
     run_turn(b, "research phones again")
     assert wait(lambda: done_b) and done_b[0].status == "done"
@@ -132,11 +132,11 @@ def test_cancel_by_the_user():
     run_turn(s, "research laptops")
     llm.text["reply"] = CANCEL
     run_turn(s, "never mind, drop it")
-    assert json.loads(s.history[-2]["content"]) == {"task_id": 1, "status": "cancelled"}
+    assert json.loads(s.history.messages[-2]["content"]) == {"task_id": 1, "status": "cancelled"}
     assert wait(lambda: smart.live == 0) and smart.aborted >= 1 and not done
     assert s.tasks.get(1).status == "cancelled" and m.task_slots.used == 0
     run_turn(s, "drop task one again")
-    assert json.loads(s.history[-2]["content"]) == {"error": PROMPTS.text("tasks", "unknown_task")}
+    assert json.loads(s.history.messages[-2]["content"]) == {"error": PROMPTS.text("tasks", "unknown_task")}
 
 
 def test_session_close_cancels_tasks():
@@ -240,7 +240,7 @@ def test_announce_after_grant():
     d = got[-1][1]
     assert d["proactive"] == 1 and not d["barged"] and d["text"].startswith("About your task")
     assert any(k == b"A" for k, _ in got) and any(k == b"X" for k, _ in got)
-    note, said = s.history[-2], s.history[-1]
+    note, said = s.history.messages[-2], s.history.messages[-1]
     assert note["role"] == "user" and note["content"].startswith("[Background task #1") and "full result" in note["content"]
     assert said == {"role": "assistant", "content": d["text"]} and s.tasks.get(1).announced == "yes"
     assert "told to the user" in s.tasks.status_block()
@@ -256,7 +256,7 @@ def test_barge_during_announcement_marks_partial():
     d = frames(peer, lambda k, p: k == b"D")[-1][1]
     assert d["barged"] and d["proactive"] == 1
     assert s.tasks.get(1).announced == "partial" and "heard only part" in s.tasks.status_block()
-    assert s.history[-1]["content"].endswith(PROMPTS.text("markers", "interrupted"))
+    assert s.history.messages[-1]["content"].endswith(PROMPTS.text("markers", "interrupted"))
     peer.close()
 
 
@@ -268,7 +268,7 @@ def test_failed_task_announced_in_one_sentence():
     assert d["text"] == llm.task_failed and d["proactive"] == 1
     req = [c[1] for c in llm.calls if c[0] == "task_failed"][-1]
     assert GOAL in req[-1]["content"] and req[-1]["content"].endswith("Say it in English.")
-    assert s.history[-2]["content"] == PROMPTS.fill("tasks", "failed_note", id=1, goal=GOAL)
+    assert s.history.messages[-2]["content"] == PROMPTS.fill("tasks", "failed_note", id=1, goal=GOAL)
     peer.close()
 
 

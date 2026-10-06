@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fakes import FakeLLM, FakeTTS, FakeMouth, PROMPTS, make_session, run_turn, stub_tools, slow_tools  # noqa: E402
 from app import mouth as M  # noqa: E402
 from app.messages import reply_prefix  # noqa: E402
+from app.mouth.turns import MAX_STILL, FILLER_GAP_S  # noqa: E402
 from app.wire import send_msg, recv_msg  # noqa: E402
 
 TOOL_REPLY = '<tool_call>\n{"name": "get_weather", "arguments": {"location": "Paris"}}\n</tool_call>'
@@ -40,8 +41,8 @@ def read_until(peer, pred, timeout=5.0):
 def test_plain_turn_remembered():
     s, _ = make_session()
     run_turn(s, "first question")
-    assert [h["role"] for h in s.history] == ["user", "assistant"]
-    assert s.history[0]["content"] == "first question"
+    assert [h["role"] for h in s.history.messages] == ["user", "assistant"]
+    assert s.history.messages[0]["content"] == "first question"
 
 
 def test_barged_plain_turn_remembered():
@@ -50,10 +51,10 @@ def test_barged_plain_turn_remembered():
     s, m = make_session(llm, FakeTTS(n=4))
     evs, _ = run_turn(s, "what's the weather on Friday?", stop_at=lambda k, n: n == 2)   # barge mid chunk 1
     assert evs[-1][0] == "done"
-    roles = [h["role"] for h in s.history]
+    roles = [h["role"] for h in s.history.messages]
     assert roles == ["user", "assistant"], roles
-    assert s.history[0]["content"] == "what's the weather on Friday?"
-    a = s.history[1]["content"]
+    assert s.history.messages[0]["content"] == "what's the weather on Friday?"
+    a = s.history.messages[1]["content"]
     assert a.startswith("Here is the first part") and a.endswith(PROMPTS.text("markers", "interrupted")), a
     assert "third sentence" not in a, a                     # never generated -> never remembered
     # the follow-up turn sees the first question
@@ -69,7 +70,7 @@ def test_barge_truncates_to_played_audio():
     s, m = make_session(llm, FakeTTS(n=5, chunk_s=0.1))      # 0.5 s of audio per chunk
     s.barge_played_s = 0.2                                   # heard 0.2 s: inside chunk 1
     run_turn(s, "tell me", stop_at=lambda k, n: n == 11)      # MOUTH had generated into chunk 3
-    a = s.history[1]["content"]
+    a = s.history.messages[1]["content"]
     assert "first sentence" in a and "second sentence" not in a, a
     assert a.endswith(PROMPTS.text("markers", "interrupted"))
 
@@ -80,8 +81,8 @@ def test_barge_before_any_audio_keeps_user():
     stop = threading.Event()
     threading.Timer(0.05, stop.set).start()
     list(s.stream_turn("hello?", stop.is_set))
-    assert [h["role"] for h in s.history] == ["user", "assistant"]
-    assert s.history[1]["content"] == PROMPTS.text("markers", "interrupted").strip()
+    assert [h["role"] for h in s.history.messages] == ["user", "assistant"]
+    assert s.history.messages[1]["content"] == PROMPTS.text("markers", "interrupted").strip()
 
 
 # ---- I-03: barge during a tool call doesn't wait for the tool ------------------------------------------
@@ -97,7 +98,7 @@ def test_barge_during_slow_tool_returns_fast():
                 t_done = time.perf_counter()
     assert t_stop is not None and t_done is not None
     assert t_done - t_stop < 0.2, f"done {1e3 * (t_done - t_stop):.0f} ms after barge"
-    assert s.history and s.history[0]["content"] == "weather in Paris?"
+    assert s.history.messages and s.history.messages[0]["content"] == "weather in Paris?"
 
 
 def test_tool_turn_completes():
@@ -108,7 +109,7 @@ def test_tool_turn_completes():
     kinds = [k for k, _, _ in evs]
     assert kinds[-1] == "done" and kinds.count("audio") >= 6, kinds      # filler + answer
     assert [c[0] for c in llm.calls][:1] == ["reply"] and "phase_b" in [c[0] for c in llm.calls]
-    assert s.history[-1]["content"].startswith("It is sunny")
+    assert s.history.messages[-1]["content"].startswith("It is sunny")
 
 
 # ---- I-12: tool calls stay in history, trimmed by whole turns ----------------------------------------------
@@ -118,9 +119,9 @@ def test_tool_exchange_kept_in_history():
     with stub_tools(lambda n, a: {"location": "Paris", "answer": "sunny, 20 C",
                                    "sources": [{"content": "x" * 2000}]}):
         run_turn(s, "weather in Paris?")
-    assert [h["role"] for h in s.history] == ["user", "assistant", "tool", "assistant"]
-    assert s.history[1]["tool_calls"][0]["name"] == "get_weather"   # neutral format: {"id", "name", "arguments"}
-    tool = s.history[2]["content"]
+    assert [h["role"] for h in s.history.messages] == ["user", "assistant", "tool", "assistant"]
+    assert s.history.messages[1]["tool_calls"][0]["name"] == "get_weather"   # neutral format: {"id", "name", "arguments"}
+    tool = s.history.messages[2]["content"]
     assert "sunny, 20 C" in tool and "xxxx" not in tool, tool       # raw search hits dropped
     run_turn(s, "and in Rome?")                                     # the next prompt carries the exchange
     nxt = next(c[1] for c in reversed(llm.calls) if c[0] == "reply")
@@ -134,8 +135,8 @@ def test_tool_call_ids_unique_and_matched():
     with slow_tools(0):
         for q in ("weather in Paris?", "and in Rome?", "and in Oslo?"):
             run_turn(s, q)
-    calls = [c for h in s.history if h.get("tool_calls") for c in h["tool_calls"]]
-    results = [h["tool_call_id"] for h in s.history if h["role"] == "tool"]
+    calls = [c for h in s.history.messages if h.get("tool_calls") for c in h["tool_calls"]]
+    results = [h["tool_call_id"] for h in s.history.messages if h["role"] == "tool"]
     assert len(calls) == 3 and len({c["id"] for c in calls}) == 3
     assert results == [c["id"] for c in calls]
 
@@ -146,8 +147,8 @@ def test_history_trimmed_by_whole_turns():
     with slow_tools(0.0):
         for i in range(m.history_turns + 3):
             run_turn(s, f"weather question {i}")
-    assert len(s.turns) == m.history_turns
-    assert s.history[0]["role"] == "user" and s.history[0]["content"] == "weather question 3"
+    assert len(s.history.turns) == m.history_turns
+    assert s.history.messages[0]["role"] == "user" and s.history.messages[0]["content"] == "weather question 3"
 
 
 # ---- L-04: filler starts at the <tool_call> tag, covers slow tools, stops on barge ---------------------------
@@ -187,11 +188,11 @@ def test_still_filler_covers_slow_tool():
     with slow_tools(3.0):
         evs, _ = run_turn(s, "weather in Paris?")
     kinds = [c[0] for c in llm.calls]
-    assert kinds.count("still") == M.MAX_STILL, kinds
+    assert kinds.count("still") == MAX_STILL, kinds
     first_still = next(c[1] for c in llm.calls if c[0] == "still")
     assert llm.leadin in first_still[-1]["content"], "the still line must know what was already said"
     gap = dead_air(evs)
-    assert gap < M.FILLER_GAP_S + 0.3, f"dead air {1e3 * gap:.0f} ms"
+    assert gap < FILLER_GAP_S + 0.3, f"dead air {1e3 * gap:.0f} ms"
 
 
 def test_no_still_filler_for_fast_tool():
@@ -282,7 +283,7 @@ def test_llm_error_speaks_apology_and_remembers():
         line = PROMPTS.text("spoken", "error")
         assert spoken(evs)[-1] == line and evs[-1][:2] == ("done", line)
         assert any(k == "audio" for k, _, _ in evs) and m.tts.requests[-1] == line
-        assert [h["role"] for h in s.history] == ["user", "assistant"] and s.history[1]["content"] == line
+        assert [h["role"] for h in s.history.messages] == ["user", "assistant"] and s.history.messages[1]["content"] == line
 
 
 def test_llm_error_while_tool_call_decodes():
@@ -297,7 +298,7 @@ def test_refusal_speaks_neutral_line():
     s, m = make_session(llm, FakeTTS(n=2))
     evs, _ = run_turn(s, "something it won't do")
     assert evs[-1][:2] == ("done", PROMPTS.text("spoken", "refusal"))
-    assert s.history[0]["content"] == "something it won't do"
+    assert s.history.messages[0]["content"] == "something it won't do"
 
 
 def test_flagged_tool_call_never_runs():
@@ -312,7 +313,7 @@ def test_flagged_tool_call_never_runs():
     s, m = make_session(Flagging(reply=TOOL_REPLY), FakeTTS(n=2))
     with stub_tools(lambda n, a: ran.append(n) or {"answer": "sunny"}):
         run_turn(s, "weather?")
-    assert ran == [] and "invalid arguments" in s.history[2]["content"]
+    assert ran == [] and "invalid arguments" in s.history.messages[2]["content"]
 
 
 # ---- escalation (step 10): ask_expert, answered by the smart model straight to the TTS ----------------------
@@ -360,9 +361,9 @@ def test_expert_turn_answered_by_smart():
     assert req[0]["content"] == PROMPTS.text("smart", "system")
     assert req[-1]["content"].startswith("what do I get from 200") and "index fund" in req[-1]["content"]
     assert evs[-1][1].endswith(smart.smart) and evs[-1][1].startswith(llm.expert_leadin)
-    assert [h["role"] for h in s.history] == ["user", "assistant", "tool", "assistant"]
-    assert s.history[1]["tool_calls"][0]["name"] == "ask_expert" and s.history[3]["content"] == smart.smart
-    first_id = s.history[1]["tool_calls"][0]["id"]
+    assert [h["role"] for h in s.history.messages] == ["user", "assistant", "tool", "assistant"]
+    assert s.history.messages[1]["tool_calls"][0]["name"] == "ask_expert" and s.history.messages[3]["content"] == smart.smart
+    first_id = s.history.messages[1]["tool_calls"][0]["id"]
     run_turn(s, "and if I doubled it?")                 # the follow-up sees the escalation in history
     follow = [c[1] for c in llm.calls if c[0] == "reply"][-1]
     assert any(x.get("tool_calls") and x["tool_calls"][0]["id"] == first_id for x in follow)
@@ -390,7 +391,7 @@ def test_expert_still_covers_a_slow_smart_model():
     tts = FakeTTS(n=3, chunk_s=0.08, step_s=0.005)               # each line: 0.24 s of audio
     s, m = make_session(llm, tts, smart=smart)
     evs, _ = run_turn(s, "plan a three day trip to Rome")
-    assert kinds(llm).count("expert_still") == M.MAX_STILL and "still" not in kinds(llm), kinds(llm)
+    assert kinds(llm).count("expert_still") == MAX_STILL and "still" not in kinds(llm), kinds(llm)
     first = next(c[1] for c in llm.calls if c[0] == "expert_still")
     assert llm.expert_leadin in first[-1]["content"]
     assert evs[-1][1].endswith(smart.smart)
@@ -406,7 +407,7 @@ def test_smart_tool_round():
     assert ran == ["get_weather"] and kinds(smart) == ["smart", "smart_b"]
     second = smart.calls[1][1]
     assert second[-2]["tool_calls"][0]["name"] == "get_weather" and "sunny" in second[-1]["content"]
-    assert evs[-1][1].endswith(smart.smart_b) and s.history[-1]["content"].endswith(smart.smart_b)
+    assert evs[-1][1].endswith(smart.smart_b) and s.history.messages[-1]["content"].endswith(smart.smart_b)
     assert "phase_b" not in kinds(llm)
 
 
@@ -431,7 +432,7 @@ def test_other_tool_results_go_to_smart():
         run_turn(s, "is Rome nice for a walk tomorrow, and what should I see?")
     last = smart.calls[0][1][-1]["content"]
     assert "get_weather" in last and "rainy, 14 C" in last
-    assert [c["name"] for c in s.history[1]["tool_calls"]] == ["get_weather", "ask_expert"]
+    assert [c["name"] for c in s.history.messages[1]["tool_calls"]] == ["get_weather", "ask_expert"]
 
 
 def test_smart_context_is_recent_plain_turns():
@@ -456,9 +457,9 @@ def test_barge_during_expert_answer():
     evs, _ = run_turn(s, "explain compound interest", stop_at=lambda k, n: n == 6)   # 4 lead-in + 2 answer
     time.sleep(0.05)
     assert evs[-1][0] == "done" and smart.aborted >= 1 and smart.live == 0
-    assert [h["role"] for h in s.history] == ["user", "assistant", "tool", "assistant"]
-    assert s.history[-1]["content"].endswith(PROMPTS.text("markers", "interrupted"))
-    assert "third one" not in s.history[-1]["content"]
+    assert [h["role"] for h in s.history.messages] == ["user", "assistant", "tool", "assistant"]
+    assert s.history.messages[-1]["content"].endswith(PROMPTS.text("markers", "interrupted"))
+    assert "third one" not in s.history.messages[-1]["content"]
 
 
 def test_smart_failure_and_refusal_are_spoken():
@@ -466,7 +467,7 @@ def test_smart_failure_and_refusal_are_spoken():
         s, m = make_session(FakeLLM(reply=ASK), FakeTTS(n=2), smart=smart)
         evs, _ = run_turn(s, "a hard question")
         assert evs[-1][:2] == ("done", PROMPTS.text("spoken", key)), (key, evs[-1])
-        assert s.history[0]["content"] == "a hard question"
+        assert s.history.messages[0]["content"] == "a hard question"
 
 
 # ---- S: TTS only, for test tools (load_test_ears.py's fixed utterance) --------------------------------------
@@ -477,7 +478,7 @@ def test_say_is_tts_only():
     assert sum(k == b"A" for k, _, _ in got) == 3
     assert got[-1][1]["text"] == "Could you count to ten for me?" and not got[-1][1]["barged"]
     assert m.llm.calls == [] and m.tts.requests == ["Could you count to ten for me?"]
-    assert s.history == []
+    assert s.history.messages == []
     peer.close()
 
 

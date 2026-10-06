@@ -1,5 +1,5 @@
 # The whole stack with the `fake` plugins: no GPU, no model downloads, no network (unless a fake reply calls a
-# tool and TAVILY_API_KEY is set; the default replies don't). Checks the server.py / mouth.py wiring and the web
+# tool and TAVILY_API_KEY is set; the default replies don't). Checks the server.py / app/mouth wiring and the web
 # page on a laptop or in CI:
 #   CONFIG=config.fake.yaml ./run.sh      then open http://localhost:7860, or run load_test_ears.py --config ...
 # Speak (or play anything above ~-45 dB); 0.5 s of silence ends the turn with the fixed transcript below, the fake

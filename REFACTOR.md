@@ -4,7 +4,7 @@
 plugins; the endpoint head is tied to nemotron, make them one plugin"). Implemented step by step on branch
 `plugins`, one commit per step (`R-NN: …` in the subject), each checked for parity before the next.
 
-**Progress:** R-00 plan, R-01, R-02 done (2026-10-06).
+**Progress:** R-00 plan, R-01, R-02, R-03 done (2026-10-06).
 
 **Goal:** a reader can find where a thing happens from its name, and a new plugin is one package plus one registry
 line, with no edits to MOUTH, EARS's server or the web page.
@@ -28,11 +28,14 @@ protocol between EARS, MOUTH and the browser (message kinds stay as they are).
 app/
   messages.py              # the neutral message format + every builder (reply prefix, shots, rounds, smart, bc)
   mouth/                   # the MOUTH process (python -m app.mouth)
-    __main__.py            #   socket server, signal handling, one Session per connection
-    service.py             #   Mouth: the loaded plugins, prompts, tool lists (shared by sessions)
-    session.py             #   Session: wire in/out, the turn and backchannel workers
-    turn.py                #   one reply turn: speak a stream, tool rounds, fillers, escalation
-    speech.py              #   Speaker: per-turn audio bookkeeping (what was said, when it plays out)
+    __main__.py            #   Server: accepts EARS connections, one Session thread each; signal handling
+    service.py             #   Mouth: the loaded plugins, prompts, tool lists (shared by sessions); shutdown()
+    session.py             #   Session: the conversation's state, the wire, the turn and backchannel workers
+    history.py             #   History: turns trimmed whole, barged turns marked
+    turns.py               #   Turn base (speak a stream, fillers, remember) + AnnouncementTurn, SayTurn
+    reply.py               #   ReplyTurn: plain reply, tool rounds (ToolRound), escalation
+    speech.py              #   speech_audio (the one path to the TTS) + Speaker (one reply's audio book-keeping)
+    threads.py             #   Prefetch, spawn: streams run on helper threads
   ears/                    # the EARS process (python -m app.ears; app.server stays as an alias for run.sh)
     __main__.py            #   aiohttp app, routes
     conversation.py        #   Conversation: the per-WebSocket state machine as a class with named states

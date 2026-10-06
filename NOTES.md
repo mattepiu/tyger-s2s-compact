@@ -33,6 +33,29 @@ modules now call `tools.execute_tool`, and tests stub it in one place (`tests/fa
 tasks.py's imports, inside functions too, and fails on the old file. Pure move: every GPU-free test passes with the
 same counts.
 
+**R-03, the `app/mouth/` package** (`app/mouth/__init__.py` lists the modules). `mouth.py` was split by job:
+- `Server` (`__main__`) and `Mouth` (`service`, which gains `shutdown()`);
+- `Session` (the conversation's state, the wire, the workers; `_dispatch` per wire message);
+- `History` (turns trimmed whole);
+- the turns: a `Turn` base with `AnnouncementTurn` and `SayTurn` (`turns.py`), and `ReplyTurn` (`reply.py`);
+- `Speaker` (`speech.py`) and the thread helpers (`threads.py`).
+
+Per-turn state used to sit on the Session (`_said`, `_audio_s`, `_play_end`, `_lang`, reset by hand in three
+places). It is now a `Speaker` and the turn's own fields, created with each turn. The `box` dicts shared with
+helper threads are now a `ToolRound` dataclass with `finished()`. The global session counter is now state on
+`Server`. Tests read `s.history.messages`; `test_mouth_parts.py` tests History and Speaker directly.
+
+One alignment: the apology / refusal line is spoken in the turn's voice. Before, it used the session's voice at
+that moment, so a voice switch arriving mid-turn could change voices inside one reply, against the documented "one
+voice per reply".
+
+Stack on the no-smart config:
+- smoke PASS: 210 / 238 / 286 / 158 ms;
+- `load_test.py` turn first-audio p50 432 / 422 / 390 ms (R-01: 395 / 406 / 393; within the ±100 ms noise);
+- `--tools --fresh` 381 ms p50, 0 errors;
+- `load_test_ears.py` 873 / 1071 ms at 1 / 4 conv (2 reply texts at 4: batching, as before);
+- no tracebacks in the stack log.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README
