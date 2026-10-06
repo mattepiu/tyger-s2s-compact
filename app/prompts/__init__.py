@@ -161,11 +161,11 @@ class Prompts:
         return Template(self.d[section][key]).substitute(values)
 
     def language_name(self, transcript):
-        from app.lang import guess_language
+        from app.prompts.lang import guess_language
         return self.d["language"]["names"].get(guess_language(transcript) or "")
 
     def result_note(self, transcript) -> str:
-        """The note appended to tool results: names the reply language when app/lang.py can tell it."""
+        """The note appended to tool results: names the reply language when app/prompts/lang.py can tell it."""
         name = self.language_name(transcript)
         return self.fill("language", "tool_note", language=name) if name else self.text("language", "tool_note_any")
 

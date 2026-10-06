@@ -6,7 +6,7 @@ then flushes the tail like Mouth._flush_tail, so streaming-only bugs (cutting "0
 import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from app.chunker import next_chunk, next_sentence, say_clean  # noqa: E402
+from app.mouth.chunker import next_chunk, next_sentence, say_clean  # noqa: E402
 
 
 def stream_chunks(text, step=3):

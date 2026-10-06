@@ -3,7 +3,7 @@ reply's audio (what was said, and when the client will have played it), made fre
 from __future__ import annotations
 import time
 
-from app.chunker import say_clean
+from app.mouth.chunker import say_clean
 
 
 def speech_audio(tts, text, voice, stop_flag):

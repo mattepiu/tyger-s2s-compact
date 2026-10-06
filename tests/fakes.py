@@ -11,7 +11,7 @@ from app.prompts import default_prompts  # noqa: E402
 from app.tools import build_tools  # noqa: E402
 from app.plugins.llm.fake import FakeLLM  # noqa: E402
 from app.plugins.tts.fake import FakeTTS  # noqa: E402
-from app.tasks import TaskSlots  # noqa: E402
+from app.mouth.tasks import TaskSlots  # noqa: E402
 
 PROMPTS = default_prompts()     # the repo's prompts.yaml; FakeLLM routes requests by their system prompt
 

@@ -61,7 +61,7 @@ voices:
   default: ref             # active voice name (stem of the chosen wav); falls back to the first clip
 
 mouth:
-  prompts: prompts.yaml               # every prompt MOUTH sends to an LLM (app/prompts.py)
+  prompts: prompts.yaml               # every prompt MOUTH sends to an LLM (app/prompts/)
   prompt_overrides_dir: prompts       # optional <llm instance name>.yaml here, merged over prompts.yaml
   max_gen: 192
   history_turns: 8                   # ~last 8 turns kept in the responder

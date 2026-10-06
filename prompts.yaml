@@ -1,5 +1,5 @@
 # Every piece of text MOUTH sends to an LLM, and the two fixed lines it speaks itself (PLUGINS.md -> "Prompts in
-# one file"). Read once at MOUTH start and validated (app/prompts.py); restart MOUTH after editing. Per-instance
+# one file"). Read once at MOUTH start and validated (app/prompts/); restart MOUTH after editing. Per-instance
 # overrides: prompts/<instance>.yaml, deep-merged over this file for the requests that LLM instance serves (lists
 # such as `shots` are replaced whole).
 # Keys that take values (`user`, `user_short`, `no_repeat`) are templates: $name (string.Template), $$ for a literal
@@ -195,12 +195,12 @@ smart:
   user: "$transcript\n\n[Restated: $question]"
   results: "\n\n[Already looked up for this question: $results]"   # other tools called in the same turn
   limit: No more lookups are possible for this question; answer now from what you have.
-# the user's language, guessed from the transcript (app/lang.py), named where a small model otherwise drifts
+# the user's language, guessed from the transcript (app/prompts/lang.py), named where a small model otherwise drifts
 # into English (step 11, Gemma 4 E4B): appended to each tool result MOUTH sends for the answer (not to the compact
 # copy kept in history; tool output is mostly English: 29% of Russian / Spanish answers came out in English), and
 # to the lead-in / still-looking requests. Unknown language: tool_note_any, and no filler hint.
 language:
-  names: {ru: Russian, es: Spanish, en: English}     # app/lang.py code -> the name used below
+  names: {ru: Russian, es: Spanish, en: English}     # app/prompts/lang.py code -> the name used below
   tool_note: "[Answer the user in $language, even if this result is in another language.]"
   tool_note_any: "[Answer the user in the language they spoke to you, even if this result is in another language.]"
   filler: " Say it in $language."

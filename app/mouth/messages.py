@@ -1,6 +1,6 @@
 """The neutral message format MOUTH speaks to every LLM plugin (app/plugins/base.py has the format), and every
 builder of it: the reply request's fixed prefix and few-shot turns, tool rounds, the smart model's request, the
-backchannel and filler requests. Pure functions over a Prompts (app/prompts.py): no I/O, no model, no state, so
+backchannel and filler requests. Pure functions over a Prompts (app/prompts/): no I/O, no model, no state, so
 MOUTH, background tasks, tests and scripts/eval_escalation.py build exactly the same requests.
 """
 from __future__ import annotations

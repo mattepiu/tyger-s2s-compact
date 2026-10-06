@@ -303,6 +303,15 @@ Per the user, there is still no argument check for local plugins' calls.
 
 Left for the user: the R-05 sliders on the page.
 
+**R-10a (extra, the user's call): MOUTH's modules into `app/mouth/`, prompts into a package.**
+- Moves (pure `git mv`, imports rewritten, no aliases for the old paths):
+  - `app/chunker.py`, `messages.py` and `tasks.py` → `app/mouth/`;
+  - `app/prompts.py` → `app/prompts/__init__.py`, and `app/lang.py` → `app/prompts/lang.py`.
+- `test_tasks_never_imports_mouth` becomes `test_tasks_never_imports_the_session`, with the same intent now that
+  tasks lives in the package: it bans the Session, service, turns, reply and speech modules, not the whole package.
+- Each moved module imports cleanly first in a fresh process (no cycle).
+- GPU-free suite passes; lint is clean.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

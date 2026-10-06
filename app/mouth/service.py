@@ -7,10 +7,10 @@ import logging
 
 from app.config import llm_roles
 from app.engines import EngineLoop
-from app.messages import reply_prefix
+from app.mouth.messages import reply_prefix
 from app.plugins import build_llms, build_tts
 from app.prompts import load_prompts
-from app.tasks import TaskSlots
+from app.mouth.tasks import TaskSlots
 from app.tools import build_tools
 
 log = logging.getLogger("mouth")

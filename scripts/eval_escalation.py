@@ -31,8 +31,8 @@ from app.plugins import plugin_class
 from app.plugins.base import PluginContext
 from app.prompts import load_prompts
 from app.tools import build_tools, execute_tool, EXPERT, START, CANCEL
-from app.messages import reply_prefix, turns_messages, round_messages, with_status
-from app.lang import guess_language, language_text
+from app.mouth.messages import reply_prefix, turns_messages, round_messages, with_status
+from app.prompts.lang import guess_language, language_text
 
 ROUTES = ("local", "tool", "expert", "background")
 HERE = Path(__file__).resolve().parent

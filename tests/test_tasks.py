@@ -7,7 +7,7 @@ import os, sys, json, logging, socket, threading, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fakes import FakeLLM, FakeTTS, FakeMouth, PROMPTS, make_session, run_turn, stub_tools  # noqa: E402
 from app import mouth as M  # noqa: E402
-from app.tasks import TaskSlots  # noqa: E402
+from app.mouth.tasks import TaskSlots  # noqa: E402
 from app.wire import send_msg, recv_msg  # noqa: E402
 
 GOAL = "Compare three budget laptops for programming"
@@ -302,7 +302,7 @@ def test_escalation_gets_the_full_result():
 
 
 def tasks_imports(source):
-    """Every module app/tasks.py imports, at the top or inside a function."""
+    """Every module app/mouth/tasks.py imports, at the top or inside a function."""
     import ast
     out = set()
     for node in ast.walk(ast.parse(source)):
@@ -313,12 +313,17 @@ def tasks_imports(source):
     return out
 
 
-def test_tasks_never_imports_mouth():
-    """tasks.py gets the message builders from app.messages and tools from app.tools: no import cycle with MOUTH
-    (it used to import app.mouth inside its functions)."""
+def test_tasks_never_imports_the_session():
+    """The task runner gets the message builders from app.mouth.messages and tools from app.tools. It never imports
+    the Session, the turns or the Mouth service, which import it: no import cycle (it used to import the old
+    mouth.py inside its functions)."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(os.path.join(root, "app", "tasks.py")) as f:
-        assert "app.mouth" not in tasks_imports(f.read())
+    with open(os.path.join(root, "app", "mouth", "tasks.py")) as f:
+        got = tasks_imports(f.read())
+    banned = {"app.mouth", "app.mouth.session", "app.mouth.service", "app.mouth.turns", "app.mouth.reply",
+              "app.mouth.speech"}
+    assert not got & banned, sorted(got & banned)
+    assert "app.mouth.messages" in got
 
 
 if __name__ == "__main__":

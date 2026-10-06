@@ -7,15 +7,15 @@ from __future__ import annotations
 import json, logging, queue, threading, time
 from collections import deque
 
-from app.messages import bc_messages
-from app.chunker import say_clean
+from app.mouth.messages import bc_messages
+from app.mouth.chunker import say_clean
 from app.mouth.history import History
 from app.mouth.reply import ReplyTurn
 from app.mouth.speech import speech_audio
 from app.mouth.threads import text_of
 from app.mouth.turns import AnnouncementTurn, SayTurn
 from app.plugins.base import LLMError
-from app.tasks import TaskRunner
+from app.mouth.tasks import TaskRunner
 from app.wire import send_msg, recv_msg
 
 log = logging.getLogger("mouth")

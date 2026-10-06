@@ -60,13 +60,13 @@ def test_load_prompts_per_instance(tmp=None):
 
 
 def test_language_named_in_notes():
-    from app.lang import guess_language
+    from app.prompts.lang import guess_language
     assert [guess_language(t) for t in ("Какая погода в Казани?", "¿Va a llover mañana?", "Que hora es en Madrid",
                                         "What time is it in Tokyo?", "Wie spät ist es?", "Hmm")] == \
         ["ru", "es", "es", "en", None, None]
     assert "Russian" in P.result_note("Какая погода в Казани?") and P.filler_hint("Какая погода в Казани?")
     assert P.result_note("Hmm") == P.text("language", "tool_note_any") and P.filler_hint("Hmm") == ""
-    from app.lang import language_text
+    from app.prompts.lang import language_text
     assert language_text("Actually, never mind, drop that one.", ["Сравни тарифы операторов, пожалуйста"]) \
         .endswith("drop that one.") and guess_language(language_text("Ok, drop it.", ["Сравни тарифы, пожалуйста"])) == "ru"
     assert language_text("What time is it in Tokyo?", ["Привет"]) == "What time is it in Tokyo?"

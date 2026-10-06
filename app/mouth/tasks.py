@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging, threading, time
 
 from app import tools
-from app.messages import plain_context, round_messages
+from app.mouth.messages import plain_context, round_messages
 from app.plugins.base import LLMError
 from app.tools import FINISH
 
@@ -44,7 +44,7 @@ class Task:
     def __init__(self, tid, goal, transcript="", lang_text=None):
         self.id = tid; self.goal = goal; self.t0 = time.monotonic(); self.t_end = None
         self.transcript = transcript    # the words that started it
-        self.lang_text = lang_text or transcript   # what its language is guessed from (app/lang.language_text)
+        self.lang_text = lang_text or transcript   # what its language is guessed from (app/prompts/lang.language_text)
         self.status = "running"         # running / done / failed / cancelled
         self.announced = "no"           # no / yes / partial (step 13)
         self.summary = self.result = None

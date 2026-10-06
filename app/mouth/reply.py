@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app import tools
-from app.lang import language_text
-from app.messages import reply_prefix, with_status, smart_messages, round_messages
+from app.prompts.lang import language_text
+from app.mouth.messages import reply_prefix, with_status, smart_messages, round_messages
 from app.mouth.threads import Prefetch
 from app.mouth.turns import Turn
 from app.plugins.base import LLMError

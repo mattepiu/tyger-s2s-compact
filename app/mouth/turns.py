@@ -10,8 +10,8 @@ stream chunk by chunk, MOUTH's own spoken lines, fillers over tool latency, and 
 from __future__ import annotations
 import logging, queue, time
 
-from app.chunker import next_chunk
-from app.messages import with_shots, still_user, compact_result
+from app.mouth.chunker import next_chunk
+from app.mouth.messages import with_shots, still_user, compact_result
 from app.mouth.speech import Speaker, speech_audio
 from app.mouth.threads import END, spawn, text_of
 

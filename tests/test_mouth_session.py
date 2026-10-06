@@ -6,7 +6,7 @@ import os, sys, json, socket, threading, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fakes import FakeLLM, FakeTTS, FakeMouth, PROMPTS, make_session, run_turn, stub_tools, slow_tools  # noqa: E402
 from app import mouth as M  # noqa: E402
-from app.messages import reply_prefix  # noqa: E402
+from app.mouth.messages import reply_prefix  # noqa: E402
 from app.mouth.turns import MAX_STILL, FILLER_GAP_S  # noqa: E402
 from app.wire import send_msg, recv_msg  # noqa: E402
 

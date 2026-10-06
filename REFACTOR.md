@@ -86,6 +86,8 @@ Each step is one commit and keeps behaviour identical unless it says otherwise. 
 | R-07 | **Plugin bases and options**: ABC bases with the shared defaults; each plugin declares an `Options` dataclass (typed, defaulted, unknown keys rejected at config load with the key named); `HostedLLM` base for `openai` / `anthropic`; one tool-argument validator. | GPU-free (config tests for unknown keys); contract test |
 | R-08 | **Tool registry**: `app/tools/` with one `Tool` per name; Tavily, time, stubs and the MOUTH-handled tools register handlers, so `Session` stops switching on tool names. | GPU-free; smoke |
 | R-09 | **Docs**: README "Adding a plugin" rewritten for the new pattern (a worked example), PLUGINS.md dated note, this file marked done. | — |
+| R-10 | **Extra (user, 2026-10-06): `app/` grouped by who uses each module.** R-10a: `chunker`, `messages`, `tasks` into `app/mouth/`; `prompts` + `lang` become `app/prompts/`. R-10b: `engines` + `resample` into `app/runtime/` (`event_loop.py`, `audio.py`); `weights` into the nemotron-tyger package (`release.py`). `config.py` and `wire.py` stay at the top. Pure moves (`git mv`), no aliases for the old paths. | GPU-free; lint; smoke |
+| R-10c | **`scripts/` by kind**: `validate/`, `bench/`, `load/`. | each script still starts; README / HANDOFF commands updated |
 
 Order: R-01 first so the refactor commits are pure moves. R-02 → R-03 (MOUTH) and R-04 → R-06 (EARS) are
 independent; R-07 / R-08 touch both sides and come after them.
