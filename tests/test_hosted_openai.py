@@ -161,7 +161,7 @@ def test_plugin_streams_and_sends_options():
 
 
 def test_plugin_stop_closes_stream():
-    p = make_plugin(); streams = []
+    p = make_plugin(max_concurrency=1, queue_timeout_s=0.5); streams = []
 
     def mk():
         streams.append(StubStream([chunk(f"word{i} ") for i in range(200)], delay=0.01)); return streams[-1]
@@ -171,6 +171,10 @@ def test_plugin_stop_closes_stream():
         n += 1
     time.sleep(0.1)
     assert n <= 3 and streams[0].closed and len(streams[0].chunks) > 150
+    got = []
+    for ev in p.stream([{"role": "user", "content": "again"}], stop_flag=lambda: bool(got)):
+        got.append(ev)
+    assert got and len(streams) == 2               # the stopped request gave its one slot back
 
 
 def test_plugin_errors_become_llmerror():
@@ -180,7 +184,8 @@ def test_plugin_errors_become_llmerror():
                        "rate_limit"),
                       (openai.InternalServerError("boom", response=httpx.Response(503, request=req), body=None),
                        "server"),
-                      (openai.APIConnectionError(request=req), "connection")):
+                      (openai.APIConnectionError(request=req), "connection"),
+                      (openai.APITimeoutError(request=req), "timeout")):
         p = make_plugin()
 
         async def create(exc=exc, **kw):

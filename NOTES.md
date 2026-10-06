@@ -228,6 +228,20 @@ check (weights 335 / 335 identical, outputs exact) is the record that the releas
   - local contract test 6/6;
   - stack (no-smart config): smoke PASS, `load_test.py` turn p50 397 ms, `load_test_ears.py` 854 / 1074 ms.
 
+**R-07b, `HostedLLM`** (`app/plugins/llm/hosted.py`), the base of `openai` and `anthropic`. The two plugins had
+copied about 60 lines of set-up and request plumbing; it now lives once:
+- the shared Options (model, base_url, api_key_env, remote, timeouts, retries, max_concurrency, queue_timeout_s);
+- the key check and the `<SDK>_LOG=debug` refusal;
+- the client and semaphore made on the EngineLoop (`make_client` is the subclass's);
+- `guarded()`: a concurrency slot, `busy` after queue_timeout_s, SDK errors -> LLMError (`llm_error`, by the
+  error names both SDKs share);
+- shutdown.
+
+A plugin keeps only its request shape and stream parser. The anthropic plugin still ignores `max_new` (its
+`max_tokens` covers thinking). Behaviour unchanged; `test_hosted_openai.py` gained the timeout kind and a check
+that a stopped request gives its slot back, and both pass on the old code too. One live gpt-5.4-mini request
+through the ported plugin streamed text.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

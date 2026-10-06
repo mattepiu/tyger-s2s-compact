@@ -15,16 +15,14 @@ bodies are never logged; keep OPENAI_LOG unset (the SDK's debug logging prints b
     whose arguments don't parse or lack a required key is returned with "error" set: MOUTH never runs it.
   * Reasoning models (gpt-5*, o-series): max_completion_tokens instead of max_tokens (guessed from the model name,
     `token_param` overrides); `reasoning_effort` / `verbosity` go in `extra_body`. Their thinking is never read.
-  * Fails fast (a voice turn can't wait): max_retries 1, short timeouts, a 429 is not waited out. Every failure is
-    an LLMError, and MOUTH speaks a short apology. `max_concurrency` bounds requests in flight per instance.
+  * Key, timeouts, concurrency, errors -> LLMError, shutdown: HostedLLM (hosted.py), as for anthropic.
   * Abort: when stop_flag turns true the stream is closed (tokens already generated are still billed).
 """
 from __future__ import annotations
-import asyncio, json, logging, os
+import json, logging
 from dataclasses import dataclass
 
-from app.plugins.base import LLMError, LLMPlugin
-from app.plugins.options import PluginOptions
+from app.plugins.llm.hosted import HostedLLM
 from app.plugins.llm._toolparse import split_speakable, strip_think, parse_calls, new_call_id, tool_start
 
 log = logging.getLogger("llm")
@@ -144,36 +142,21 @@ class ChatStreamParser:
         return out + [("tool_calls", events, None)]
 
 
-class OpenAICompatLLM(LLMPlugin):
+class OpenAICompatLLM(HostedLLM):
+    SDK = "openai"
+
     @dataclass(frozen=True, kw_only=True)
-    class Options(PluginOptions):
-        model: str
-        base_url: str | None = None            # None: OpenAI
-        api_key_env: str = "OPENAI_API_KEY"    # the env var (.env) that holds the key
-        remote: bool = True                    # False only for an endpoint on this box
+    class Options(HostedLLM.Options):
+        api_key_env: str = "OPENAI_API_KEY"
         max_tokens: int | None = None          # if set, every request gets it instead of MOUTH's max_new
         token_param: str | None = None         # max_tokens / max_completion_tokens; None: guessed from the model
         temperature: float | None = None       # sent only if set
         extra_body: dict | None = None         # e.g. {reasoning_effort: none}
         strip_think: bool = True               # drop <think> text some models put in content
-        read_timeout_s: float = 10.0
-        connect_timeout_s: float = 2.0
-        max_retries: int = 1
-        max_concurrency: int = 8               # requests in flight per instance
-        queue_timeout_s: float = 2.0           # waiting longer for a slot is LLMError("busy")
 
     def __init__(self, conf: dict, ctx):
-        import httpx
-        from openai import AsyncOpenAI
         super().__init__(conf, ctx)
         o = self.opts
-        self.model = o.model
-        self.remote = o.remote
-        key = os.environ.get(o.api_key_env)
-        if not key:
-            raise RuntimeError(f"llm {self.name}: {o.api_key_env} is not set (put it in .env)")
-        if (os.environ.get("OPENAI_LOG") or "").lower() == "debug":
-            raise RuntimeError("OPENAI_LOG=debug would log request bodies (transcripts): unset it")
         self.max_tokens = o.max_tokens
         # OpenAI's reasoning models (gpt-5*, o-series) take max_completion_tokens (thinking + text) and reject
         # max_tokens; other endpoints (Groq, Cerebras, vLLM) take max_tokens. `token_param` overrides the guess.
@@ -182,29 +165,13 @@ class OpenAICompatLLM(LLMPlugin):
         self.temperature = o.temperature
         self.extra_body = o.extra_body or None
         self.think_guard = o.strip_think
-        timeout = httpx.Timeout(o.read_timeout_s, connect=o.connect_timeout_s)
 
-        async def make():
-            return AsyncOpenAI(api_key=key, base_url=o.base_url, timeout=timeout, max_retries=o.max_retries), \
-                asyncio.Semaphore(o.max_concurrency)
-        self.client, self.sem = self.eloop.run(make())
-        self.wait_s = o.queue_timeout_s
-        self.rate_limited = 0
-
-    def _error(self, e):
-        import openai
-        if isinstance(e, openai.RateLimitError):
-            self.rate_limited += 1
-            log.warning("llm %s: rate limited (429), %d so far", self.name, self.rate_limited)
-            return LLMError("rate_limit")
-        if isinstance(e, openai.APITimeoutError):
-            return LLMError("timeout")
-        if isinstance(e, openai.APIStatusError):
-            log.warning("llm %s: HTTP %d", self.name, e.status_code)
-            return LLMError("server" if e.status_code >= 500 else "request")
-        if isinstance(e, openai.APIConnectionError):
-            return LLMError("connection")
-        return None
+    def make_client(self, key):
+        import httpx
+        from openai import AsyncOpenAI
+        o = self.opts
+        return AsyncOpenAI(api_key=key, base_url=o.base_url, max_retries=o.max_retries,
+                           timeout=httpx.Timeout(o.read_timeout_s, connect=o.connect_timeout_s))
 
     def stream(self, messages, tools=None, max_new=192, stop_flag=None):
         kw = dict(model=self.model, messages=to_openai_messages(messages), stream=True,
@@ -217,37 +184,16 @@ class OpenAICompatLLM(LLMPlugin):
             kw["extra_body"] = self.extra_body
 
         async def chunks():
+            s = await self.client.chat.completions.create(**kw)
             try:
-                await asyncio.wait_for(self.sem.acquire(), self.wait_s)
-            except asyncio.TimeoutError:
-                raise LLMError("busy") from None
-            try:
-                s = await self.client.chat.completions.create(**kw)
-                try:
-                    async for c in s:
-                        yield c
-                finally:
-                    await s.close()                      # also on cancel (barge-in): closes the HTTP stream
-            except Exception as e:
-                err = self._error(e)
-                if err is None:
-                    raise
-                raise err from None
+                async for c in s:
+                    yield c
             finally:
-                self.sem.release()
+                await s.close()                          # also on cancel (barge-in): closes the HTTP stream
 
         p = ChatStreamParser(tools, self.think_guard)
-        for c in self.eloop.iterate(chunks, stop_flag=stop_flag):
+        for c in self.eloop.iterate(lambda: self.guarded(chunks), stop_flag=stop_flag):
             yield from p.feed(c)
         if stop_flag and stop_flag():
             return
         yield from p.finish()
-
-    def warmup(self):
-        pass                      # a request would cost money; the first turn pays the connection set-up
-
-    def shutdown(self):
-        try:
-            self.eloop.run(self.client.close(), timeout=5)
-        except Exception:
-            pass
