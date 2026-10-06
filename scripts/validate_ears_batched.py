@@ -12,12 +12,13 @@ logging.basicConfig(level=logging.WARNING)
 from datasets import load_dataset
 from app.config import load_config
 from app import weights
+from scripts.reference.ears_ref import SOURCE_FILE, SOURCE_REPO
 from scripts.reference.ears_ref.endpoint_ears import EndpointEars
 from app.plugins.ears.nemotron_tyger.constants import HOP_N, SEG_S
 from app.plugins.ears.nemotron_tyger.engine import EarsEngine
 from app.plugins.ears.nemotron_tyger.session import EarsSession
 
-ap = argparse.ArgumentParser(); ap.add_argument("--no-merge", action="store_true"); ap.add_argument("--no-graph", action="store_true")
+ap = argparse.ArgumentParser(); ap.add_argument("--no-graph", action="store_true")
 a = ap.parse_args()
 ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
 clip = lambda i: np.asarray(ds[i]["audio"]["array"], np.float32)
@@ -37,7 +38,8 @@ def scenario(k):
     return hops
 
 cfg = load_config(); e = cfg["ears"]
-ckpt = weights.ensure_heads(cfg["ears"]["heads_repo"], cfg["ears"]["heads_file"])
+ckpt = weights.research_checkpoint(SOURCE_REPO, SOURCE_FILE)            # the reference: the research checkpoint
+release = weights.heads_release(cfg["ears"]["heads"], cfg["ears"].get("heads_revision"))   # the engine: the release
 thr = dict(ep_thr=float(e["ep_thr"]), ep_deb=int(e["ep_deb"]), barge_thr=float(e["barge_thr"]),
            barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]))
 
@@ -61,7 +63,7 @@ refs = [run_ref(h) for h in scen]
 del ref; torch.cuda.empty_cache()
 
 # ---- batched engine ----
-eng = EarsEngine(ckpt, slots=S, merge_lora=not a.no_merge, cuda_graph=not a.no_graph)
+eng = EarsEngine(release, slots=S, cuda_graph=not a.no_graph)
 def run_eng(sessions, hop_lists, offsets):
     """Run sessions together; session k starts at tick offsets[k]. Returns per-session (trace, events), tick ms."""
     for s in sessions:

@@ -12,9 +12,9 @@ server:
 
 ears:                      # turn-taking: nemotron ASR + the tyger 1.0 heads (exp-12 arm C endpoint rule +
   plugin: nemotron-tyger-1.0   # barge/backchannel; live defaults, retuned live at V2)
-  nemotron: nvidia/nemotron-3.5-asr-streaming-0.6b
-  heads_repo: nineninesix/tyger-exp10-heads
-  heads_file: exp12/ep_s0/ep_best.pt    # exp-12 arm C seed 0 (LoRA + state/hazard/yield/bc/ep heads)
+  heads: nineninesix/TYGER-S2S-endpointer   # the tyger 1.0 heads release (private; exp-12 arm C seed 0, LoRA merged).
+  heads_revision: 5df9430bfbae16f6d489a60fd309ab578f6c1a60   # v0.1.0-rc1. Its config pins the nemotron
+                           # encoder (ears.nemotron / nemotron_revision would override it)
   ep_thr: 0.9146           # p_end threshold (sel_dev tau) -- NOT yet retuned live (exp-11 found offline ~2x high)
   ep_deb: 2                # debounce frames (80 ms each)
   barge_thr: 0.5

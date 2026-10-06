@@ -39,11 +39,11 @@ class RingKV:
 class HeadBatch:
     """One head step for up to `slots` sessions at once. step(entries) -> (slots, 8) numpy:
     [state logits x4, hazard, yield, bc, p_end] (probabilities sigmoid'ed, state logits raw)."""
-    def __init__(self, ym, slots, ring_len, device, cuda_graph=True):
-        self.ym = ym; self.S = slots; self.L = ring_len; self.device = device
-        cfg = ym.base.backbone.config
+    def __init__(self, heads, slots, ring_len, device, cuda_graph=True):
+        self.heads = heads; self.S = slots; self.L = ring_len; self.device = device
+        cfg = heads.backbone.config
         hd = getattr(cfg, "head_dim", None) or cfg.hidden_size // cfg.num_attention_heads
-        self.kv = RingKV(cfg.num_hidden_layers, slots, ring_len, cfg.num_key_value_heads, hd, ym.base.dtype, device)
+        self.kv = RingKV(cfg.num_hidden_layers, slots, ring_len, cfg.num_key_value_heads, hd, heads.dtype, device)
         S, cols = slots, ring_len + 1
         f32 = dict(dtype=torch.float32, device=device)
         self.hu = torch.zeros(S, 1, 1024, **f32); self.ha = torch.zeros(S, 1, 1024, **f32)
@@ -72,18 +72,16 @@ class HeadBatch:
                 self.graph = None
 
     def _compute(self, cols):
-        ym, b = self.ym, self.ym.base
+        h = self.heads
         self.kv.cols = cols
         self.valid.index_put_((self.ar, self.kv.widx), self.part)       # new column valid for active rows
         self.mask[:, 0, 0, :].copy_(self.valid)
         self.mask[:, 0, 0, 0] = ~self.part                              # idle rows attend the scratch column
-        x = ym.fuse2(self.hu, self.ha, self.act, self.prev)
-        o = b.backbone(inputs_embeds=x, attention_mask={"full_attention": self.mask[..., :cols]},
+        x = h.fuse(self.hu, self.ha, self.act, self.prev)
+        o = h.backbone(inputs_embeds=x, attention_mask={"full_attention": self.mask[..., :cols]},
                        position_ids=self.pos,
                        past_key_values=self.kv, use_cache=True)
-        z = o.last_hidden_state.float()
-        return torch.cat([b.state_head(z), torch.sigmoid(b.hazard_head(z)), torch.sigmoid(ym.yield_head(z)),
-                          torch.sigmoid(ym.bc_head(z)), torch.sigmoid(ym.ep_head(z))], -1)[:, 0]
+        return h.outputs(o.last_hidden_state)[:, 0]
 
     @torch.no_grad()
     def _capture(self):

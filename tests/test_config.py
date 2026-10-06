@@ -33,6 +33,12 @@ def test_old_shape_rejected_with_new_keys():
             "plugin: voxcpm2", "plugin: nemotron-tyger-1.0")
 
 
+def test_research_heads_keys_rejected():
+    cfg = copy.deepcopy(BASE)
+    cfg["ears"] = {**cfg["ears"], "heads_repo": "r", "heads_file": "f.pt"}
+    rejects(cfg, "`ears.heads_repo`", "`ears.heads: nineninesix/TYGER-S2S-endpointer`", "`ears.heads_revision`")
+
+
 def test_filler_defaults_to_reply_instance():
     cfg = copy.deepcopy(BASE); cfg["llm"].pop("filler", None); cfg["llm"].pop("smart", None)
     roles = llm_roles(validate_config(cfg))

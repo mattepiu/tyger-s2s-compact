@@ -93,7 +93,7 @@ def main():
     thr = dict(ep_thr=float(e["ep_thr"]), ep_deb=int(e["ep_deb"]), barge_thr=float(e["barge_thr"]),
                barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]),
                fallback_frames=int(e.get("fallback_sil_frames", 15)))
-    eng = EarsEngine(weights.ensure_heads(e["heads_repo"], e["heads_file"]), slots=1)
+    eng = EarsEngine(weights.heads_release(e["heads"], e.get("heads_revision")), slots=1)
     print(f"trials {a.trials} per row; agent level 0.6; user cuts in at 1.5 s")
     print(f"{'chunk':>6} {'method':>6} | {'SNR dB':>7} | {'alone: false barges':>19} {'mean yield':>10} | "
           f"{'cut in: barges':>14} {'median latency':>14}")

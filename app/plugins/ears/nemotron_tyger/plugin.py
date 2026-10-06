@@ -1,6 +1,6 @@
-"""nemotron-tyger-1.0, the EarsPlugin surface: nemotron-3.5-asr (`ears.nemotron`, default
-nvidia/nemotron-3.5-asr-streaming-0.6b) + the tyger 1.0 turn-taking heads (exp-12 arm C: LoRA + state / hazard /
-yield / backchannel / endpoint heads; private weights, `heads_repo` / `heads_file`). Builds EarsEngine + EarsService:
+"""nemotron-tyger-1.0, the EarsPlugin surface: the tyger 1.0 turn-taking heads (the TYGER-S2S-endpointer release in
+`ears.heads` at `ears.heads_revision`; private) + the nemotron-3.5-asr encoder that release pins (`ears.nemotron`
+overrides it). Builds EarsEngine + EarsService:
 one GPU thread, one batched step per 320 ms hop for every conversation with a hop ready. The class stays light to
 import (EARS's page and tests read THRESHOLDS); the models load in the constructor.
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 
 from app.plugins.base import Slider, Threshold, find_threshold
-from .constants import FRAME_S, HOP_N, MODEL_ID, SR
+from .constants import FRAME_S, HOP_N, SR
 
 log = logging.getLogger("ears")
 
@@ -40,12 +40,12 @@ class NemotronTyger:
         self.sr = SR
         self.hop_samples = HOP_N                                 # 320 ms @ 16 kHz = 5120
         self.defaults = {t.name: t.from_config(conf) for t in THRESHOLDS}
-        heads = weights.ensure_heads(conf["heads_repo"], conf["heads_file"])
+        heads = weights.heads_release(conf["heads"], conf.get("heads_revision"))
         self.slots = int(ctx.cfg["server"].get("max_sessions", 4))
-        model_id = conf.get("nemotron") or MODEL_ID
-        log.info("loading EARS (nemotron-tyger-1.0: %s) for %d sessions, ep_thr=%s ep_deb=%s", model_id, self.slots,
-                 self.defaults["ep_thr"], self.defaults["ep_deb"])
-        engine = EarsEngine(heads, slots=self.slots, ring_len=int(conf.get("ring_frames", 2048)), model_id=model_id)
+        log.info("loading EARS (nemotron-tyger-1.0: %s) for %d sessions, ep_thr=%s ep_deb=%s", conf["heads"],
+                 self.slots, self.defaults["ep_thr"], self.defaults["ep_deb"])
+        engine = EarsEngine(heads, slots=self.slots, ring_len=int(conf.get("ring_frames", 2048)),
+                            nemotron=conf.get("nemotron"), nemotron_revision=conf.get("nemotron_revision"))
         self.service = EarsService(engine, gather_s=float(conf.get("gather_ms", 15)) / 1e3,
                                    expect_s=float(conf.get("expect_ms", 60)) / 1e3,
                                    stats_every_s=float(conf.get("stats_s", 60)))

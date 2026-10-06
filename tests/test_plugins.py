@@ -66,6 +66,24 @@ def test_threshold_spec():
         pass
 
 
+def test_heads_release_is_checked_before_loading():
+    """TygerHeads refuses a release of another kind, or one trained on another audio frontend, before it builds
+    anything (no GPU, no download)."""
+    from app.plugins.ears.nemotron_tyger.heads import TygerHeads, check_frontend
+    good = {"layer": 15, "sample_rate": 16000, "frame_period_s": 0.08, "window_s": 8.0, "hop_s": 0.32,
+            "num_lookahead_tokens": 0, "energy_norm": "clip((dB + 50) / 25, -3, 3)"}
+    check_frontend(good)
+    for bad in ({"layer": 12}, {"hop_s": 0.16}, {"energy_norm": "dB / 50"}):
+        try:
+            check_frontend({**good, **bad}); raise AssertionError(f"accepted frontend {bad}")
+        except ValueError as e:
+            assert next(iter(bad)) in str(e)
+    try:
+        TygerHeads({"model_type": "llama", "frontend": good}); raise AssertionError("accepted another model type")
+    except ValueError:
+        pass
+
+
 def test_nemotron_tyger_sliders_unchanged():
     """R-05 moved the sliders into the plugin; the user asked to keep nemotron-tyger's as they were on the page."""
     from app.plugins.ears.nemotron_tyger.plugin import THRESHOLDS

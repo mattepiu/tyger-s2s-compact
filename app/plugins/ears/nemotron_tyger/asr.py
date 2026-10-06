@@ -1,5 +1,5 @@
-"""NemotronAsr: everything specific to nemotron-3.5-asr (nvidia/nemotron-3.5-asr-streaming-0.6b, or the checkpoint
-in ears.nemotron). Its processor and model, its log-mel features computed on the GPU, the layer-15 encode the tyger
+"""NemotronAsr: everything specific to nemotron-3.5-asr (the checkpoint and revision the heads release pins, or
+ears.nemotron). Its processor and model, its log-mel features computed on the GPU, the layer-15 encode the tyger
 heads read (equal-length windows batched; all-zero windows cached), and transcription through its own greedy RNN-T
 decoder as a CUDA graph (rnnt.py), on a CUDA stream of its own so it never stalls the hop clock.
 """
@@ -17,13 +17,13 @@ class _StopAtL15(Exception):
 
 
 class NemotronAsr:
-    def __init__(self, model_id=MODEL_ID, device="cuda", max_batch=4, cuda_graph=True):
+    def __init__(self, model_id=MODEL_ID, revision=None, device="cuda", max_batch=4, cuda_graph=True):
         from transformers import AutoModel, AutoProcessor
         self.device = device
-        self.proc = AutoProcessor.from_pretrained(model_id)
+        self.proc = AutoProcessor.from_pretrained(model_id, revision=revision)
         self.fe = self.proc.feature_extractor
         self.fe.mel_filters = self.fe.mel_filters.to(device)   # features are computed on the GPU (self.features)
-        self.model = AutoModel.from_pretrained(model_id, dtype=torch.float32).to(device).eval()
+        self.model = AutoModel.from_pretrained(model_id, revision=revision, dtype=torch.float32).to(device).eval()
         self.enc = self.model.encoder
         self._zero_enc = {}                    # window length -> L15 of an all-zero window
         # The heads read layer 15 of 24: their encodes stop there (a hook on that layer raises), ~1/3 less encoder

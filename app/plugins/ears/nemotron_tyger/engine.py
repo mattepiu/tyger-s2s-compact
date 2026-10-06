@@ -17,10 +17,10 @@ import logging, queue, threading, time
 import numpy as np, torch
 
 from .asr import NemotronAsr
-from .constants import (BACKCHANNEL, BARGE_PRE_S, FRAME_S, HOLD, HOP_FRAMES, LISTEN, MIN_SPEECH_MS, MODEL_ID, SEG_S,
+from .constants import (BACKCHANNEL, BARGE_PRE_S, FRAME_S, HOLD, HOP_FRAMES, LISTEN, MIN_SPEECH_MS, SEG_S,
                         SEG_SEARCH_S, SPEAK, SR, STATE_NAMES, TURN_MAX_S, VAD_DB, WARMUP_FRAMES, WINDOW_S)
 from .head_batch import HeadBatch
-from .heads import EndpointModel
+from .heads import TygerHeads
 
 log = logging.getLogger("ears")
 
@@ -61,16 +61,19 @@ class Job:
 
 
 class EarsEngine:
-    def __init__(self, heads_ckpt, slots=4, ring_len=2048, device="cuda", merge_lora=True, cuda_graph=True,
-                 model_id=MODEL_ID):
+    def __init__(self, heads_dir, slots=4, ring_len=2048, device="cuda", cuda_graph=True, nemotron=None,
+                 nemotron_revision=None):
+        """heads_dir: a TYGER-S2S-endpointer release (weights.heads_release). The encoder is the one the release
+        pins (its config's frontend), unless `nemotron` names another checkpoint."""
         self.device = device; self.slots = slots
-        self.asr = NemotronAsr(model_id, device=device, max_batch=slots, cuda_graph=cuda_graph)
-        self.ym = EndpointModel(device=device); self.ym.load(heads_ckpt); self.ym.eval()
-        if merge_lora:                         # LoRA folded into the frozen weights: fewer kernels per step
-            self.ym.base.backbone = self.ym.base.backbone.merge_and_unload()
-        self.head = HeadBatch(self.ym, slots, ring_len, device, cuda_graph=cuda_graph)
-        log.info("EARS engine: %d slots, ring %d frames, LoRA merged=%s, head CUDA graph=%s",
-                 slots, ring_len, merge_lora, self.head.graph is not None)
+        self.heads = TygerHeads.from_pretrained(heads_dir, device=device)
+        fe = self.heads.frontend
+        model_id, revision = (nemotron, nemotron_revision) if nemotron else (fe["repo_id"], fe["revision"])
+        self.asr = NemotronAsr(model_id, revision, device=device, max_batch=slots, cuda_graph=cuda_graph)
+        self.head = HeadBatch(self.heads, slots, ring_len, device, cuda_graph=cuda_graph)
+        log.info("EARS engine: %d slots, ring %d frames, heads %s, encoder %s@%s, head CUDA graph=%s", slots,
+                 ring_len, self.heads.config.get("version"), model_id, (revision or "latest")[:8],
+                 self.head.graph is not None)
         self.asr_q: queue.Queue = queue.Queue()
         self.t_enc = self.t_head = self.t_asr = 0.0          # busy seconds, reset by the stats log
         threading.Thread(target=self._asr_loop, name="ears-asr", daemon=True).start()

@@ -48,7 +48,11 @@ def _old_shape(cfg: dict) -> list[str]:
     """What still uses the pre-plugin config shape, each with the key that replaces it."""
     found = []
     if "models" in cfg:
-        found.append("top-level `models:` -> move nemotron / heads_repo / heads_file into `ears:`")
+        found.append("top-level `models:` -> the heads release goes in `ears.heads` (it pins its nemotron encoder)")
+    ears = cfg.get("ears")
+    if isinstance(ears, dict) and ("heads_repo" in ears or "heads_file" in ears):
+        found.append("`ears.heads_repo` / `ears.heads_file` (a research .pt) -> `ears.heads: "
+                     "nineninesix/TYGER-S2S-endpointer` (the release) and `ears.heads_revision`")
     llm = cfg.get("llm")
     if isinstance(llm, dict) and "model" in llm:
         found.append("`llm.model` and the other flat `llm:` keys -> move them under `llm.reply:` with "

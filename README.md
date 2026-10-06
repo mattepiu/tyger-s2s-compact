@@ -63,7 +63,7 @@ Copy `.env.example` to `.env` (gitignored) and fill in:
 
 - **`TAVILY_API_KEY`** — powers `web_search` and `get_weather`. Without it those tools return an error and the
   model says it couldn't look it up; it never invents a value.
-- **`HF_TOKEN`** — pulls the **private** endpoint-head weights (`heads_repo` in `config.yaml`). If a token
+- **`HF_TOKEN`** — pulls the **private** turn-taking heads release (`ears.heads` in `config.yaml`). If a token
   already exists at `$HF_HOME/token`, leave this blank.
 
 Never commit `.env`.
@@ -140,6 +140,7 @@ CONFIG=config.fake.yaml ./run.sh                 # the whole stack on the fake p
                                                          #   (fixed utterance and reply: runs compare)
 .venv/bin/python scripts/validate_ears_batched.py        # GPU free: batched EARS == single-session reference
 .venv/bin/python scripts/validate_rnnt.py                # GPU free: graphed RNN-T == nemotron generate()
+.venv/bin/python scripts/validate_heads.py               # GPU free: the heads release == the research model (weights, outputs)
 .venv/bin/python scripts/validate_barge.py               # GPU free: a barge-in keeps the start of the utterance
 .venv/bin/python scripts/validate_second_ear.py          # GPU free: the 2nd ear's 24->16 kHz step, old vs new, on the heads
 .venv/bin/python scripts/validate_long_turn.py           # GPU free: > 20 s turns transcribed whole
@@ -231,7 +232,8 @@ Tasks need a web-search key (`TAVILY_API_KEY`) to find anything current; without
 
 | component | model | licence |
 |---|---|---|
-| ASR encoder + turn-taking | `nvidia/nemotron-3.5-asr-streaming-0.6b` + endpoint head (private) | NVIDIA Open Model Licence / private head |
+| ASR encoder | `nvidia/nemotron-3.5-asr-streaming-0.6b` @ `ea30d66` (the revision the heads release pins) | OpenMDW-1.1 |
+| turn-taking heads | `nineninesix/TYGER-S2S-endpointer` v0.1.0-rc1 (private; Qwen3-0.6B decoder with its LoRA merged + the heads) | Apache-2.0 (modified Qwen3-0.6B: see its NOTICE) |
 | responder | `google/gemma-4-E4B-it`, FP8 at load (was `Qwen/Qwen3.5-4B`, before that `Qwen/Qwen3-4B-Instruct-2507`) | Apache-2.0 |
 | TTS | `openbmb/VoxCPM2` | Apache-2.0 |
 | web tools | Tavily API | commercial API (your key) |

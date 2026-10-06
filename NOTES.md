@@ -154,6 +154,36 @@ Parity, all on this box:
 - the EARS contract passes;
 - stack: smoke PASS, `load_test_ears.py` 874 / 1086 ms at 1 / 4 conv.
 
+**R-06b, the heads from the TYGER-S2S-endpointer release** (the user's packaging of the heads: private repo
+`nineninesix/TYGER-S2S-endpointer`, v0.1.0-rc1, pinned in `ears.heads_revision`).
+- The release has `config.json` + `model.safetensors`: the Qwen3-0.6B decoder with the LoRA already merged (bf16),
+  the added modules in fp32, the backbone's config embedded, and the frontend it was trained on pinned
+  (nemotron-3.5-asr @ ea30d66, layer 15, 8 s window, 0.32 s hop, the energy norm).
+- `TygerHeads` (`heads.py`) is its loader and inference model:
+  - it builds the backbone from the embedded config: no peft, no Qwen3-0.6B download, rotary buffers in fp32 as
+    `from_pretrained` builds them;
+  - it loads all 335 tensors in their stored dtypes (strict);
+  - it checks `model_type` and the frontend against `constants.py`, so a release needing another audio grid fails
+    at load;
+  - it keeps only `fuse` / `outputs`; the constant agent-text embedding is computed once.
+- The checkpoint is now read once. Before, the research `.pt` was `torch.load`ed three times
+  (`weights.verify_head_ckpt`, `YieldModel.load`, `EndpointModel.load`), with `strict=False`.
+- EarsEngine loads the heads first, then the nemotron the release pins (`ears.nemotron` / `nemotron_revision`
+  override it).
+- Config: `ears.heads` + `ears.heads_revision` replace `heads_repo` / `heads_file`. The old keys are rejected with
+  the new ones named. The research `.pt` stays only for the validators' reference
+  (`scripts/reference/ears_ref` `SOURCE_REPO` / `SOURCE_FILE`, from the model card's provenance).
+- Removed: `weights.ensure_public_cached` (unused) and `verify_head_ckpt`. Corrected: nemotron's licence is
+  OpenMDW-1.1 (its card), not the NVIDIA Open Model Licence the README said.
+
+Parity:
+- new `scripts/validate_heads.py`: the research classes on the source checkpoint (LoRA merged as serving did)
+  against the release, **weights identical 335 / 335, outputs max |diff| 0**;
+- `validate_ears_batched.py`: the baseline's max diffs to the last digit, events and transcripts match, the same GPU
+  memory (8447 MiB);
+- `validate_barge.py` and `validate_long_turn.py` unchanged; the contract passes;
+- stack: smoke PASS, `load_test_ears.py` 889 / 1073 ms at 1 / 4 conv, EARS start ~15 s and 5.7 GB as before.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

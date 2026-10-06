@@ -1,9 +1,9 @@
-"""nemotron-tyger-1.0's fixed numbers, in one place: the audio grid nemotron-3.5-asr sets, the layer and backbone the
+"""nemotron-tyger-1.0's fixed numbers, in one place: the audio grid nemotron-3.5-asr sets, the layer the
 tyger 1.0 heads were trained on, the heads' state vocabulary, and the turn rules around them. Light (no imports):
 the plugin class and the page's slider spec read it without loading a model."""
 
 # ---- nemotron-3.5-asr: the audio grid -----------------------------------------------------------------------
-MODEL_ID = "nvidia/nemotron-3.5-asr-streaming-0.6b"   # the default for ears.nemotron
+MODEL_ID = "nvidia/nemotron-3.5-asr-streaming-0.6b"   # the encoder the heads were trained on (the release pins it)
 SR = 16000                       # its input rate
 FRAME_S = 0.08                   # one encoder frame (12.5 Hz) = one turn-taking decision
 HOP_FRAMES = 4                   # frames per hop: EARS steps every 320 ms
@@ -12,8 +12,7 @@ WINDOW_S = 8.0                   # the rolling window each hop re-encodes
 L15 = 15                         # the encoder layer the heads read (of 24): encodes stop there
 ENC_HIDDEN = 1024                # its width
 
-# ---- the tyger 1.0 heads ------------------------------------------------------------------------------------
-HEAD_BACKBONE = "Qwen/Qwen3-0.6B"                      # frozen backbone (+ LoRA from the checkpoint)
+# ---- the tyger 1.0 heads (their release's config.json holds the backbone; these are the inputs' ids) ----------
 LISTEN, HOLD, SPEAK, BACKCHANNEL = 0, 1, 2, 3           # the state head's classes
 STATE_NAMES = ("LISTEN", "HOLD", "SPEAK", "BACKCHANNEL")
 N_STATE = 4

@@ -1,177 +1,111 @@
-"""The tyger 1.0 heads (exp-12 arm C) as the research code defined them: StateChannelModel (exp-4: the frozen
-backbone over fused per-frame inputs, the 4-way state head and the hazard head), YieldModel (exp-7: the agent channel,
-the user's energy, the yield and backchannel heads) and EndpointModel (exp-12: the endpoint head). EARS uses only
-their inference path (fuse2, the merged backbone, the heads). Training-only methods are kept as they were.
+"""TygerHeads: the loader and inference model for the TYGER-S2S-endpointer release (the tyger 1.0 heads, exp-12 arm
+C; private repo `ears.heads`, weights only: its model card says the loader lives here).
+
+Per frame the heads read nemotron-3.5-asr's layer-15 features of the user's audio and of the agent's own audio (the
+2nd ear), the user's normalised frame energy and the previous turn state. These are fused additively into one input
+per frame (`fuse`), run through the Qwen3-0.6B decoder (its LoRA already merged in the release), and the last hidden
+state feeds five heads (`outputs`): the 4-way state logits, and the hazard, yield (barge), backchannel and endpoint
+probabilities.
+
+The release is self-describing (config.json): the backbone's config is embedded (nothing else is downloaded), the
+dtype policy is bf16 backbone / fp32 added modules ("keep the stored dtypes"), and `frontend` pins the encoder the
+heads were trained on (repo, revision, layer, window, hop, energy norm). The loader checks that frontend against
+constants.py, so a release that needs a different audio grid fails at load instead of misbehaving.
+scripts/validate_heads.py checks this model against the research classes (scripts/reference/ears_ref) on the
+source checkpoint: same weights, same outputs.
 """
 from __future__ import annotations
+import json
+from pathlib import Path
+
 import torch, torch.nn as nn
 
-from .constants import ENC_HIDDEN, HEAD_BACKBONE, N_STATE, TEXT_PAD
+from .constants import ENC_HIDDEN, FRAME_S, HOP_N, L15, N_STATE, SR, TEXT_PAD, WINDOW_S
+
+MODEL_TYPE = "tyger_endpointer"
+ADDED_MODULES = ("proj_h", "proj_agent", "proj_act", "state_emb", "in_norm", "state_head", "hazard_head",
+                 "yield_head", "bc_head", "ep_head")
+_NOT_QWEN3_CONFIG = ("architectures", "torch_dtype", "transformers_version")
 
 
-class StateChannelModel(nn.Module):
-    def __init__(self, backbone_id=HEAD_BACKBONE, enc_hidden=ENC_HIDDEN, device="cuda",
-                 dtype=torch.bfloat16, lora=False, lora_r=16):
+def _mlp_head(d):
+    return nn.Sequential(nn.Linear(d, d), nn.SiLU(), nn.Linear(d, 1))
+
+
+def check_frontend(frontend: dict):
+    """The release's pinned frontend must be the audio grid this plugin runs (constants.py); ValueError if not."""
+    want = {"layer": L15, "sample_rate": SR, "frame_period_s": FRAME_S, "window_s": WINDOW_S,
+            "hop_s": HOP_N / SR, "num_lookahead_tokens": 0, "energy_norm": "clip((dB + 50) / 25, -3, 3)"}
+    bad = [f"{k}: release {frontend.get(k)!r}, plugin {v!r}" for k, v in want.items() if frontend.get(k) != v]
+    if bad:
+        raise ValueError("the heads release needs another audio frontend than this plugin runs: " + "; ".join(bad))
+
+
+class TygerHeads(nn.Module):
+    def __init__(self, config: dict):
+        """The model's modules from the release's config.json (random weights: use from_pretrained)."""
         super().__init__()
-        from transformers import AutoModelForCausalLM
-        self.device = device; self.dtype = dtype; self.backbone_id = backbone_id
-        lm = AutoModelForCausalLM.from_pretrained(backbone_id, dtype=dtype)
-        self.backbone = lm.model                      # base decoder (no LM head)
-        self.embed_tokens = self.backbone.embed_tokens  # frozen text embeddings (Etext)
-        d = self.backbone.config.hidden_size
-        self.d_model = d
-        for p in self.backbone.parameters():
-            p.requires_grad_(False)
-        self.lora = lora
-        if lora:
-            from peft import LoraConfig, get_peft_model
-            cfg = LoraConfig(r=lora_r, lora_alpha=2 * lora_r, target_modules=[
-                "q_proj", "k_proj", "v_proj", "o_proj"], lora_dropout=0.0, bias="none",
-                task_type="FEATURE_EXTRACTION")
-            self.backbone = get_peft_model(self.backbone, cfg)
-        # trainable bits (fp32 for stable head training)
-        self.proj_h = nn.Linear(enc_hidden, d)
-        self.state_emb = nn.Embedding(N_STATE + 1, d)   # +START
+        from transformers import Qwen3Config, Qwen3Model
+        if config.get("model_type") != MODEL_TYPE:
+            raise ValueError(f"not a {MODEL_TYPE} release (model_type {config.get('model_type')!r})")
+        check_frontend(config["frontend"])
+        self.config = config
+        self.dtype = getattr(torch, config["dtype_policy"]["backbone"])
+        bb = Qwen3Config(**{k: v for k, v in config["backbone_config"].items() if k not in _NOT_QWEN3_CONFIG})
+        # as from_pretrained builds it: parameters in the backbone dtype, rotary buffers in fp32
+        self.backbone = Qwen3Model._from_config(bb, dtype=self.dtype, attn_implementation=config["attn_implementation"])
+        d, enc = config["hidden_size"], config["encoder_hidden_size"]
+        assert enc == ENC_HIDDEN and config["num_states"] == N_STATE and config["text_pad_token_id"] == TEXT_PAD
+        self.proj_h = nn.Linear(enc, d)                    # the user's layer-15 features
+        self.proj_agent = nn.Linear(enc, d)                # the agent's (the 2nd ear)
+        self.proj_act = nn.Linear(1, d)                    # the user's frame energy
+        self.state_emb = nn.Embedding(config["num_state_embeddings"], d)   # the previous state (+ START)
         self.in_norm = nn.LayerNorm(d)
-        self.state_head = nn.Linear(d, N_STATE)
+        self.state_head = nn.Linear(d, config["num_states"])
         self.hazard_head = nn.Linear(d, 1)
-        self.to(device)
-        # cast trainable modules to fp32, keep backbone in dtype
-        for m in (self.proj_h, self.state_emb, self.in_norm, self.state_head, self.hazard_head):
-            m.float()
+        self.yield_head = _mlp_head(d)                     # the user is barging in: yield now (speaking)
+        self.bc_head = _mlp_head(d)                        # the user gave a cue: backchannel now (listening)
+        self.ep_head = _mlp_head(d)                        # the user's turn ended: take the floor (listening)
 
-    def fuse(self, h_user, prev_state, text_tok):
-        """h_user (B,T,enc_hidden) float; prev_state (B,T) long; text_tok (B,T) long -> (B,T,d)."""
-        x = self.proj_h(h_user.float())
-        x = x + self.state_emb(prev_state)
-        with torch.no_grad():
-            te = self.embed_tokens(text_tok).float()
-        x = x + te
+    @classmethod
+    def from_pretrained(cls, path, device="cuda"):
+        """Load a release from a local directory (config.json + model.safetensors): every tensor, in its stored
+        dtype. Missing or unexpected tensors are an error."""
+        from safetensors.torch import load_file
+        path = Path(path)
+        model = cls(json.loads((path / "config.json").read_text()))
+        added = getattr(torch, model.config["dtype_policy"]["added_modules"])
+        for name in ADDED_MODULES:
+            getattr(model, name).to(added)
+        model.to(device)
+        state = load_file(str(path / "model.safetensors"), device=str(device))
+        missing, unexpected = model.load_state_dict(state, strict=False)
+        if missing or unexpected:
+            raise ValueError(f"heads release {path}: {len(missing)} tensors missing, {len(unexpected)} unexpected")
+        wrong = [k for k, v in model.state_dict().items() if k in state and v.dtype != state[k].dtype]
+        if wrong:
+            raise ValueError(f"heads release {path}: stored dtypes changed on load ({', '.join(wrong[:3])})")
+        model.eval()
+        # the agent-text input is always TEXT_PAD live (no agent words are fed): its embedding, once
+        model.register_buffer("text_pad", model.backbone.embed_tokens.weight[TEXT_PAD].float().clone(),
+                              persistent=False)
+        return model
+
+    @property
+    def frontend(self) -> dict:
+        """The encoder the heads were trained on: repo_id, revision, dtype, layer, ..."""
+        return self.config["frontend"]
+
+    def fuse(self, h_user, h_agent, act, prev_state):
+        """One input per frame: (B, T, 1024) user and agent features, (B, T) normalised energy, (B, T) previous
+        state -> (B, T, d) in the backbone's dtype. The same sums, in the same order, as the research fuse2."""
+        x = self.proj_h(h_user.float()) + self.state_emb(prev_state)
+        x = x + self.text_pad + self.proj_agent(h_agent.float()) + self.proj_act(act.float().unsqueeze(-1))
         return self.in_norm(x).to(self.dtype)
 
-    def backbone_hidden(self, x, attn_mask=None):
-        out = self.backbone(inputs_embeds=x, attention_mask=attn_mask,
-                            use_cache=False, output_hidden_states=False)
-        return out.last_hidden_state.float()            # (B,T,d)
-
-    def forward(self, h_user, prev_state, text_tok, attn_mask=None):
-        x = self.fuse(h_user, prev_state, text_tok)
-        z = self.backbone_hidden(x, attn_mask)
-        return self.state_head(z), self.hazard_head(z).squeeze(-1)   # (B,T,4),(B,T)
-
-    def trainable_parameters(self):
-        ps = list(self.proj_h.parameters()) + list(self.state_emb.parameters()) + \
-             list(self.in_norm.parameters()) + list(self.state_head.parameters()) + \
-             list(self.hazard_head.parameters())
-        if self.lora:
-            ps += [p for p in self.backbone.parameters() if p.requires_grad]
-        return ps
-
-    def n_trainable(self):
-        return sum(p.numel() for p in self.trainable_parameters())
-    def n_frozen(self):
-        return sum(p.numel() for p in self.parameters() if not p.requires_grad)
-
-
-class YieldModel(nn.Module):
-    def __init__(self, backbone_id=HEAD_BACKBONE, enc_hidden=ENC_HIDDEN, device="cuda",
-                 lora=True, lora_r=16):
-        super().__init__()
-        self.base = StateChannelModel(backbone_id=backbone_id, enc_hidden=enc_hidden,
-                                      device=device, lora=lora, lora_r=lora_r)
-        d = self.base.d_model
-        self.device = device
-        self.proj_agent = nn.Linear(enc_hidden, d)
-        self.proj_act = nn.Linear(1, d)
-        self.yield_head = nn.Sequential(nn.Linear(d, d), nn.SiLU(), nn.Linear(d, 1))
-        # bc_head: the EARLY-WARNING "the user gave a cue -> backchannel now" head (LISTEN mode). Distinct
-        # from the 4-way state head for the same reason yield_head is: entering BACKCHANNEL from the user
-        # cue is the hard free-run transition the frozen head can't do (p[BC] max 0.12; exp-4's 0.84 was
-        # teacher-forced). Zero-init last layer => at load bc == 0.5 everywhere (additive identity), so
-        # loading a yield ckpt preserves the 0.903/0.944 model exactly and bc is learned on top.
-        self.bc_head = nn.Sequential(nn.Linear(d, d), nn.SiLU(), nn.Linear(d, 1))
-        for lin in (self.proj_agent, self.proj_act, self.yield_head[-1], self.bc_head[-1]):
-            nn.init.zeros_(lin.weight); nn.init.zeros_(lin.bias)   # additive identity at start
-        for m in (self.proj_agent, self.proj_act, self.yield_head, self.bc_head):
-            m.to(device).float()
-
-    def load_base(self, ckpt):
-        sd = torch.load(ckpt, map_location=self.device)
-        self.base.load_state_dict(sd, strict=False)
-
-    def fuse2(self, h_user, h_agent, act, prev_state):
-        b = self.base
-        x = b.proj_h(h_user.float()) + b.state_emb(prev_state)
-        with torch.no_grad():
-            te = b.embed_tokens(torch.full_like(prev_state, TEXT_PAD)).float()
-        x = x + te + self.proj_agent(h_agent.float()) + self.proj_act(act.float().unsqueeze(-1))
-        return b.in_norm(x).to(b.dtype)
-
-    def forward(self, h_user, h_agent, act, prev_state, attn_mask=None):
-        x = self.fuse2(h_user, h_agent, act, prev_state)
-        z = self.base.backbone_hidden(x, attn_mask)                # (B,T,d) float
-        return (self.base.state_head(z), self.base.hazard_head(z).squeeze(-1),
-                self.yield_head(z).squeeze(-1),                    # state (B,T,4), hazard (B,T), yield (B,T)
-                self.bc_head(z).squeeze(-1))                       # bc (B,T)
-
-    def trainable_parameters(self):
-        ps = list(self.proj_agent.parameters()) + list(self.proj_act.parameters()) + \
-             list(self.yield_head.parameters()) + list(self.bc_head.parameters()) + \
-             list(self.base.state_head.parameters()) + list(self.base.hazard_head.parameters())
-        ps += [p for p in self.base.backbone.parameters() if p.requires_grad]   # LoRA
-        return ps
-
-    def save(self, path):
-        keep = ("proj_h.", "state_emb.", "in_norm.", "state_head.", "hazard_head.")
-        base_sd = {k: v for k, v in self.base.state_dict().items()
-                   if k.startswith(keep) or "lora" in k.lower()}
-        torch.save({"base": base_sd, "proj_agent": self.proj_agent.state_dict(),
-                    "proj_act": self.proj_act.state_dict(), "yield_head": self.yield_head.state_dict(),
-                    "bc_head": self.bc_head.state_dict()}, path)
-
-    def load(self, path):
-        ck = torch.load(path, map_location=self.device)
-        self.base.load_state_dict(ck["base"], strict=False)
-        self.proj_agent.load_state_dict(ck["proj_agent"]); self.proj_act.load_state_dict(ck["proj_act"])
-        self.yield_head.load_state_dict(ck["yield_head"])
-        if "bc_head" in ck:                                        # older (yield-only) ckpts -> bc stays zero-init
-            self.bc_head.load_state_dict(ck["bc_head"])
-
-
-class EndpointModel(YieldModel):
-    def __init__(self, backbone_id=HEAD_BACKBONE, enc_hidden=ENC_HIDDEN, device="cuda",
-                 lora=True, lora_r=16):
-        super().__init__(backbone_id=backbone_id, enc_hidden=enc_hidden, device=device,
-                         lora=lora, lora_r=lora_r)
-        d = self.base.d_model
-        # ep_head: the LISTEN-mode "the user's turn just ended -> take the floor now" head. Distinct from
-        # the 4-way state head (teacher-forced to keep prev, so weak at ENTERING SPEAK) exactly as
-        # yield/bc are. Zero-init last layer => p_end == 0.5 at load (additive identity); loading bc_s1
-        # preserves the 0.930/0.969/0.883 chain and ep is learned on top.
-        self.ep_head = nn.Sequential(nn.Linear(d, d), nn.SiLU(), nn.Linear(d, 1))
-        nn.init.zeros_(self.ep_head[-1].weight); nn.init.zeros_(self.ep_head[-1].bias)
-        self.ep_head.to(device).float()
-
-    def forward(self, h_user, h_agent, act, prev_state, attn_mask=None):
-        x = self.fuse2(h_user, h_agent, act, prev_state)
-        z = self.base.backbone_hidden(x, attn_mask)                    # (B,T,d) float
-        return (self.base.state_head(z), self.base.hazard_head(z).squeeze(-1),
-                self.yield_head(z).squeeze(-1), self.bc_head(z).squeeze(-1),
-                self.ep_head(z).squeeze(-1))                           # state,haz,yield,bc,ep
-
-    def trainable_parameters(self):
-        return super().trainable_parameters() + list(self.ep_head.parameters())
-
-    def save(self, path):
-        keep = ("proj_h.", "state_emb.", "in_norm.", "state_head.", "hazard_head.")
-        base_sd = {k: v for k, v in self.base.state_dict().items()
-                   if k.startswith(keep) or "lora" in k.lower()}
-        torch.save({"base": base_sd, "proj_agent": self.proj_agent.state_dict(),
-                    "proj_act": self.proj_act.state_dict(), "yield_head": self.yield_head.state_dict(),
-                    "bc_head": self.bc_head.state_dict(), "ep_head": self.ep_head.state_dict()}, path)
-
-    def load(self, path):
-        super().load(path)                                             # base + proj + yield + bc
-        ck = torch.load(path, map_location=self.device)
-        if "ep_head" in ck:
-            self.ep_head.load_state_dict(ck["ep_head"])                # else: stays zero-init (from bc_s1)
+    def outputs(self, z):
+        """The backbone's last hidden state (B, T, d) -> (B, T, 8): state logits x4, then the hazard, yield,
+        backchannel and endpoint probabilities."""
+        z = z.float()
+        return torch.cat([self.state_head(z), torch.sigmoid(self.hazard_head(z)), torch.sigmoid(self.yield_head(z)),
+                          torch.sigmoid(self.bc_head(z)), torch.sigmoid(self.ep_head(z))], -1)
