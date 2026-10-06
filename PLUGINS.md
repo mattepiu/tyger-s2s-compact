@@ -8,6 +8,20 @@
 > removed after losing to Gemma, together with the tool-call formats only they used (Qwen XML, Nemotron
 > `<TOOLCALL>`). The text below is the design record as written; only the registry snippet and the package layout
 > show the code as it is now. Trial numbers: `NOTES.md`; removed code: git history.
+>
+> **Note, 2026-10-06 (later):** the readability refactor (`REFACTOR.md`, R-01..R-09) changed the code under this
+> design, not the design itself:
+> - The interfaces in `base.py` are now ABC bases (`LLMPlugin`, `TTSPlugin`, `EarsPlugin`) with the shared
+>   defaults, not `typing.Protocol`s.
+> - Each plugin declares its config block as an `Options` dataclass (`options.py`), checked when the config loads.
+> - The hosted LLMs share `HostedLLM` (`llm/hosted.py`).
+> - An EARS plugin declares its tunable `THRESHOLDS`, and the page builds its sliders from them.
+> - `app/tools.py` is the registry `app/tools/`.
+> - `mouth.py` and `server.py` are the packages `app/mouth/` and `app/ears/`.
+> - `app/ears_core/` is the plugin package `ears/nemotron_tyger/`, which loads the heads release
+>   `nineninesix/TYGER-S2S-endpointer`.
+>
+> README → "Adding a plugin" shows the current pattern with a worked example.
 
 **Goal:** swap the LLM, TTS and turn-taking (EARS) models through config, without touching the orchestration.
 
@@ -216,15 +230,17 @@ tts:
 **Package layout:**
 ```
 app/plugins/
-  base.py
+  base.py                # ABC bases: Plugin, LLMPlugin, TTSPlugin, EarsPlugin (+ Threshold / Slider)
+  options.py             # PluginOptions: a plugin's config block, typed, checked at config load
   __init__.py
   llm/
+    hosted.py            # HostedLLM: the base of openai / anthropic
     vllm_base.py
     gemma4.py
     openai_compat.py
     anthropic.py
     fake.py
-    _toolparse.py        # gemma4 + hermes_json calls, call-tag splitting, <think> guard
+    _toolparse.py        # gemma4 + hermes_json calls, call-tag splitting, <think> guard, check_arguments
   tts/
     voxcpm2.py
     fake.py

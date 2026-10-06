@@ -121,13 +121,14 @@ the voice picker. Browser DSP (echo cancellation, noise suppression, auto gain) 
 .venv/bin/python tests/test_chunker.py          # text chunking (no GPU)
 .venv/bin/python tests/test_llm_parse.py        # tool-call splitting, both call formats, <think> guard (no GPU)
 .venv/bin/python tests/test_mouth_session.py    # MOUTH turns/barge/tools/backchannels on the fake plugins (no GPU)
-.venv/bin/python tests/test_config.py           # plugin config shape; the old shape is rejected (no GPU)
+.venv/bin/python tests/test_config.py           # plugin config shape + every block's Options; old shape rejected (no GPU)
 .venv/bin/python tests/test_prompts.py          # prompts.yaml loader + checks (no GPU)
 .venv/bin/python tests/test_plugins.py          # plugin classes import light; off-rate TTS resampled (no GPU)
 .venv/bin/python tests/test_plugin_contract.py  # plugin contract on the fakes; TYGER_CONTRACT_LOCAL=1 adds the real
                                                 #   local plugins (GPU free: stop run.sh first)
 .venv/bin/python tests/test_mouth_parts.py      # MOUTH's History and Speaker on their own (no GPU)
 .venv/bin/python tests/test_tasks.py            # background tasks + their announcement on a fake smart model (no GPU)
+.venv/bin/python tests/test_tools.py            # the tool registry: order, which context answers which call (no GPU)
 .venv/bin/python tests/test_ears_floor.py       # EARS floor requests: the Conversation state machine, fake EARS (no GPU)
 .venv/bin/python tests/test_ears_parts.py      # EARS's AgentPlayback and the web app (busy page, voices) (no GPU)
 .venv/bin/python tests/test_ears_asr_jobs.py    # EARS's ASR thread resolves endpoint / partial jobs, also on failure (no GPU)
@@ -193,10 +194,90 @@ TTS was tried and removed: every text chunk paid a request's time to first audio
 request that fails (rate limit, timeout, network) ends the turn with a short spoken apology; a refusal with a short
 neutral line (both in `prompts.yaml` → `spoken`).
 
-**Adding a plugin:** a module under `app/plugins/<llm|tts|ears>/` with a class that implements the protocol in
-`app/plugins/base.py` (constructor `(conf, ctx)`; import heavy dependencies inside it, so the class stays light to
-import), one line in `REGISTRY` (`app/plugins/__init__.py`), and a run in `tests/test_plugin_contract.py`.
+### Adding a plugin
+
+A plugin is a class that subclasses its kind's base in `app/plugins/base.py` (`LLMPlugin`, `TTSPlugin` or
+`EarsPlugin`), declares its config block as an `Options` dataclass, and has one line in the registry. MOUTH, EARS
+and the page don't change. A worked example, an LLM that answers every turn with the user's last words:
+
+```python
+# app/plugins/llm/echo.py
+from __future__ import annotations
+from dataclasses import dataclass
+
+from app.plugins.base import LLMPlugin
+from app.plugins.options import PluginOptions
+
+
+class EchoLLM(LLMPlugin):
+    @dataclass(frozen=True, kw_only=True)
+    class Options(PluginOptions):
+        prefix: str = "You said:"             # llm.<role>.prefix in config.yaml
+
+    def stream(self, messages, tools=None, max_new=192, stop_flag=None):
+        last = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+        for word in f"{self.opts.prefix} {last}".split()[:max_new]:
+            if stop_flag and stop_flag():                 # barge-in: stop within one item
+                return
+            yield ("text", word + " ")
+```
+
+```python
+# app/plugins/__init__.py, in REGISTRY["llm"]
+"echo": "app.plugins.llm.echo:EchoLLM",
+```
+
+```yaml
+# config.yaml
+llm:
+  reply: {plugin: echo, prefix: "I heard"}
+```
+
+What the base gives you, and what is yours to write:
+- **Options.** The constructor `(conf, ctx)` turns the block into `self.opts`, and sets `self.name` (the instance
+  name) and `self.eloop` (MOUTH's asyncio loop). The config is checked against `Options` when it loads, so a typo
+  stops start-up with the key named (`unknown option prefx (did you mean prefix?)`). A field without a default
+  must be set. `plugin:` and `name:` belong to the config shape.
+- **Constructor.** If you write one, call `super().__init__(conf, ctx)` first, and import heavy dependencies (vllm,
+  an SDK) inside it, not at module level: the class must stay light to import (`tests/test_plugins.py` checks
+  this).
+- **Defaults.** `warmup()` and `shutdown()` do nothing unless you override them. `remote` is False; set it True if
+  transcripts leave the box (the startup log then names the role).
+- **LLM.** `stream()` yields the neutral events documented in `base.py`: `("text", delta)`, then for a tool call
+  `("tool_start", {"name"})` and `("tool_calls", calls, native)`. It polls `stop_flag`, and raises `LLMError` for
+  a failed request (MOUTH speaks an apology). Local vLLM models subclass `VLLMChatPlugin` (`vllm_base.py`) and
+  override only its hooks, as `gemma4.py` does. Hosted APIs subclass `HostedLLM` (`hosted.py`: key, timeouts,
+  concurrency, errors), as `openai_compat.py` and `anthropic.py` do. Validate tool arguments with
+  `_toolparse.check_arguments`.
+- **TTS.** Set `out_sr` and `caps`, and write `list_voices(cfg)` (a classmethod: EARS calls it without loading
+  the model), `load_voice(name)` and `stream(text, voice)`, which yields float32 mono at `out_sr`. MOUTH
+  resamples to the 24 kHz wire.
+- **EARS.** Set `sr` and `hop_samples`, and declare the tunable thresholds as `THRESHOLDS` (`Threshold`, each
+  with an optional `Slider`): the base reads their defaults from config, and the page builds its sliders from
+  them. Write `open_session(thresholds)`, `close`, `feed` (one hop in, events out: FRAME / ENDPOINT / BARGE /
+  BACKCHANNEL) and `full` / `active`. `nemotron_tyger/` is the full example: a package that keeps its
+  encoder, heads and rules together.
+- **Tests.** Add a run to `tests/test_plugin_contract.py` (`llm_suite`, `tts_suite` or `ears_suite`). The fakes in
+  `app/plugins/*/fake.py` are the smallest complete plugins of each kind.
+
 Per-model prompt changes go in `prompts/<instance name>.yaml`, never in code.
+
+### Adding a tool
+
+Tools are a registry too (`app/tools/`). Write the function in a module there (a new module goes on the import
+line in `app/tools/__init__.py`, before `agent`: the order there is the order the models see), give it its JSON
+schema with `@tool`, and add its description to `prompts.yaml` →
+`tools:`; `build_tools` offers it to the models, and `execute_tool` runs it. It returns a small dict, and
+`{"error": ...}` on failure:
+
+```python
+@tool("get_exchange_rate", {"type": "object", "properties": {"pair": {"type": "string"}}, "required": ["pair"]})
+def get_exchange_rate(pair):
+    ...
+```
+
+Tools that MOUTH answers itself (`ask_expert`, the task tools) register `handle(arguments, ctx)` with
+`@agent_tool` in `app/tools/agent.py` instead.
 
 ## Escalation and background tasks
 

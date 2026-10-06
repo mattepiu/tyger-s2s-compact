@@ -8,7 +8,6 @@ import sys, time, uuid, argparse, logging, statistics
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 logging.basicConfig(level=logging.WARNING)
-import numpy as np, torch
 from app.config import load_config
 from app.engines import EngineLoop
 from app.plugins.base import PluginContext

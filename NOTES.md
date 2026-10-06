@@ -287,6 +287,22 @@ Checks:
 
 Per the user, there is still no argument check for local plugins' calls.
 
+**R-09, docs; the refactor is done.**
+- **README:**
+  - "Adding a plugin" is rewritten for the new pattern, around a worked example (an `echo` LLM: Options, `stream`,
+    the registry line, a config block). The example was run before it went in: config validation (a typo named),
+    the contract test's plain-turn checks, and a whole MOUTH turn on the fake TTS.
+  - Per-kind notes for LLM / TTS / EARS, a new "Adding a tool" section, and `test_tools.py` in the test list.
+- **PLUGINS.md:** a dated note on what changed in the code under the design, and the package layout with
+  `options.py` and `hosted.py`.
+- **REFACTOR.md:** marked done, with the layout as built (the tool-argument check is in `_toolparse.py`, not a
+  separate `schema.py`; the EARS package also has `head_batch.py`, `rules.py` and `session.py`).
+- **Lint:** `uvx pyflakes app/ scripts/ tests/` is clean. It removed the unused imports in
+  `bench_tts_voice.py`, `load_test.py`, `smoke_test.py` and `tests/fakes.py`; `validate_ears_batched.py` now
+  drops its reference model with `ref = None` instead of `del ref`, which pyflakes read as an undefined name.
+
+Left for the user: the R-05 sliders on the page.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

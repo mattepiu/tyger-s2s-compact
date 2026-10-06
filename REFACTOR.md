@@ -1,10 +1,13 @@
 # tyger — readability refactor (design)
 
-**Status:** plan, 2026-10-06 (user: "the code is still very hard to read; use common patterns so we can easily add
-plugins; the endpoint head is tied to nemotron, make them one plugin"). Implemented step by step on branch
-`plugins`, one commit per step (`R-NN: …` in the subject), each checked for parity before the next.
+**Status:** done, 2026-10-06. Planned the same day (user: "the code is still very hard to read; use common
+patterns so we can easily add plugins; the endpoint head is tied to nemotron, make them one plugin"). Implemented
+step by step on branch `plugins`, one commit per step (`R-NN: …` in the subject), each checked for parity before
+the next.
 
-**Progress:** R-00 plan, R-01, R-02, R-03, R-04a, R-04b, R-05, R-06a, R-06b, R-06c, R-07a, R-07b, R-07c, R-08 done (2026-10-06).
+**Progress:** all steps done (2026-10-06): R-00 plan, R-01, R-02, R-03, R-04a, R-04b, R-05, R-06a, R-06b, R-06c,
+R-07a, R-07b, R-07c, R-08, R-09. Per-step results and measurements: NOTES.md → "Readability refactor". The layout
+below is the code as built.
 
 **Goal:** a reader can find where a thing happens from its name, and a new plugin is one package plus one registry
 line, with no edits to MOUTH, EARS's server or the web page.
@@ -41,18 +44,26 @@ app/
     web.py                 #   EarsApp: the page, the voice list, one Conversation per WebSocket (no module globals)
     conversation.py        #   Conversation: the per-WebSocket state machine as a class with named states
     playback.py            #   AgentPlayback: the reply as the browser plays it + the 2nd ear's audio
-  tools/                   # tool registry: one Tool per name (schema + handler); MOUTH-handled tools are Tools too
+  tools/                   # tool registry: one Tool per name, registered where it is implemented
+    registry.py            #   Tool, ToolContext, @tool / @agent_tool, run_call / run_round, execute_tool, build_tools
+    lookups.py             #   get_weather, web_search (Tavily), get_current_time
+    stubs.py               #   set_reminder, send_message (not connected: a demo marker)
+    agent.py               #   the tools MOUTH answers itself: ask_expert, start_task, cancel_task, finish_task
   plugins/
-    base.py                # ABC bases (LLMPlugin, TTSPlugin, EarsPlugin) with defaults; Options dataclasses
+    base.py                # ABC bases (LLMPlugin, TTSPlugin, EarsPlugin) with defaults; Threshold / Slider
+    options.py             # PluginOptions: each plugin's config block as a typed dataclass, checked at load
     llm/  hosted.py        #   HostedLLM base: key check, debug-log guard, concurrency, error mapping
-          schema.py        #   one tool-argument validator for every plugin
+          _toolparse.py    #   call parsing, and check_arguments: the one tool-argument check (hosted plugins)
     ears/nemotron_tyger/   # ONE package for the joint model: nemotron-3.5-asr (encoder + ASR) + tyger 1.0 heads
       constants.py         #   frame / hop / window / sample rate, state names: one place
       asr.py               #   nemotron-3.5-asr: load, features on the GPU, the L15 encode the heads read,
                            #     transcription (everything specific to that checkpoint, model id from config)
       rnnt.py              #   nemotron-3.5-asr's greedy RNN-T decoder (its LSTM decoder + joint), CUDA-graphed
-      heads.py             #   the tyger 1.0 inference model (fuse + backbone + heads), checkpoint loaded once
-      engine.py            #   per-tick batching, RingKV / HeadBatch, the per-frame decision rule
+      heads.py             #   TygerHeads: the TYGER-S2S-endpointer release (fuse + backbone + heads), loaded once
+      head_batch.py        #   RingKV / HeadBatch: the heads batched across conversations, CUDA graphs
+      rules.py             #   the per-frame turn rules (endpoint, barge-in, backchannel), shared with the reference
+      session.py           #   EarsSession: one conversation's state
+      engine.py            #   per-tick batching of encoder + heads, the ASR jobs
       service.py           #   the GPU thread that gathers hops across conversations
       plugin.py            #   NemotronTyger: the EarsPlugin surface + its threshold / slider spec
 scripts/ears_reference.py  # one conversation through the heads release the plain way: what the validators check the engine against

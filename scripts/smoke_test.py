@@ -11,7 +11,7 @@
 
 Run: HF_HOME=/workspace/.hf_home .venv/bin/python scripts/smoke_test.py [--mouth|--ears] [--wav x.wav]
 """
-import os, sys, json, time, socket, struct, argparse, wave
+import sys, json, time, socket, argparse, wave
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))

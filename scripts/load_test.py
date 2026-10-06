@@ -7,7 +7,7 @@ the previous audio would have finished playing) and peak GPU memory. Test prompt
 
   .venv/bin/python scripts/load_test.py --sessions 4 [--turns 3] [--tools]
 """
-import os, sys, json, time, socket, argparse, threading, subprocess, statistics
+import sys, json, time, socket, argparse, threading, subprocess, statistics
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.wire import send_msg, recv_msg

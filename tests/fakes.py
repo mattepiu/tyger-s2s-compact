@@ -9,7 +9,7 @@ from app import mouth as M  # noqa: E402
 from app.tools import registry as T  # noqa: E402
 from app.prompts import default_prompts  # noqa: E402
 from app.tools import build_tools  # noqa: E402
-from app.plugins.llm.fake import FakeLLM, wait_or_stop  # noqa: E402,F401
+from app.plugins.llm.fake import FakeLLM  # noqa: E402
 from app.plugins.tts.fake import FakeTTS  # noqa: E402
 from app.tasks import TaskSlots  # noqa: E402
 

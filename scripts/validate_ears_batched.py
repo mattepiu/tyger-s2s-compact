@@ -57,7 +57,7 @@ def run_ref(hops):
 S = 4
 scen = [scenario(4 * k) for k in range(S)]
 refs = [run_ref(h) for h in scen]
-del ref; torch.cuda.empty_cache()
+ref = None; torch.cuda.empty_cache()          # free the reference model before the engine loads
 
 # ---- batched engine ----
 eng = EarsEngine(release, slots=S, cuda_graph=not a.no_graph)
