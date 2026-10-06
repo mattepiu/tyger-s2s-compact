@@ -44,7 +44,7 @@ class Mouth:
         self.history_turns = int(m.get("history_turns", 8))
         self.bc_min_words = int(m.get("bc_min_words", 4))
         self.bc_max_new = int(m.get("bc_max_new", 12))
-        self.first_chunk = m.get("first_chunk", "clause")         # chunker.FIRST_CHUNK_RULES (checked at config load)
+        self.first_chunk = m.get("first_chunk", "sentence")         # chunker.FIRST_CHUNK_RULES (checked at config load)
         self.eloop = EngineLoop()
         # TTS first: its engine config pins a small KV budget; the LLM's start-up check then sees what's left.
         self.tts = build_tts(cfg, self.eloop)            # at the 24 kHz wire rate

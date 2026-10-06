@@ -104,7 +104,7 @@ def validate_config(cfg: dict) -> dict:
 
 def _check_mouth(mouth: dict):
     from app.mouth.chunker import FIRST_CHUNK_RULES
-    rule = mouth.get("first_chunk", "clause")
+    rule = mouth.get("first_chunk", "sentence")
     if rule not in FIRST_CHUNK_RULES:
         raise ConfigError(f"`mouth.first_chunk: {rule}` is not one of {', '.join(FIRST_CHUNK_RULES)}")
 

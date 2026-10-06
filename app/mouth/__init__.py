@@ -7,9 +7,9 @@ Architecture:
     vLLM AsyncLLM, VoxCPM2 on vLLM-Omni AsyncOmni. No HTTP between MOUTH and the models.
     They can't be one vLLM-Omni pipeline: MOUTH has to sit between them (chunking, tools + lead-in,
     backchannels, barge-in).
-  * The LLM reply is chunked by chunker.next_chunk: with mouth.first_chunk `clause` (the default) the FIRST
-    chunk may end at a clause boundary (comma, semicolon, dash) so playback doesn't wait for a long opening
-    sentence; with `sentence` it is a whole sentence too. Then whole sentences. No chunk
+  * The LLM reply is chunked by chunker.next_chunk into whole sentences (mouth.first_chunk `sentence`, the
+    default). With `clause` the FIRST chunk may end at a clause boundary (comma, semicolon, dash), so playback
+    doesn't wait for a long opening sentence, at the cost of the intonation restarting there. No chunk
     is cut below MIN_CHARS (40), so short replies/sentences go to the TTS whole. Each chunk is one VoxCPM2
     request whose audio streams out per decode step, so playback starts on chunk 1 while the rest render.
   * Concurrency: the engines are shared; each EARS connection is its own Session (history, voice, recent

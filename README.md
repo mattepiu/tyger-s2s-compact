@@ -31,11 +31,11 @@ I-11 before exposing it beyond an SSH tunnel).
    listening. EARS serves the web page and the WebSocket.
 2. **MOUTH** is the orchestrator, and hosts both models in-process (no HTTP hop to either). On an endpoint it
    streams the LLM reply, cuts it into text chunks, and sends each chunk to VoxCPM2 as soon as it closes;
-   audio streams back to EARS (and on to the browser) per decode step. By default the **first** chunk may end
-   at a clause (comma, semicolon, dash) so playback doesn't wait for a long opening sentence. Each chunk is its
-   own TTS request, so the intonation restarts there; `mouth.first_chunk: sentence` waits for the whole first
-   sentence instead. Later chunks are whole sentences; no chunk is cut below 40 characters, so short replies go
-   to the TTS whole. On a tool call
+   audio streams back to EARS (and on to the browser) per decode step. Chunks are whole sentences: each chunk is
+   its own TTS request, so the intonation restarts at a chunk boundary, and at a sentence end that sounds natural.
+   (`mouth.first_chunk: clause` lets the first chunk end at a comma instead: audio ~30–95 ms sooner, but the
+   intonation restarts mid-sentence.) No chunk is cut below 40 characters, so short replies go to the TTS
+   whole. On a tool call
    it speaks a short contextual filler ("Checking the current weather in Oslo.") the moment the call starts
    decoding, runs the tool as soon as the call parses, adds a "still looking" line if the tool is slow, then
    speaks the result. On a barge it stops within one audio chunk, aborts the live LLM/TTS requests, and keeps

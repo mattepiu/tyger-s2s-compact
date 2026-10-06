@@ -66,9 +66,9 @@ mouth:
   max_gen: 192
   history_turns: 8                   # ~last 8 turns kept in the responder
   bc_max_new: 12                     # token budget for a backchannel (kept short for low latency)
-  first_chunk: clause                # the reply's first TTS chunk: `clause` ends it at a comma / after 12 words
-                                     # (audio sooner; the intonation restarts mid-sentence), `sentence` waits for
-                                     # the whole first sentence (pipecat's rule: natural intonation, audio later)
+  first_chunk: sentence              # the reply's first TTS chunk is a whole sentence (pipecat's rule; the user
+                                     # heard it as much better). `clause` ends it at a comma / after 12 words:
+                                     # audio ~30-95 ms sooner, but the intonation restarts mid-sentence
   cpu_threads: 4                     # torch CPU threads in the MOUTH process
   bc_min_words: 4                    # ASR partial shorter than this is flagged to the LLM as "only a few
                                      # words so far" -> it answers with a neutral hum instead of a reaction

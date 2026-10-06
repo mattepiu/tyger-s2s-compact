@@ -406,6 +406,8 @@ feat_encoder and AudioVAE (startup log). The user chose to keep the engine optio
   | `stack/load.py`, 4 conv, 2 runs | 418 / 379 ms | 474 / 515 ms (≈ +95) |
   | smoke turns (short first sentences) | 145–266 ms | 170–282 ms |
   | `stack/load_ears.py`, endpoint → first audio (fixed short reply) | 232 ms | 229 ms |
+- **The user listened** with `sentence` (2026-10-06): "sounds much better". `sentence` is now the default (config,
+  code fallback, the tests' FakeMouth); `clause` stays available.
 
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
