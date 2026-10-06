@@ -1,6 +1,6 @@
-"""Weights: fetch the private turn-taking heads release. All downloads go to HF_HOME (mounted cache); nothing is baked
-into the image. The other models (nemotron, the
-LLM, VoxCPM2) are downloaded by their loaders on first start."""
+"""Fetch the TYGER-S2S-endpointer release (the tyger 1.0 heads; private) into HF_HOME, the mounted cache: nothing is
+baked into the image. The encoder the release pins, and the other models, are downloaded by their loaders on first
+start."""
 from __future__ import annotations
 import os
 from pathlib import Path
@@ -15,7 +15,6 @@ def _hf_token():
     return t or None
 
 
-# ---- the turn-taking heads ----------------------------------------------------------------------
 def heads_release(repo: str, revision: str | None = None) -> str:
     """The local directory of a TYGER-S2S-endpointer release (config.json + model.safetensors), downloaded once into
     HF_HOME. The repo is private: needs HF_TOKEN."""

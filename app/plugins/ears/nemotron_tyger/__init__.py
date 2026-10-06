@@ -9,6 +9,7 @@ Modules:
   session     EarsSession: one conversation's turn-taking state and thresholds
   asr         NemotronAsr: nemotron-3.5-asr's features, its layer-15 encode, transcription
   rnnt        nemotron-3.5-asr's greedy RNN-T decoder (its LSTM decoder + joint) as a CUDA graph
+  release     heads_release: fetch the heads release from the Hub (HF_TOKEN)
   heads       the tyger 1.0 heads (the model classes)
   head_batch  RingKV + HeadBatch: the heads' batched, CUDA-graphed step for every conversation
 """

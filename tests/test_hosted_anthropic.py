@@ -9,7 +9,7 @@ from app.plugins.llm.anthropic import (AnthropicLLM, ClaudeStreamParser, FALLBAC
                                        to_claude, to_claude_tools)
 from app.prompts import default_prompts  # noqa: E402
 from app.tools import build_tools  # noqa: E402
-from app.engines import EngineLoop  # noqa: E402
+from app.runtime.event_loop import EngineLoop  # noqa: E402
 
 TOOLS = build_tools(default_prompts())
 THINK = {"type": "thinking", "thinking": "", "signature": "sig-abc"}

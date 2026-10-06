@@ -26,7 +26,7 @@ import numpy as np
 from app.config import repo_path
 from app.plugins.base import TTSCaps, TTSPlugin
 from app.plugins.options import PluginOptions
-from app.resample import StreamingAudioResampler
+from app.runtime.audio import StreamingAudioResampler
 
 log = logging.getLogger("tts")
 

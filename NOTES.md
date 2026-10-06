@@ -312,6 +312,17 @@ Left for the user: the R-05 sliders on the page.
 - Each moved module imports cleanly first in a fresh process (no cycle).
 - GPU-free suite passes; lint is clean.
 
+**R-10b: shared runtime into `app/runtime/`, the heads fetcher into its plugin.**
+- Moves (pure `git mv`): `app/engines.py` → `app/runtime/event_loop.py` (EngineLoop), `app/resample.py` →
+  `app/runtime/audio.py` (StreamingAudioResampler), and `app/weights.py` →
+  `app/plugins/ears/nemotron_tyger/release.py` (`heads_release`; only that plugin and its validators use it).
+- `app/` top level is now `config.py`, `wire.py` and the packages `ears/`, `mouth/`, `plugins/`, `prompts/`,
+  `runtime/`, `tools/`.
+- Checks:
+  - GPU-free suite passes; lint is clean;
+  - stack (no-smart config): smoke PASS, `load_test.py` turn p50 409 ms, `load_test_ears.py` 871 ms at 1 conv;
+  - `validate_heads.py` OK with the same diffs as before (0.0071 / 0.0065).
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

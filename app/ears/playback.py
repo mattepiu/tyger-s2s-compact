@@ -3,7 +3,7 @@ several times faster than real time, so most of a long reply is still queued in 
 done. AgentPlayback estimates when the browser will have played everything (play_until), how much it has played
 (for a barge-in: MOUTH keeps what was heard in history), and keeps the same audio at the EARS rate for the turn-taking
 model's 2nd ear, handed out one hop at a time. The 2nd ear's audio goes through one stateful polyphase resampler per
-reply (app/resample.py), so it doesn't depend on where MOUTH's chunks happen to end (scripts/validate_second_ear.py).
+reply (app/runtime/audio.py), so it doesn't depend on where MOUTH's chunks happen to end (scripts/validate_second_ear.py).
 """
 from __future__ import annotations
 import time
@@ -11,7 +11,7 @@ import time
 import numpy as np
 
 from app.plugins.tts import WIRE_SR
-from app.resample import StreamingAudioResampler
+from app.runtime.audio import StreamingAudioResampler
 
 LEAD_IN_S = 0.04                 # the page starts a chunk this long after it arrives when nothing is queued
 

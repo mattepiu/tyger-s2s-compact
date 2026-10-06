@@ -35,7 +35,7 @@ class Job:
 class EarsEngine:
     def __init__(self, heads_dir, slots=4, ring_len=2048, device="cuda", cuda_graph=True, nemotron=None,
                  nemotron_revision=None):
-        """heads_dir: a TYGER-S2S-endpointer release (weights.heads_release). The encoder is the one the release
+        """heads_dir: a TYGER-S2S-endpointer release (release.heads_release). The encoder is the one the release
         pins (its config's frontend), unless `nemotron` names another checkpoint."""
         self.device = device; self.slots = slots
         self.heads = TygerHeads.from_pretrained(heads_dir, device=device)

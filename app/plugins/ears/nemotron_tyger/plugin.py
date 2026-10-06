@@ -49,13 +49,13 @@ class NemotronTyger(EarsPlugin):
 
     def __init__(self, conf: dict, ctx):
         import torch
-        from app import weights
+        from .release import heads_release
         from .engine import EarsEngine
         from .service import EarsService
         super().__init__(conf, ctx)
         o = self.opts
         torch.set_num_threads(o.cpu_threads)
-        heads = weights.heads_release(o.heads, o.heads_revision)
+        heads = heads_release(o.heads, o.heads_revision)
         self.slots = int(ctx.cfg["server"].get("max_sessions", 4))
         log.info("loading EARS (nemotron-tyger-1.0: %s) for %d sessions, ep_thr=%s ep_deb=%s", o.heads,
                  self.slots, self.defaults["ep_thr"], self.defaults["ep_deb"])

@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1])); torch.set_num_thre
 logging.basicConfig(level=logging.WARNING)
 from datasets import load_dataset
 from app.config import load_config
-from app import weights
+from app.plugins.ears.nemotron_tyger.release import heads_release
 from app.plugins.ears.nemotron_tyger.constants import HOP_N
 from app.plugins.ears.nemotron_tyger.engine import EarsEngine
 from app.plugins.ears.nemotron_tyger.session import EarsSession
@@ -28,7 +28,7 @@ a = ap.parse_args()
 ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
 words = lambda t: re.findall(r"[a-z']+", t.lower())
 cfg = load_config(); e = cfg["ears"]
-ckpt = weights.heads_release(cfg["ears"]["heads"], cfg["ears"].get("heads_revision"))
+ckpt = heads_release(cfg["ears"]["heads"], cfg["ears"].get("heads_revision"))
 thr = dict(ep_thr=float(e["ep_thr"]), ep_deb=int(e["ep_deb"]), barge_thr=float(e["barge_thr"]),
            barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]),
            fallback_frames=int(e.get("fallback_sil_frames", 15)))

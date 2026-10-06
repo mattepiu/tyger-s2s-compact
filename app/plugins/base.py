@@ -53,7 +53,7 @@ class TTSCaps:
 @dataclass
 class PluginContext:
     """What every plugin constructor gets besides its config block."""
-    eloop: Any                             # app.engines.EngineLoop: MOUTH's asyncio loop for engines and clients
+    eloop: Any                             # app.runtime.event_loop.EngineLoop: MOUTH's asyncio loop for engines and clients
     cfg: dict                              # the whole config (paths, voices.dir, ...)
     name: str                              # instance name: the block's `name:`, else the plugin name
     extra: dict = field(default_factory=dict)

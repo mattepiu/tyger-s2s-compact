@@ -16,7 +16,7 @@ class AtWireRate:
         return getattr(self.inner, k)
 
     def stream(self, text, voice, stop_flag=None):
-        from app.resample import StreamingAudioResampler
+        from app.runtime.audio import StreamingAudioResampler
         rs = StreamingAudioResampler(self.inner.out_sr, WIRE_SR)
         for a in self.inner.stream(text, voice, stop_flag=stop_flag):
             out = rs.process(a)

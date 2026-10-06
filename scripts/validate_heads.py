@@ -16,7 +16,7 @@ from pathlib import Path
 
 import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1])); logging.basicConfig(level=logging.WARNING)
-from app import weights  # noqa: E402
+from app.plugins.ears.nemotron_tyger.release import heads_release  # noqa: E402
 from app.config import load_config  # noqa: E402
 from app.plugins.ears.nemotron_tyger.heads import TygerHeads  # noqa: E402
 
@@ -48,7 +48,7 @@ def real_inputs(heads, n=4):
 @torch.no_grad()
 def main():
     e = load_config()["ears"]
-    heads = TygerHeads.from_pretrained(weights.heads_release(e["heads"], e.get("heads_revision")), device="cuda")
+    heads = TygerHeads.from_pretrained(heads_release(e["heads"], e.get("heads_revision")), device="cuda")
     c = heads.config
     n = sum(p.numel() for p in heads.parameters())
     print(f"release {c.get('version')} @ {(e.get('heads_revision') or 'latest')[:8]}: {n:,} parameters; frontend "

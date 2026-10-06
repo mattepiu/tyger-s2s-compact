@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 logging.basicConfig(level=logging.WARNING)
 import yaml
 from app.config import load_config, repo_path
-from app.engines import EngineLoop
+from app.runtime.event_loop import EngineLoop
 from app.plugins import plugin_class
 from app.plugins.base import PluginContext
 from app.prompts import load_prompts

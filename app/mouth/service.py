@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 
 from app.config import llm_roles
-from app.engines import EngineLoop
+from app.runtime.event_loop import EngineLoop
 from app.mouth.messages import reply_prefix
 from app.plugins import build_llms, build_tts
 from app.prompts import load_prompts

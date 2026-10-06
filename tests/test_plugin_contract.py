@@ -42,7 +42,7 @@ _ELOOP = None
 def eloop():
     global _ELOOP
     if _ELOOP is None:
-        from app.engines import EngineLoop
+        from app.runtime.event_loop import EngineLoop
         _ELOOP = EngineLoop()
     return _ELOOP
 
