@@ -330,12 +330,17 @@ class Session:
         mark = self.m.prompts["reply"].text("markers", "interrupted")   # the system prompt explains it
         self._remember(user, (" ".join(t.strip() for t in heard) + mark).strip(), tool_msgs)
 
+    def _speech_audio(self, text, voice, stop_flag):
+        """The TTS audio of `text` as it is said aloud (say_clean). No request at all when nothing speakable is
+        left (markup or punctuation only): every path from text to the TTS goes through here."""
+        clean = say_clean(text)
+        if clean:
+            yield from self.m.tts.stream(clean, voice, stop_flag=stop_flag)
+
     def _say(self, text, voice, stop_flag):
         """TTS one text chunk as reply audio; logs it in self._said once its first audio is out."""
-        clean = say_clean(text); first = True
-        if not clean:
-            return
-        for w in self.m.tts.stream(clean, voice, stop_flag=stop_flag):
+        first = True
+        for w in self._speech_audio(text, voice, stop_flag):
             if first:
                 self._said.append((text, self._audio_s)); first = False
             self._audio(w)
@@ -372,9 +377,7 @@ class Session:
         if not line or stop_flag():
             return
         yield ("text", line)
-        clean = say_clean(line)
-        if clean:
-            yield from (("audio", w) for w in self.m.tts.stream(clean, voice, stop_flag=stop_flag))
+        yield from (("audio", w) for w in self._speech_audio(line, voice, stop_flag))
 
     def _relay(self, q, stop_flag):
         """Yield a filler's items from its helper thread as this turn's reply; returns the filler line."""
@@ -701,15 +704,17 @@ class Session:
     # ---- backchannel: always a contextual LLM ack off the ASR partial ----
     def stream_bc(self, partial, stop_flag):
         """The LLM picks the ack: a reaction to the content, or a neutral hum when the partial is too short
-        (< bc_min_words, flagged to it explicitly) or gives nothing to react to."""
+        (< bc_min_words, flagged to it explicitly) or gives nothing to react to. An ack with nothing speakable in
+        it ("—", "*") counts as no ack: not spoken, not remembered."""
         m = self.m
         messages = bc_messages(m.prompts["filler"], list(self.recent_acks), partial, m.bc_min_words)
         text = _text(m.llms["filler"].stream(messages, max_new=m.bc_max_new, stop_flag=stop_flag)).strip()
+        if not say_clean(text):
+            text = ""
         if text:
             self.recent_acks.append(text)
             yield ("text", text)
-            for w in m.tts.stream(say_clean(text), self.voice, stop_flag=stop_flag):
-                yield ("audio", w)
+            yield from (("audio", w) for w in self._speech_audio(text, self.voice, stop_flag))
         yield ("done", text)
 
     # ---- workers ----

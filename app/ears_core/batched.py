@@ -310,26 +310,39 @@ class EarsEngine:
                     jobs.append(self.asr_q.get_nowait())
                 except queue.Empty:
                     break
-            finals = [j for j in jobs if j.kind in ("final", "segment")]   # enqueue order: a turn's segments
-                                                                           # are done before its final
-            partials = [j for j in jobs if j.kind == "partial"]
             t0 = time.perf_counter()
-            try:
-                if finals:                                     # an endpoint reply is waiting on these
-                    for j, t in zip(finals, self.transcribe([j.wav for j in finals])):
-                        j.done(t)
-                if partials:
-                    for j, t in zip(partials, self.transcribe([j.wav for j in partials])):
-                        if j.sess.turn_gen == j.gen:          # drop partials from a turn that already ended
-                            j.sess.partial_asr = t
-                        j.sess.partial_inflight = False
-            except Exception as e:
-                log.exception("ASR error: %s", type(e).__name__)
-                for j in finals:
-                    j.done("")
-                for j in partials:
-                    j.sess.partial_inflight = False
+            # enqueue order: a turn's segments are done before its final; finals first, an endpoint waits on them
+            self._finish_finals([j for j in jobs if j.kind in ("final", "segment")])
+            self._finish_partials([j for j in jobs if j.kind == "partial"])
             self.t_asr += time.perf_counter() - t0
+
+    def _transcribe_or_none(self, jobs, what):
+        """Their texts, or None if transcription failed (logged by kind only)."""
+        try:
+            return self.transcribe([j.wav for j in jobs])
+        except Exception as e:
+            log.exception("ASR error (%s): %s", what, type(e).__name__)
+            return None
+
+    def _finish_finals(self, jobs):
+        """Endpoint transcripts and long-turn segments: each job's done() runs exactly once, with "" if
+        transcription failed, so the waiting hop always resolves."""
+        if not jobs:
+            return
+        texts = self._transcribe_or_none(jobs, "finals") or [""] * len(jobs)
+        for j, t in zip(jobs, texts):
+            j.done(t)
+
+    def _finish_partials(self, jobs):
+        """Backchannel partials: best effort. A failure keeps the previous partial; either way the session may ask
+        for the next one. Partials from a turn that already ended are dropped."""
+        if not jobs:
+            return
+        texts = self._transcribe_or_none(jobs, "partials") or [None] * len(jobs)
+        for j, t in zip(jobs, texts):
+            if t is not None and j.sess.turn_gen == j.gen:
+                j.sess.partial_asr = t
+            j.sess.partial_inflight = False
 
     # ---- one tick ----
     def process(self, items):

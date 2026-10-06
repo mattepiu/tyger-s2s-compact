@@ -104,7 +104,8 @@ async def _conversation(ws, ears):
           "bc_active": False, "agent_buf": np.zeros(0, np.float32),
           "turn_t0": None, "await_onset": False, "barge_t0": None, "bc_t0": None,
           "play_until": 0.0, "sent_s": 0.0, "mouth_done": False, "done_task": None,
-          "floor_q": deque(), "idle_frames": 0}         # task ids waiting for the floor; user silence so far
+          "floor_q": deque(), "idle_frames": 0,         # task ids waiting for the floor; user silence so far
+          "mouth_lost": False}
     floor_frames = math.ceil(float((CFG.get("mouth") or {}).get("tasks", {}).get("announce_after_silence_ms", 1200))
                              / FRAME_MS)
     try:
@@ -122,13 +123,33 @@ async def _conversation(ws, ears):
                                        "endpoint": "ep", "fallback_frames": th["fallback_frames"]}})
     log.info("conversation start (active=%d)", EARS.active())
 
+    async def mouth_lost(what):
+        """MOUTH's connection broke (it restarted or died): this conversation can't answer any more. Tell the page
+        and close the socket, which ends the conversation (no dead hop loop, no audio piling up in `buf`)."""
+        if st["mouth_lost"]:
+            return
+        st["mouth_lost"] = True
+        log.warning("MOUTH connection lost (%s): closing the conversation", what)
+        try:
+            await ws.send_json({"type": "error", "error": "mouth_lost"})
+            await ws.close()
+        except ConnectionError:
+            pass
+
+    async def to_mouth(kind, payload):
+        """Every message to MOUTH goes through here: a broken connection ends the conversation (mouth_lost)."""
+        try:
+            await async_send_msg(m_writer, kind, payload)
+        except ConnectionError as e:
+            await mouth_lost(type(e).__name__)
+
     def start_speaking():
         st["speaking"] = True; st["turn_t0"] = time.perf_counter(); st["await_onset"] = True
         st["mouth_done"] = False; st["play_until"] = 0.0; st["sent_s"] = 0.0
 
     async def send_turn(transcript):
         start_speaking()
-        await async_send_msg(m_writer, b"T", {"transcript": transcript})
+        await to_mouth(b"T", {"transcript": transcript})
 
     async def maybe_grant_floor():
         """A finished task's announcement gets the floor only when nobody else has it (module docstring)."""
@@ -138,7 +159,7 @@ async def _conversation(ws, ears):
         tid = st["floor_q"].popleft()
         start_speaking()
         log.info("floor granted to task #%s after %d ms of silence", tid, st["idle_frames"] * FRAME_MS)
-        await async_send_msg(m_writer, b"G", {"task": tid})
+        await to_mouth(b"G", {"task": tid})
         await ws.send_json({"type": "task_done", "task": tid})
 
     async def finish_turn(barged):
@@ -169,7 +190,7 @@ async def _conversation(ws, ears):
 
     async def send_backchannel(partial):
         st["bc_active"] = True; st["bc_t0"] = time.perf_counter()
-        await async_send_msg(m_writer, b"C", {"partial": partial or ""})
+        await to_mouth(b"C", {"partial": partial or ""})
 
     async def pump_mouth():
         try:
@@ -211,8 +232,8 @@ async def _conversation(ws, ears):
                     else:                                         # generated; hold until it has played
                         st["mouth_done"] = True
                         st["done_task"] = asyncio.create_task(finish_after_playback())
-        except (asyncio.IncompleteReadError, ConnectionError):
-            pass
+        except (asyncio.IncompleteReadError, ConnectionError) as e:
+            await mouth_lost(type(e).__name__)
     pump = asyncio.create_task(pump_mouth()) if have_mouth else None
 
     async def handle_events(evs):
@@ -255,7 +276,7 @@ async def _conversation(ws, ears):
                     await finish_turn(True)
                 elif have_mouth:            # + how much of the reply had played, so MOUTH remembers what was heard
                     played = st["sent_s"] - max(0.0, st["play_until"] - time.perf_counter())
-                    await async_send_msg(m_writer, b"B", {"played_s": round(max(0.0, played), 2)})
+                    await to_mouth(b"B", {"played_s": round(max(0.0, played), 2)})
         if have_mouth:
             await maybe_grant_floor()                     # after this hop's events: an endpoint wins
         if last is not None:
@@ -285,7 +306,7 @@ async def _conversation(ws, ears):
                     ah = np.zeros(HOP_N, np.float32); mode = "listen"
                 evs = await EARS.feed(ears, uh, ah, mode, more=len(buf) >= HOP_N)  # batched across sessions
                 await handle_events(evs)
-        except (ConnectionError, asyncio.CancelledError):
+        except (ConnectionError, asyncio.CancelledError):   # the page went away (MOUTH errors end in to_mouth)
             pass
         except Exception as e:
             log.exception("hop loop error: %s", type(e).__name__)
@@ -305,7 +326,7 @@ async def _conversation(ws, ears):
                 elif data.startswith("voice:") and have_mouth:
                     name = data.split(":", 1)[1]
                     if name in VOICES:
-                        await async_send_msg(m_writer, b"V", {"voice": name})
+                        await to_mouth(b"V", {"voice": name})
                         await ws.send_json({"type": "voice", "voice": name})
                 elif data.startswith("set:"):
                     try:                                       # per conversation (the sliders)

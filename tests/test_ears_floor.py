@@ -26,7 +26,7 @@ class Msg:
 class FakeWS:
     """The browser side: audio in (push), JSON / audio out (sent)."""
     def __init__(self):
-        self.q = asyncio.Queue(); self.sent = []
+        self.q = asyncio.Queue(); self.sent = []; self.closed = False
 
     def push(self, f32):
         self.q.put_nowait(Msg(np.asarray(f32, np.float32).tobytes()))
@@ -46,8 +46,8 @@ class FakeWS:
     async def send_bytes(self, b):
         self.sent.append(("audio", len(b)))
 
-    async def close(self):
-        pass
+    async def close(self):                         # like aiohttp: closing ends the message loop
+        self.closed = True; self.q.put_nowait(None)
 
     def types(self):
         return [x["type"] for x in self.sent if isinstance(x, dict) and x["type"] not in ("state",)]
@@ -78,6 +78,10 @@ class FakeMouth:
 
     def kinds(self):
         return [k for k, _ in self.got]
+
+    async def drop(self):
+        """MOUTH goes away (restart / crash): close its end of the connection."""
+        self.writer.close(); await self.writer.wait_closed()
 
 
 def silence(hops=1):
@@ -227,6 +231,18 @@ def test_two_requests_take_turns():
         ws.push(silence(2)); await settle()
         assert [d for k, d in mouth.got if k == b"G"] == [{"task": 5}, {"task": 6}]
         await teardown(ws, conv)
+    run(go())
+
+
+def test_lost_mouth_ends_the_conversation():
+    """MOUTH restarts mid-conversation: the page is told and the conversation ends, instead of a dead hop loop
+    with the mic audio piling up."""
+    async def go():
+        ws, mouth, conv = await setup()
+        ws.push(speech(1)); await settle()
+        await mouth.drop()
+        await asyncio.wait_for(conv, 2)                           # ended on its own: no teardown needed
+        assert {"type": "error", "error": "mouth_lost"} in ws.sent and ws.closed
     run(go())
 
 

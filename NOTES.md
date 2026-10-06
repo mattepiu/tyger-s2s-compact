@@ -1,5 +1,30 @@
 # tyger v1 — build notes
 
+## Readability refactor (REFACTOR.md), 2026-10-06
+The user asked for a readability refactor ("use common patterns so we can easily add plugins"; nemotron and the
+tyger heads as one plugin). The plan and its steps are in REFACTOR.md: one commit per step, with parity checked on
+a config without `llm.smart`.
+
+**R-01, the review's correctness bugs (the only behaviour change before R-08):**
+- **ASR thread:** finals and partials are transcribed and resolved separately
+  (`EarsEngine._finish_finals` / `_finish_partials`). Before, one `try` covered both, so a partials failure re-ran
+  `done("")` on finals already resolved. That could blank an endpoint transcript the hop had already handed back.
+- **A lost MOUTH ends the conversation.** Every message to MOUTH goes through `to_mouth`. A broken connection (on a
+  send, or in the reader) sends `{"type": "error", "error": "mouth_lost"}` to the page and closes the socket. Before,
+  the hop loop died silently while the mic audio kept piling up in `buf`. The page now says the agent went away.
+- **`ears.nemotron` is read** (it was ignored), and the startup log names the model.
+- **An ack with nothing speakable** ("—", "*") is no ack: no TTS request, and not remembered as a recent ack. All
+  text-to-TTS paths go through `Session._speech_audio`.
+- Not changed: the anthropic plugin ignoring `max_new` is by design (thinking can't be turned off; `max_tokens`
+  must cover it).
+
+New tests: `test_ears_asr_jobs.py` (4 tests), `test_lost_mouth_ends_the_conversation` (it fails on the old
+`server.py`), `test_unspeakable_backchannel_never_reaches_the_tts`. Stack on the no-smart config:
+- smoke PASS: plain / weather / reminder / backchannel 235 / 230 / 286 / 128 ms;
+- `load_test.py --sessions 4 --turns 6` turn first-audio p50 395 / 406 / 393 ms;
+- `load_test_ears.py` end of speech → first audio p50 860 ms at 1 conv and 1071 ms at 4, no endpoint inside an
+  utterance, one reply text.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

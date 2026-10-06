@@ -22,7 +22,7 @@ class NemotronTyger:
     def __init__(self, conf: dict, ctx):
         import torch
         from app import weights
-        from app.ears_core.batched import EarsEngine, EarsService, HOP_N
+        from app.ears_core.batched import EarsEngine, EarsService, HOP_N, MODEL_ID
         from app.ears_core.encoder_stream import ENC_SR
         torch.set_num_threads(int(conf.get("cpu_threads", 4)))   # default 48 threads mostly spin-wait
         self.sr = ENC_SR
@@ -31,9 +31,10 @@ class NemotronTyger:
         self.defaults = {k: typ(conf[key]) for k, (typ, key) in THRESHOLDS.items()}
         heads = weights.ensure_heads(conf["heads_repo"], conf["heads_file"])
         self.slots = int(ctx.cfg["server"].get("max_sessions", 4))
-        log.info("loading EARS (nemotron-tyger-1.0) for %d sessions, ep_thr=%s ep_deb=%s", self.slots,
+        model_id = conf.get("nemotron") or MODEL_ID
+        log.info("loading EARS (nemotron-tyger-1.0: %s) for %d sessions, ep_thr=%s ep_deb=%s", model_id, self.slots,
                  self.defaults["ep_thr"], self.defaults["ep_deb"])
-        engine = EarsEngine(heads, slots=self.slots, ring_len=int(conf.get("ring_frames", 2048)))
+        engine = EarsEngine(heads, slots=self.slots, ring_len=int(conf.get("ring_frames", 2048)), model_id=model_id)
         self.service = EarsService(engine, gather_s=float(conf.get("gather_ms", 15)) / 1e3,
                                    expect_s=float(conf.get("expect_ms", 60)) / 1e3,
                                    stats_every_s=float(conf.get("stats_s", 60)))

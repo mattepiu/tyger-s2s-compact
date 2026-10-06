@@ -278,6 +278,17 @@ def test_backchannel_alongside_turn_still_runs():
     peer.close()
 
 
+def test_unspeakable_backchannel_never_reaches_the_tts():
+    """An ack with nothing speakable in it is no ack: no TTS request, not remembered as a recent ack."""
+    for ack in ("—", "*", " , "):
+        s, m = make_session(FakeLLM(ack=ack), FakeTTS(n=2))
+        evs = list(s.stream_bc("so I finally got the job", lambda: False))
+        assert evs == [("done", "")] and m.tts.requests == [] and not s.recent_acks, (ack, evs)
+    s, m = make_session(FakeLLM(ack="oh nice"), FakeTTS(n=2))
+    evs = list(s.stream_bc("so I finally got the job", lambda: False))
+    assert m.tts.requests == ["oh nice"] and list(s.recent_acks) == ["oh nice"] and evs[-1] == ("done", "oh nice")
+
+
 # ---- hosted LLM failures: a spoken apology / neutral line, never silence; bad tool arguments never run --------
 def spoken(evs):
     return [v for k, v, _ in evs if k == "text"]
