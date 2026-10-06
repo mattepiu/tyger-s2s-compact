@@ -21,8 +21,10 @@ bodies are never logged; keep OPENAI_LOG unset (the SDK's debug logging prints b
 """
 from __future__ import annotations
 import asyncio, json, logging, os
+from dataclasses import dataclass
 
-from app.plugins.base import LLMError
+from app.plugins.base import LLMError, LLMPlugin
+from app.plugins.options import PluginOptions
 from app.plugins.llm._toolparse import split_speakable, strip_think, parse_calls, new_call_id, tool_start
 
 log = logging.getLogger("llm")
@@ -142,35 +144,51 @@ class ChatStreamParser:
         return out + [("tool_calls", events, None)]
 
 
-class OpenAICompatLLM:
+class OpenAICompatLLM(LLMPlugin):
+    @dataclass(frozen=True, kw_only=True)
+    class Options(PluginOptions):
+        model: str
+        base_url: str | None = None            # None: OpenAI
+        api_key_env: str = "OPENAI_API_KEY"    # the env var (.env) that holds the key
+        remote: bool = True                    # False only for an endpoint on this box
+        max_tokens: int | None = None          # if set, every request gets it instead of MOUTH's max_new
+        token_param: str | None = None         # max_tokens / max_completion_tokens; None: guessed from the model
+        temperature: float | None = None       # sent only if set
+        extra_body: dict | None = None         # e.g. {reasoning_effort: none}
+        strip_think: bool = True               # drop <think> text some models put in content
+        read_timeout_s: float = 10.0
+        connect_timeout_s: float = 2.0
+        max_retries: int = 1
+        max_concurrency: int = 8               # requests in flight per instance
+        queue_timeout_s: float = 2.0           # waiting longer for a slot is LLMError("busy")
+
     def __init__(self, conf: dict, ctx):
         import httpx
         from openai import AsyncOpenAI
-        self.conf = conf; self.name = ctx.name; self.eloop = ctx.eloop
-        self.model = conf["model"]
-        self.remote = bool(conf.get("remote", True))
-        key_env = conf.get("api_key_env", "OPENAI_API_KEY")
-        key = os.environ.get(key_env)
+        super().__init__(conf, ctx)
+        o = self.opts
+        self.model = o.model
+        self.remote = o.remote
+        key = os.environ.get(o.api_key_env)
         if not key:
-            raise RuntimeError(f"llm {self.name}: {key_env} is not set (put it in .env)")
+            raise RuntimeError(f"llm {self.name}: {o.api_key_env} is not set (put it in .env)")
         if (os.environ.get("OPENAI_LOG") or "").lower() == "debug":
             raise RuntimeError("OPENAI_LOG=debug would log request bodies (transcripts): unset it")
-        self.max_tokens = conf.get("max_tokens")
+        self.max_tokens = o.max_tokens
         # OpenAI's reasoning models (gpt-5*, o-series) take max_completion_tokens (thinking + text) and reject
         # max_tokens; other endpoints (Groq, Cerebras, vLLM) take max_tokens. `token_param` overrides the guess.
-        self.token_param = conf.get("token_param") or (
+        self.token_param = o.token_param or (
             "max_completion_tokens" if str(self.model).startswith(("gpt-5", "o1", "o3", "o4")) else "max_tokens")
-        self.temperature = conf.get("temperature")             # sent only if set
-        self.extra_body = conf.get("extra_body") or None
-        self.think_guard = bool(conf.get("strip_think", True))
-        timeout = httpx.Timeout(float(conf.get("read_timeout_s", 10.0)), connect=float(conf.get("connect_timeout_s", 2.0)))
+        self.temperature = o.temperature
+        self.extra_body = o.extra_body or None
+        self.think_guard = o.strip_think
+        timeout = httpx.Timeout(o.read_timeout_s, connect=o.connect_timeout_s)
 
         async def make():
-            return AsyncOpenAI(api_key=key, base_url=conf.get("base_url"), timeout=timeout,
-                               max_retries=int(conf.get("max_retries", 1))), \
-                asyncio.Semaphore(int(conf.get("max_concurrency", 8)))
+            return AsyncOpenAI(api_key=key, base_url=o.base_url, timeout=timeout, max_retries=o.max_retries), \
+                asyncio.Semaphore(o.max_concurrency)
         self.client, self.sem = self.eloop.run(make())
-        self.wait_s = float(conf.get("queue_timeout_s", 2.0))
+        self.wait_s = o.queue_timeout_s
         self.rate_limited = 0
 
     def _error(self, e):

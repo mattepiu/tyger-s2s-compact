@@ -27,8 +27,10 @@ plugin; the startup log says which roles are remote. Bodies are never logged; AN
 """
 from __future__ import annotations
 import asyncio, json, logging, os
+from dataclasses import dataclass
 
-from app.plugins.base import LLMError
+from app.plugins.base import LLMError, LLMPlugin
+from app.plugins.options import PluginOptions
 
 log = logging.getLogger("llm")
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -161,30 +163,47 @@ class ClaudeStreamParser:
         return [("tool_calls", calls, native)]
 
 
-class AnthropicLLM:
+class AnthropicLLM(LLMPlugin):
+    @dataclass(frozen=True, kw_only=True)
+    class Options(PluginOptions):
+        model: str = "claude-opus-5-5"
+        base_url: str | None = None            # None: Anthropic
+        api_key_env: str = "ANTHROPIC_API_KEY"  # the env var (.env) that holds the key
+        remote: bool = True
+        max_tokens: int = 1024                 # thinking + text: per role, never MOUTH's max_new
+        effort: str = "low"
+        fallbacks: str | None = "default"      # null turns server-side fallback off
+        temperature: float | None = None       # sent only if set (Claude Opus 5.5 rejects them)
+        top_p: float | None = None
+        top_k: int | None = None
+        read_timeout_s: float = 15.0
+        connect_timeout_s: float = 2.0
+        max_retries: int = 1
+        max_concurrency: int = 8               # requests in flight per instance
+        queue_timeout_s: float = 2.0           # waiting longer for a slot is LLMError("busy")
+
     def __init__(self, conf: dict, ctx):
         import anthropic
-        self.conf = conf; self.name = ctx.name; self.eloop = ctx.eloop
-        self.model = conf.get("model") or "claude-opus-5-5"
-        self.remote = bool(conf.get("remote", True))
-        key_env = conf.get("api_key_env", "ANTHROPIC_API_KEY")
-        key = os.environ.get(key_env)
+        super().__init__(conf, ctx)
+        o = self.opts
+        self.model = o.model
+        self.remote = o.remote
+        key = os.environ.get(o.api_key_env)
         if not key:
-            raise RuntimeError(f"llm {self.name}: {key_env} is not set (put it in .env)")
+            raise RuntimeError(f"llm {self.name}: {o.api_key_env} is not set (put it in .env)")
         if (os.environ.get("ANTHROPIC_LOG") or "").lower() == "debug":
             raise RuntimeError("ANTHROPIC_LOG=debug would log request bodies (transcripts): unset it")
-        self.max_tokens = int(conf.get("max_tokens", 1024))
-        self.effort = conf.get("effort", "low")
-        self.fallbacks = conf.get("fallbacks", "default")       # null in config turns server-side fallback off
-        self.sampling = {k: conf[k] for k in ("temperature", "top_p", "top_k") if k in conf}   # only if set
-        timeout = anthropic.Timeout(float(conf.get("read_timeout_s", 15.0)), connect=float(conf.get("connect_timeout_s", 2.0)))
+        self.max_tokens = o.max_tokens
+        self.effort = o.effort
+        self.fallbacks = o.fallbacks
+        self.sampling = {k: getattr(o, k) for k in ("temperature", "top_p", "top_k") if getattr(o, k) is not None}
+        timeout = anthropic.Timeout(o.read_timeout_s, connect=o.connect_timeout_s)
 
         async def make():
-            return anthropic.AsyncAnthropic(api_key=key, base_url=conf.get("base_url") or None, timeout=timeout,
-                                            max_retries=int(conf.get("max_retries", 1))), \
-                asyncio.Semaphore(int(conf.get("max_concurrency", 8)))
+            return anthropic.AsyncAnthropic(api_key=key, base_url=o.base_url or None, timeout=timeout,
+                                            max_retries=o.max_retries), asyncio.Semaphore(o.max_concurrency)
         self.client, self.sem = self.eloop.run(make())
-        self.wait_s = float(conf.get("queue_timeout_s", 2.0))
+        self.wait_s = o.queue_timeout_s
         self.rate_limited = 0; self.cache_reads = 0
 
     def _error(self, e):

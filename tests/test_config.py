@@ -3,7 +3,7 @@ that replace it, roles resolve. Run: .venv/bin/python tests/test_config.py"""
 import copy, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from app.config import load_config, validate_config, llm_roles, ConfigError  # noqa: E402
+from app.config import ROOT, load_config, validate_config, llm_roles, ConfigError  # noqa: E402
 from app.plugins import REGISTRY, plugin_class  # noqa: E402
 
 BASE = load_config()
@@ -68,6 +68,43 @@ def test_bad_roles_and_plugins_rejected():
     rejects(cfg, "tts.plugin: nope", "voxcpm2")
     cfg = copy.deepcopy(BASE); del cfg["llm"]["reply"]
     rejects(cfg, "llm.reply")
+
+
+def test_fake_config_loads():
+    cfg = load_config(str(ROOT / "config.fake.yaml"))
+    assert cfg["ears"]["plugin"] == "fake" and cfg["tts"]["plugin"] == "fake"
+
+
+def test_plugin_options_checked_at_load():
+    """A block's keys are its plugin's Options: a typo, a missing required key or a wrong type fails the load with
+    the key named (before R-07 a typo was silently ignored and the default used)."""
+    cfg = copy.deepcopy(BASE); cfg["llm"]["reply"]["kv_cache_gb"] = 2.0
+    rejects(cfg, "`llm.reply`", "unknown option `kv_cache_gb`", "did you mean `kv_cache_gib`")
+    cfg = copy.deepcopy(BASE); cfg["ears"]["ring_frame"] = 1024
+    rejects(cfg, "`ears`", "`ring_frame`", "`ring_frames`")
+    cfg = copy.deepcopy(BASE); cfg["tts"]["allow_zero_shot"] = "yes"
+    rejects(cfg, "`tts`", "`allow_zero_shot` must be a bool")
+    cfg = copy.deepcopy(BASE); cfg["llm"]["smart"] = {"plugin": "openai", "max_tokens": 512}
+    rejects(cfg, "`llm.smart`", "`model` is not set")
+    cfg = copy.deepcopy(BASE); del cfg["ears"]["ep_thr"]           # a threshold without a default
+    rejects(cfg, "`ears`", "`ep_thr` is not set")
+    cfg = copy.deepcopy(BASE); cfg["ears"]["ep_deb"] = "two"
+    rejects(cfg, "`ears`")
+
+
+def test_options_types():
+    """Scalars as YAML leaves them: an int where a float is declared, an all-digit revision hash as a string."""
+    from app.plugins.ears.nemotron_tyger.plugin import NemotronTyger
+    from app.plugins.llm.vllm_base import VLLMChatPlugin
+    o = NemotronTyger.options({**BASE["ears"], "gather_ms": 20, "heads_revision": 1234567})
+    assert o.gather_ms == 20.0 and isinstance(o.gather_ms, float) and o.heads_revision == "1234567"
+    assert o.heads == BASE["ears"]["heads"] and o.ring_frames == BASE["ears"]["ring_frames"]
+    assert VLLMChatPlugin.options({"plugin": "gemma-4-e4b", "name": "x"}).kv_cache_gib == 3.0   # shape keys skipped
+    for bad in ({"max_num_seqs": 8.5}, {"max_num_seqs": True}, {"temperature": "hot"}, {"max_model_len": None}):
+        try:
+            VLLMChatPlugin.options(bad); raise AssertionError(f"accepted {bad}")
+        except ValueError as e:
+            assert next(iter(bad)) in str(e)
 
 
 def test_registry_unknown_name():

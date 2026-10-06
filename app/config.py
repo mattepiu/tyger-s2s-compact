@@ -68,7 +68,8 @@ def _old_shape(cfg: dict) -> list[str]:
 
 
 def validate_config(cfg: dict) -> dict:
-    """Check the plugin config shape (PLUGINS.md). The old shape is rejected, never reinterpreted."""
+    """Check the plugin config shape (PLUGINS.md) and every block's options. The old shape is rejected, never
+    reinterpreted."""
     from app.plugins import REGISTRY
     old = _old_shape(cfg)
     if old:
@@ -99,11 +100,17 @@ def validate_config(cfg: dict) -> dict:
 
 
 def _check_block(registry, kind, where, block):
+    """A block names a registered plugin, and the rest of it fits that plugin's Options (unknown keys included)."""
+    from app.plugins import plugin_class
     if not isinstance(block, dict) or "plugin" not in block:
         raise ConfigError(f"`{where}:` must be a block with `plugin:`")
     if block["plugin"] not in registry[kind]:
         raise ConfigError(f"`{where}.plugin: {block['plugin']}` is not a {kind} plugin "
                           f"(known: {', '.join(sorted(registry[kind]))})")
+    try:
+        plugin_class(kind, block["plugin"]).options(block)
+    except (KeyError, TypeError, ValueError) as e:
+        raise ConfigError(f"`{where}` (plugin {block['plugin']}): {e.args[0] if e.args else e}") from None
 
 
 def llm_roles(cfg: dict) -> dict[str, tuple[str, dict]]:

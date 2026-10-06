@@ -7,24 +7,34 @@ constant level. Every request's text is recorded in `requests` for tests; nothin
 """
 from __future__ import annotations
 import math, threading
+from dataclasses import dataclass
 
 import numpy as np
 
-from app.plugins.base import TTSCaps
+from app.plugins.base import TTSCaps, TTSPlugin
 from app.plugins.llm.fake import wait_or_stop
-
-DEFAULTS = {"out_sr": 24000, "n": 5, "chunk_s": 0.08, "step_s": 0.002, "onset_s": 0.0, "per_char_s": 0.0,
-            "tone_hz": 0.0, "level": 0.1}
+from app.plugins.options import PluginOptions
 
 
-class FakeTTS:
-    remote = False
+class FakeTTS(TTSPlugin):
+    @dataclass(frozen=True, kw_only=True)
+    class Options(PluginOptions):
+        out_sr: int = 24000
+        n: int = 5                         # chunks per request (unless per_char_s is set)
+        chunk_s: float = 0.08
+        step_s: float = 0.002              # between chunks
+        onset_s: float = 0.0               # before the first
+        per_char_s: float = 0.0            # > 0: audio length follows the text
+        tone_hz: float = 0.0               # > 0: a sine tone instead of a constant level
+        level: float = 0.1
 
     def __init__(self, conf: dict | None = None, ctx=None, **kw):
-        o = {**DEFAULTS, **{k: v for k, v in (conf or {}).items() if k in DEFAULTS}, **kw}
-        self.out_sr = int(o["out_sr"]); self.n = int(o["n"]); self.chunk_s = float(o["chunk_s"])
-        self.step_s = float(o["step_s"]); self.onset_s = float(o["onset_s"]); self.per_char_s = float(o["per_char_s"])
-        self.tone_hz = float(o["tone_hz"]); self.level = float(o["level"])
+        """conf: the config block; keyword arguments override it (tests)."""
+        super().__init__({**(conf or {}), **kw}, ctx)
+        o = self.opts
+        self.out_sr = o.out_sr; self.n = o.n; self.chunk_s = o.chunk_s
+        self.step_s = o.step_s; self.onset_s = o.onset_s; self.per_char_s = o.per_char_s
+        self.tone_hz = o.tone_hz; self.level = o.level
         self.caps = TTSCaps(cloning=False, max_batch=4)
         self.requests = []; self.aborted = 0; self.live = 0; self.lock = threading.Lock()
 
@@ -34,12 +44,6 @@ class FakeTTS:
 
     def load_voice(self, name):
         return None
-
-    def warmup(self, voice=None):
-        pass
-
-    def shutdown(self):
-        pass
 
     def _chunk(self, i):
         m = int(self.chunk_s * self.out_sr)

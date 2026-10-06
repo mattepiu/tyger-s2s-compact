@@ -11,22 +11,16 @@ lists kinds answered with a refusal. Every request is recorded in `calls` (kind,
 """
 from __future__ import annotations
 import threading, time
+from dataclasses import dataclass, field
 
-from app.plugins.base import LLMError
+from app.plugins.base import LLMError, LLMPlugin
+from app.plugins.options import PluginOptions
 from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id, tool_start, names_tool
 
 KINDS = ("reply", "phase_b", "leadin", "still", "ack", "expert_leadin", "expert_still", "smart", "smart_b", "task",
          "task_b", "task_failed")
 FINISH_CALL = ('<tool_call>\n{"name": "finish_task", "arguments": {"summary": "About your task: it is done, and it '
                'went well.", "result": "The full result of the task, in plain text."}}\n</tool_call>')
-DEFAULTS = {"reply": "Sure, here is a reasonably long first sentence for you. And a second one.",
-            "phase_b": "It is sunny and twenty degrees there today, a lovely day.",
-            "leadin": "One sec, let me look that up.", "still": "Still looking, almost there.", "ack": "oh nice",
-            "expert_leadin": "Let me think that through.", "expert_still": "Still working it out.",
-            "smart": "Here is the careful answer, worked out step by step. It holds up.",
-            "smart_b": "Having checked, the careful answer is forty two.",
-            "task": FINISH_CALL, "task_b": FINISH_CALL, "task_failed": "Sorry, I couldn't finish that one.",
-            "step_s": 0.002, "chars": 4, "fail": {}, "fail_after": 0, "refuse": ()}
 
 
 def wait_or_stop(seconds, stop_flag, poll=0.002):
@@ -39,14 +33,35 @@ def wait_or_stop(seconds, stop_flag, poll=0.002):
     return bool(stop_flag and stop_flag())
 
 
-class FakeLLM:
-    remote = False
+class FakeLLM(LLMPlugin):
+    @dataclass(frozen=True, kw_only=True)
+    class Options(PluginOptions):
+        # the scripted text per request kind (KINDS)
+        reply: str = "Sure, here is a reasonably long first sentence for you. And a second one."
+        phase_b: str = "It is sunny and twenty degrees there today, a lovely day."
+        leadin: str = "One sec, let me look that up."
+        still: str = "Still looking, almost there."
+        ack: str = "oh nice"
+        expert_leadin: str = "Let me think that through."
+        expert_still: str = "Still working it out."
+        smart: str = "Here is the careful answer, worked out step by step. It holds up."
+        smart_b: str = "Having checked, the careful answer is forty two."
+        task: str = FINISH_CALL
+        task_b: str = FINISH_CALL
+        task_failed: str = "Sorry, I couldn't finish that one."
+        step_s: float = 0.002                 # between items
+        chars: int = 4                        # per item
+        fail: dict = field(default_factory=dict)   # kind -> the LLMError kind raised for it
+        fail_after: int = 0                   # ...after this many items
+        refuse: list = field(default_factory=list)  # kinds answered with a refusal
 
     def __init__(self, conf: dict | None = None, ctx=None, **kw):
-        o = {**DEFAULTS, **(conf or {}), **kw}
-        self.text = {k: o[k] for k in KINDS}
-        self.step_s, self.chars = float(o["step_s"]), int(o["chars"])
-        self.fail, self.fail_after, self.refuse = dict(o["fail"]), int(o["fail_after"]), set(o["refuse"])
+        """conf: the config block; keyword arguments override it (tests)."""
+        super().__init__({**(conf or {}), **kw}, ctx)
+        o = self.opts
+        self.text = {k: getattr(o, k) for k in KINDS}
+        self.step_s, self.chars = o.step_s, o.chars
+        self.fail, self.fail_after, self.refuse = dict(o.fail), o.fail_after, set(o.refuse)
         if ctx is not None:
             from app.prompts import load_prompts
             self.prompts = load_prompts(ctx.cfg, [ctx.name])[ctx.name]
@@ -114,9 +129,3 @@ class FakeLLM:
         finally:
             with self.lock:
                 self.live -= 1
-
-    def warmup(self):
-        pass
-
-    def shutdown(self):
-        pass

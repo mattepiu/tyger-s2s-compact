@@ -7,9 +7,12 @@ Events have the real plugin's shape (FRAME / ENDPOINT / BARGE), so EARS's Conver
 Its one tunable threshold is the endpoint silence.
 """
 from __future__ import annotations
+from dataclasses import dataclass
+
 import numpy as np
 
-from app.plugins.base import Slider, Threshold, find_threshold
+from app.plugins.base import EarsPlugin, Slider, Threshold
+from app.plugins.options import PluginOptions
 
 SR = 16000
 FRAME_N = 1280                         # 80 ms
@@ -22,8 +25,8 @@ THRESHOLDS = (
 
 
 class FakeEarsSession:
-    def __init__(self, slot, **th):
-        self.slot = slot; self.th = th
+    def __init__(self, slot, endpoint_silence_frames):
+        self.slot = slot; self.endpoint_silence_frames = endpoint_silence_frames
         self._clear()
 
     def _clear(self):
@@ -33,24 +36,27 @@ class FakeEarsSession:
         self._clear()
 
 
-class EnergyEars:
+class EnergyEars(EarsPlugin):
     hop_samples = HOP_N
     sr = SR
     THRESHOLDS = THRESHOLDS
 
-    def __init__(self, conf: dict, ctx):
-        self.transcript = str(conf.get("transcript", "hello there"))
-        self.vad_db = float(conf.get("vad_db", -45.0))
-        self.min_speech_ms = float(conf.get("min_speech_ms", 350.0))
-        self.barge_frames = int(conf.get("barge_frames", 4))
+    @dataclass(frozen=True, kw_only=True)
+    class Options(PluginOptions):
+        transcript: str = "hello there"    # every ENDPOINT's (there is no ASR)
+        vad_db: float = -45.0
+        min_speech_ms: float = 350.0
+        barge_frames: int = 4
+
+    def __init__(self, conf: dict | None = None, ctx=None):
+        super().__init__(conf, ctx)
         self.slots = int(ctx.cfg["server"].get("max_sessions", 4)) if ctx else 4
-        self.defaults = {t.name: t.from_config(conf) for t in THRESHOLDS}
         self.free = list(range(self.slots)); self.sessions = set()
 
-    def open(self, **thresholds):
+    def open_session(self, thresholds):
         if not self.free:
             return None
-        s = FakeEarsSession(self.free.pop(0), **{**self.defaults, **thresholds}); self.sessions.add(s)
+        s = FakeEarsSession(self.free.pop(0), **thresholds); self.sessions.add(s)
         return s
 
     def close(self, session):
@@ -63,22 +69,15 @@ class EnergyEars:
     def active(self):
         return len(self.sessions)
 
-    def thresholds(self, session):
-        return dict(session.th)
-
-    def set_threshold(self, session, name, value):
-        session.th[name] = find_threshold(THRESHOLDS, name).parse(value)
-        return session.th[name]
-
     async def feed(self, session, user_hop, agent_hop, mode, more=False):
-        s = session; events = []
+        s = session; o = self.opts; events = []
         u = np.asarray(user_hop, np.float32)
         for j in range(len(u) // FRAME_N):
             f = u[j * FRAME_N:(j + 1) * FRAME_N]
-            voiced = 20 * np.log10(np.sqrt(float((f ** 2).mean())) + 1e-9) > self.vad_db
+            voiced = 20 * np.log10(np.sqrt(float((f ** 2).mean())) + 1e-9) > o.vad_db
             if mode == "speaking":
                 s.voice_run = s.voice_run + 1 if voiced else 0
-                if s.voice_run >= self.barge_frames:
+                if s.voice_run >= o.barge_frames:
                     events.append(dict(kind="BARGE", yield_prob=1.0)); s.voice_run = 0
                 events.append(dict(kind="FRAME", state="SPEAK", yield_prob=float(voiced), hazard=0.0, p_end=0.0))
                 continue
@@ -88,12 +87,13 @@ class EnergyEars:
                 s.sil_run += 1
             if s.in_turn:
                 s.turn_s += 0.08
-            if s.in_turn and s.voiced_ms >= self.min_speech_ms and s.sil_run >= s.th["endpoint_silence_frames"]:
-                events.append(dict(kind="ENDPOINT", transcript=self.transcript, turn_s=round(s.turn_s, 2),
+            if s.in_turn and s.voiced_ms >= o.min_speech_ms and s.sil_run >= s.endpoint_silence_frames:
+                events.append(dict(kind="ENDPOINT", transcript=o.transcript, turn_s=round(s.turn_s, 2),
                                    segments=0, by="energy", p_end=1.0))
                 s._clear()
                 events.append(dict(kind="FRAME", state="idle", yield_prob=0.0, hazard=0.0, bc_prob=0.0, p_end=1.0))
                 continue
-            events.append(dict(kind="FRAME", state="LISTEN" if s.in_turn or voiced else "idle", yield_prob=0.0, hazard=0.0, bc_prob=0.0,
-                               p_end=round(min(1.0, s.sil_run / max(1, s.th["endpoint_silence_frames"])), 3)))
+            events.append(dict(kind="FRAME", state="LISTEN" if s.in_turn or voiced else "idle", yield_prob=0.0,
+                               hazard=0.0, bc_prob=0.0,
+                               p_end=round(min(1.0, s.sil_run / max(1, s.endpoint_silence_frames)), 3)))
         return events

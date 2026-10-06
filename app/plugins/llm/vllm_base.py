@@ -11,7 +11,10 @@ is pinned (kv_cache_gib), so GPU memory doesn't depend on what else is loaded.
 """
 from __future__ import annotations
 import asyncio, threading, uuid, logging
+from dataclasses import dataclass
 
+from app.plugins.base import LLMPlugin
+from app.plugins.options import PluginOptions
 from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id, tool_start, TAGS, names_tool
 
 log = logging.getLogger("llm")
@@ -31,24 +34,34 @@ def to_template_messages(messages):
     return out
 
 
-class VLLMChatPlugin:
-    remote = False
+class VLLMChatPlugin(LLMPlugin):
     default_model: str = ""
     tool_format: str = "hermes_json"            # _toolparse.TAGS key: the call format the model writes
+
+    @dataclass(frozen=True, kw_only=True)
+    class Options(PluginOptions):
+        model: str | None = None               # None: the plugin's default_model
+        quantization: str | None = None        # e.g. fp8 (at load); unset for a pre-quantized checkpoint
+        gpu_memory_utilization: float = 0.45   # vLLM's start-up free-memory check only
+        kv_cache_gib: float = 3.0              # the pinned KV budget
+        max_model_len: int = 8192
+        max_num_seqs: int = 8
+        temperature: float = 0.7
+        max_tokens: int | None = None          # if set, every request gets it instead of MOUTH's max_new
+        # (backchannel / filler limits included): meant for a block that serves only `smart`, as in openai_compat
 
     def __init__(self, conf: dict, ctx):
         from vllm import AsyncEngineArgs
         from vllm.v1.engine.async_llm import AsyncLLM
-        self.conf = conf; self.name = ctx.name; self.eloop = ctx.eloop
-        self.model = conf.get("model") or self.default_model
-        self.temperature = float(conf.get("temperature", 0.7))
-        self.max_tokens = conf.get("max_tokens")   # if set, every request gets it instead of MOUTH's max_new
-        # (backchannel / filler limits included): meant for a block that serves only `smart`, as in openai_compat
-        args = AsyncEngineArgs(model=self.model, gpu_memory_utilization=float(conf.get("gpu_memory_utilization", 0.45)),
-                               kv_cache_memory_bytes=int(float(conf.get("kv_cache_gib", 3.0)) * 2**30),
-                               max_model_len=int(conf.get("max_model_len", 8192)),
-                               max_num_seqs=int(conf.get("max_num_seqs", 8)),
-                               **({"quantization": conf["quantization"]} if conf.get("quantization") else {}),
+        super().__init__(conf, ctx)
+        o = self.opts
+        self.model = o.model or self.default_model
+        self.temperature = o.temperature
+        self.max_tokens = o.max_tokens
+        args = AsyncEngineArgs(model=self.model, gpu_memory_utilization=o.gpu_memory_utilization,
+                               kv_cache_memory_bytes=int(o.kv_cache_gib * 2**30),
+                               max_model_len=o.max_model_len, max_num_seqs=o.max_num_seqs,
+                               **({"quantization": o.quantization} if o.quantization else {}),
                                **self.engine_kwargs())
 
         async def make():                                     # construct on the loop that will drive it
@@ -128,8 +141,7 @@ class VLLMChatPlugin:
                 yield ("tool_start", {"name": calls[0]["name"] if calls else None})
             yield ("tool_calls", [{"id": new_call_id(), **c} for c in calls], None)
 
-    def warmup(self) -> None:
-        pass                      # MOUTH's own start-up request (prompts.yaml `warmup`) pays the first prefill
+    # warmup: none. MOUTH's own start-up request (prompts.yaml `warmup`) pays the first prefill
 
     def shutdown(self) -> None:
         self.engine.shutdown()

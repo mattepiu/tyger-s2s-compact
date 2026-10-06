@@ -23,6 +23,21 @@ def test_plugin_classes_import_light():
     assert out.stdout.strip() == "", f"importing plugin classes loaded {out.stdout.strip()}"
 
 
+def test_registered_classes_implement_their_base():
+    """Every registered class subclasses its kind's ABC base and implements all of it (it could be built), and
+    declares its config block as Options."""
+    import inspect
+    from app.plugins import plugin_class
+    from app.plugins.base import EarsPlugin, LLMPlugin, TTSPlugin
+    from app.plugins.options import PluginOptions
+    bases = {"llm": LLMPlugin, "tts": TTSPlugin, "ears": EarsPlugin}
+    for kind in REGISTRY:
+        for name in REGISTRY[kind]:
+            cls = plugin_class(kind, name)
+            assert issubclass(cls, bases[kind]) and not inspect.isabstract(cls), (kind, name)
+            assert issubclass(cls.Options, PluginOptions) and cls.Options is not PluginOptions, (kind, name)
+
+
 def test_off_rate_tts_resampled_to_wire():
     tts = AtWireRate(FakeTTS(out_sr=22050, n=10, chunk_s=0.1))
     out = np.concatenate(list(tts.stream("hello", None)))

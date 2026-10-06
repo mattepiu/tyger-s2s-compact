@@ -24,7 +24,8 @@ from pathlib import Path
 import numpy as np
 
 from app.config import repo_path
-from app.plugins.base import TTSCaps
+from app.plugins.base import TTSCaps, TTSPlugin
+from app.plugins.options import PluginOptions
 from app.resample import StreamingAudioResampler
 
 log = logging.getLogger("tts")
@@ -57,8 +58,14 @@ class Voice:
     feat_len: int = 0     # encoded clip length, which the prompt needs once the clip itself isn't sent
 
 
-class VoxCPM2:
-    remote = False
+class VoxCPM2(TTSPlugin):
+    @dataclass(frozen=True, kw_only=True)
+    class Options(PluginOptions):
+        model: str = "openbmb/VoxCPM2"
+        deploy_config: str | None = None   # the vLLM-Omni stage config (repo-relative)
+        out_sr: int = 24000                # VoxCPM2's 48 kHz is resampled to this
+        ref_max_s: float = 10.0            # reference-only mode: the clip is trimmed to this
+        allow_zero_shot: bool = False      # testing only: start without a voice clip
 
     @classmethod
     def list_voices(cls, cfg) -> tuple[list[str], str | None]:
@@ -70,15 +77,16 @@ class VoxCPM2:
         from vllm_omni.entrypoints.async_omni import AsyncOmni
         from vllm_omni.entrypoints.utils import coerce_param_message_types
         from vllm_omni.model_executor.models.voxcpm2.voxcpm2_talker import build_cjk_split_map
-        self.cfg = ctx.cfg; self.eloop = eloop = ctx.eloop
-        model = conf.get("model") or "openbmb/VoxCPM2"
-        deploy_config = repo_path(conf.get("deploy_config"))
-        self.out_sr = int(conf.get("out_sr", 24000))
-        self.ref_max_s = float(conf.get("ref_max_s", 10.0))
+        super().__init__(conf, ctx)
+        self.cfg = ctx.cfg; eloop = self.eloop
+        model = self.opts.model
+        deploy_config = repo_path(self.opts.deploy_config)
+        self.out_sr = self.opts.out_sr
+        self.ref_max_s = self.opts.ref_max_s
         names, default = scan_voices(self.cfg)
         if names:
             log.info("voices available: %s (default=%s)", sorted(names), default)
-        elif conf.get("allow_zero_shot"):          # testing only: VoxCPM2's unconditioned voice, no clone
+        elif self.opts.allow_zero_shot:          # testing only: VoxCPM2's unconditioned voice, no clone
             log.warning("no voice clips in voices.dir -> zero-shot TTS voice (tts.allow_zero_shot)")
         else:
             raise RuntimeError("no voice reference clips found (put a *.wav in voices.dir)")

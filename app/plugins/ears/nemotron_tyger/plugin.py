@@ -9,8 +9,10 @@ a new turn (applied before its next hop); its thresholds are per conversation (t
 """
 from __future__ import annotations
 import logging
+from dataclasses import dataclass
 
-from app.plugins.base import Slider, Threshold, find_threshold
+from app.plugins.base import EarsPlugin, Slider, Threshold
+from app.plugins.options import PluginOptions
 from .constants import FRAME_S, HOP_N, SR
 
 log = logging.getLogger("ears")
@@ -28,31 +30,42 @@ THRESHOLDS = (
 )
 
 
-class NemotronTyger:
+class NemotronTyger(EarsPlugin):
     THRESHOLDS = THRESHOLDS
+    sr = SR
+    hop_samples = HOP_N                    # 320 ms @ 16 kHz = 5120
+
+    @dataclass(frozen=True, kw_only=True)
+    class Options(PluginOptions):
+        heads: str                         # the heads release (HF repo id or a local directory)
+        heads_revision: str | None = None  # pin it (None: latest)
+        nemotron: str | None = None        # the encoder: None = the one the release pins
+        nemotron_revision: str | None = None
+        ring_frames: int = 2048            # head context per conversation, in 80 ms frames
+        gather_ms: float = 15              # wait this long to batch other conversations' hops into one GPU step
+        expect_ms: float = 60              # ...or this long when one that is behind is about to resubmit
+        stats_s: float = 60                # log timing + busy % this often
+        cpu_threads: int = 4               # torch CPU threads (the default 48 mostly spin-wait)
 
     def __init__(self, conf: dict, ctx):
         import torch
         from app import weights
         from .engine import EarsEngine
         from .service import EarsService
-        torch.set_num_threads(int(conf.get("cpu_threads", 4)))   # default 48 threads mostly spin-wait
-        self.sr = SR
-        self.hop_samples = HOP_N                                 # 320 ms @ 16 kHz = 5120
-        self.defaults = {t.name: t.from_config(conf) for t in THRESHOLDS}
-        heads = weights.heads_release(conf["heads"], conf.get("heads_revision"))
+        super().__init__(conf, ctx)
+        o = self.opts
+        torch.set_num_threads(o.cpu_threads)
+        heads = weights.heads_release(o.heads, o.heads_revision)
         self.slots = int(ctx.cfg["server"].get("max_sessions", 4))
-        log.info("loading EARS (nemotron-tyger-1.0: %s) for %d sessions, ep_thr=%s ep_deb=%s", conf["heads"],
+        log.info("loading EARS (nemotron-tyger-1.0: %s) for %d sessions, ep_thr=%s ep_deb=%s", o.heads,
                  self.slots, self.defaults["ep_thr"], self.defaults["ep_deb"])
-        engine = EarsEngine(heads, slots=self.slots, ring_len=int(conf.get("ring_frames", 2048)),
-                            nemotron=conf.get("nemotron"), nemotron_revision=conf.get("nemotron_revision"))
-        self.service = EarsService(engine, gather_s=float(conf.get("gather_ms", 15)) / 1e3,
-                                   expect_s=float(conf.get("expect_ms", 60)) / 1e3,
-                                   stats_every_s=float(conf.get("stats_s", 60)))
+        engine = EarsEngine(heads, slots=self.slots, ring_len=o.ring_frames, nemotron=o.nemotron,
+                            nemotron_revision=o.nemotron_revision)
+        self.service = EarsService(engine, gather_s=o.gather_ms / 1e3, expect_s=o.expect_ms / 1e3,
+                                   stats_every_s=o.stats_s)
 
-    def open(self, **thresholds):
-        """A new conversation's session with the configured thresholds (overridable), or None when full."""
-        return self.service.open(**{**self.defaults, **thresholds})
+    def open_session(self, thresholds):
+        return self.service.open(**thresholds)
 
     def close(self, session):
         self.service.close(session)
@@ -65,13 +78,3 @@ class NemotronTyger:
 
     def active(self):
         return self.service.active()
-
-    def thresholds(self, session) -> dict:
-        return {t.name: getattr(session, t.name) for t in THRESHOLDS}
-
-    def set_threshold(self, session, name, value):
-        """Set one of THRESHOLDS for this conversation; returns the value now in effect. KeyError for an unknown
-        name, ValueError for a bad value."""
-        v = find_threshold(THRESHOLDS, name).parse(value)
-        setattr(session, name, v)
-        return v

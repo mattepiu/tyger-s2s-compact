@@ -205,6 +205,29 @@ check (weights 335 / 335 identical, outputs exact) is the record that the releas
   the same comparisons agree to 2e-4.
 - Stack: smoke PASS, `load_test_ears.py` 881 / 1092 ms at 1 / 4 conv.
 
+**R-07a, plugin bases and typed options.**
+- **Bases:** `app/plugins/base.py`'s Protocols are now ABC bases (`Plugin`, then `LLMPlugin`, `TTSPlugin` and
+  `EarsPlugin`) that every registered plugin subclasses. They hold the shared defaults: `remote` False,
+  no-op `warmup` / `shutdown`, `self.opts` / `name` / `eloop` from the constructor.
+- **EARS:** `EarsPlugin` also holds the threshold plumbing both EARS plugins had copied (`defaults` from config,
+  `open` merging overrides, `thresholds`, `set_threshold`). A plugin implements `open_session`, and a session keeps
+  its thresholds as attributes; the fake's session used to keep them in a `th` dict.
+- **Options:** each plugin declares its config block as an `Options` dataclass (`app/plugins/options.py`: typed,
+  defaulted, frozen). `validate_config` builds it for every block, so a bad key fails at load, before any model
+  loads, with the key named: `unknown option kv_cache_gb (did you mean kv_cache_gib?)`, `model is not set`,
+  `allow_zero_shot must be a bool`. Before this, a typo was silently ignored and the default used. An EARS block's
+  threshold keys are checked by its THRESHOLDS. Values are coerced as YAML leaves them: an int where a float is
+  declared, and an all-digit revision as a string.
+- **No behaviour change:** every default is the one the old `conf.get(key, default)` used.
+- **Tests:**
+  - `test_config.py`: unknown, missing and wrong-type keys, coercion, and `config.fake.yaml` loads; the first two
+    fail on the old code.
+  - `test_plugins.py`: every registered class is a concrete subclass of its kind's base and has its own `Options`.
+- **Checks:**
+  - GPU-free suite passes;
+  - local contract test 6/6;
+  - stack (no-smart config): smoke PASS, `load_test.py` turn p50 397 ms, `load_test_ears.py` 854 / 1074 ms.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README
