@@ -131,6 +131,7 @@ the voice picker. Browser DSP (echo cancellation, noise suppression, auto gain) 
 .venv/bin/python tests/test_ears_floor.py       # EARS floor requests: the Conversation state machine, fake EARS (no GPU)
 .venv/bin/python tests/test_ears_parts.py      # EARS's AgentPlayback and the web app (busy page, voices) (no GPU)
 .venv/bin/python tests/test_ears_asr_jobs.py    # EARS's ASR thread resolves endpoint / partial jobs, also on failure (no GPU)
+.venv/bin/python tests/test_ears_rules.py       # nemotron-tyger's turn rules: endpoint, backchannel, barge-in (no GPU)
 CONFIG=config.fake.yaml ./run.sh                 # the whole stack on the fake plugins: no GPU, no downloads
 .venv/bin/python scripts/smoke_test.py          # needs run.sh up: MOUTH tool turns + barge-in + EARS speech → audio
 .venv/bin/python scripts/load_test.py --sessions 4       # needs run.sh up: concurrent MOUTH turns + backchannels
@@ -140,7 +141,7 @@ CONFIG=config.fake.yaml ./run.sh                 # the whole stack on the fake p
                                                          #   (fixed utterance and reply: runs compare)
 .venv/bin/python scripts/validate_ears_batched.py        # GPU free: batched EARS == single-session reference
 .venv/bin/python scripts/validate_rnnt.py                # GPU free: graphed RNN-T == nemotron generate()
-.venv/bin/python scripts/validate_heads.py               # GPU free: the heads release == the research model (weights, outputs)
+.venv/bin/python scripts/validate_heads.py               # GPU free: the heads release loads and is consistent (real speech features)
 .venv/bin/python scripts/validate_barge.py               # GPU free: a barge-in keeps the start of the utterance
 .venv/bin/python scripts/validate_second_ear.py          # GPU free: the 2nd ear's 24->16 kHz step, old vs new, on the heads
 .venv/bin/python scripts/validate_long_turn.py           # GPU free: > 20 s turns transcribed whole

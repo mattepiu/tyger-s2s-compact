@@ -1,5 +1,5 @@
 """EarsSession: one conversation's turn-taking state (its audio windows, the turn being heard, the decision runs) and
-its thresholds. The engine changes it on the GPU thread; reset() may come from any thread.
+its thresholds. The turn rules and the engine change it on the GPU thread; reset() may come from any thread.
 """
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from .constants import LISTEN, SR
 
 
 class EarsSession:
-    """One conversation's EARS state (what LiveEars/EndpointEars kept on self), plus its thresholds."""
+    """One conversation's state for the turn rules (rules.py) and its thresholds (the module docstring)."""
     def __init__(self, slot, ep_thr=0.9146, ep_deb=2, barge_thr=0.5, barge_deb=2, bc_thr=0.5, bc_deb=2,
                  fallback_frames=15, theta=0.2, bc_refractory=15, partial_refresh_s=0.8):
         self.slot = slot

@@ -184,6 +184,27 @@ Parity:
 - `validate_barge.py` and `validate_long_turn.py` unchanged; the contract passes;
 - stack: smoke PASS, `load_test_ears.py` 889 / 1073 ms at 1 / 4 conv, EARS start ~15 s and 5.7 GB as before.
 
+**R-06c, the validators check the release** (the user's call). The research reference code and its checkpoint are
+gone from the repo: `scripts/reference/` and `weights.research_checkpoint` (both in git history). R-06b's one-off
+check (weights 335 / 335 identical, outputs exact) is the record that the release is the research model.
+- **`rules.py`:** the per-frame turn rules (`begin_hop`, `switch_mode`, `on_frame`, `frame_energy`,
+  `state_decision`) moved out of `EarsEngine`. They are plain functions on an `EarsSession` that say when the
+  heads' context must restart, so the engine and the reference share them. New `tests/test_ears_rules.py` (6 tests:
+  endpoint by head and by silence, minimum speech, backchannel debounce and refractory, barge-in and its seeded
+  turn, energy) covers them directly, since the reference no longer checks them independently.
+- **`scripts/ears_reference.py`:** `ReferenceEars` runs one conversation through the same release the plain way.
+  That means HF processor features on the CPU, the full encoder with `hidden_states[15]`, `TygerHeads` stepped with
+  HF's `DynamicCache`, and `generate()` on the whole turn. `validate_ears_batched.py` compares the engine with it.
+  Result: events and transcripts match in all 5 sessions, max diffs 0.0022–0.0059 (against the research reference
+  they were 0.0018–0.0077), tick p50 58 ms at 4 sessions.
+- **`scripts/validate_heads.py`** now checks the release alone, on nemotron layer-15 features of LibriSpeech:
+  - it loads (strict, dtypes kept, frontend fits);
+  - its outputs are deterministic and well-formed;
+  - probabilities frame by frame vs one pass differ by max 0.0071, alone vs batched by 0.0065 (tolerance 0.02).
+  Random features would be useless here: they push the state logits to |46| and bf16 noise to 0.66, while in fp32
+  the same comparisons agree to 2e-4.
+- Stack: smoke PASS, `load_test_ears.py` 881 / 1092 ms at 1 / 4 conv.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

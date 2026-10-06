@@ -1,5 +1,5 @@
-"""Weights: fetch the private turn-taking heads (the release, and for the validators the research checkpoint it came
-from). All downloads go to HF_HOME (mounted cache); nothing is baked into the image. The other models (nemotron, the
+"""Weights: fetch the private turn-taking heads release. All downloads go to HF_HOME (mounted cache); nothing is baked
+into the image. The other models (nemotron, the
 LLM, VoxCPM2) are downloaded by their loaders on first start."""
 from __future__ import annotations
 import os
@@ -25,11 +25,3 @@ def heads_release(repo: str, revision: str | None = None) -> str:
         raise RuntimeError(f"HF_TOKEN required for the private heads release {repo!r}")
     return snapshot_download(repo, revision=revision, token=token, allow_patterns=["config.json", "model.safetensors"])
 
-
-def research_checkpoint(repo: str, filename: str) -> str:
-    """A research checkpoint file (the .pt the release was exported from), for the validators' reference only."""
-    from huggingface_hub import hf_hub_download
-    token = _hf_token()
-    if not token:
-        raise RuntimeError(f"HF_TOKEN required for the private research checkpoint {repo!r}")
-    return hf_hub_download(repo_id=repo, filename=filename, token=token)

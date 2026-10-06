@@ -11,8 +11,8 @@ The release is self-describing (config.json): the backbone's config is embedded 
 dtype policy is bf16 backbone / fp32 added modules ("keep the stored dtypes"), and `frontend` pins the encoder the
 heads were trained on (repo, revision, layer, window, hop, energy norm). The loader checks that frontend against
 constants.py, so a release that needs a different audio grid fails at load instead of misbehaving.
-scripts/validate_heads.py checks this model against the research classes (scripts/reference/ears_ref) on the
-source checkpoint: same weights, same outputs.
+scripts/validate_heads.py checks the release as loaded here (on real speech features); when it was introduced (R-06b)
+it was bit-identical to the research model it was exported from (NOTES.md).
 """
 from __future__ import annotations
 import json

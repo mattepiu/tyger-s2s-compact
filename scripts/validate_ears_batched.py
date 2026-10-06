@@ -1,5 +1,7 @@
-"""Validate the batched multi-session EARS (app/plugins/ears/nemotron_tyger) against the single-session research
-reference (scripts/reference/ears_ref EndpointEars): per-frame head outputs and events, alone and 4 sessions with staggered starts, plus tick timing.
+"""Validate the batched multi-session EARS engine (app/plugins/ears/nemotron_tyger) against a plain single-session run
+of the same TYGER-S2S-endpointer release (scripts/ears_reference.py: CPU features, the full encoder, eager heads, HF
+generate; the same turn rules): per-frame head outputs and events, alone and 4 sessions with staggered starts, plus
+tick timing.
 Mic input = public LibriSpeech test clips (hf-internal-testing/librispeech_asr_dummy), in memory; prints numbers
 and event kinds only. Needs the GPU free (stop run.sh) and `datasets` (pip install datasets).
 
@@ -12,8 +14,7 @@ logging.basicConfig(level=logging.WARNING)
 from datasets import load_dataset
 from app.config import load_config
 from app import weights
-from scripts.reference.ears_ref import SOURCE_FILE, SOURCE_REPO
-from scripts.reference.ears_ref.endpoint_ears import EndpointEars
+from scripts.ears_reference import ReferenceEars
 from app.plugins.ears.nemotron_tyger.constants import HOP_N, SEG_S
 from app.plugins.ears.nemotron_tyger.engine import EarsEngine
 from app.plugins.ears.nemotron_tyger.session import EarsSession
@@ -38,25 +39,21 @@ def scenario(k):
     return hops
 
 cfg = load_config(); e = cfg["ears"]
-ckpt = weights.research_checkpoint(SOURCE_REPO, SOURCE_FILE)            # the reference: the research checkpoint
-release = weights.heads_release(cfg["ears"]["heads"], cfg["ears"].get("heads_revision"))   # the engine: the release
+release = weights.heads_release(e["heads"], e.get("heads_revision"))
 thr = dict(ep_thr=float(e["ep_thr"]), ep_deb=int(e["ep_deb"]), barge_thr=float(e["barge_thr"]),
-           barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]))
+           barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]),
+           fallback_frames=int(e.get("fallback_sil_frames", 15)))
 
-# ---- reference (single-session EndpointEars), one scenario ----
-ref = EndpointEars(ckpt, echo=True, theta=0.2, **thr); ref.FALLBACK_SIL_FRAMES = int(e.get("fallback_sil_frames", 15))
-ref_trace = []; orig = ref._head_step
-def rec(*x):
-    r = orig(*x); ref_trace.append(r[1:]); return r      # (haz, yp, bcp, pep)
-ref._head_step = rec
+# ---- reference: one session at a time, the plain way ----
+ref = ReferenceEars(release)
 def run_ref(hops):
-    ref.reset(); ref_trace.clear(); evs = []
+    s = EarsSession(0, **thr); s.trace = []; ref.cache = None; evs = []
     for uh, ah, mode in hops:
-        for ev in ref.feed(uh, ah, mode):
+        for ev in ref.feed(s, uh, ah, mode):
             if ev["kind"] != "FRAME":
-                evs.append((ev["kind"], len(ref_trace), ev.get("transcript", "")[:40] if ev["kind"] == "ENDPOINT" else "",
+                evs.append((ev["kind"], len(s.trace), ev.get("transcript", "")[:40] if ev["kind"] == "ENDPOINT" else "",
                             ev.get("turn_s", 0.0)))
-    return list(ref_trace), evs
+    return [x[1:] for x in s.trace], evs                 # (haz, yp, bcp, pep) per frame
 S = 4
 scen = [scenario(4 * k) for k in range(S)]
 refs = [run_ref(h) for h in scen]
@@ -97,8 +94,8 @@ def compare(name, ref_tr, got_tr, ref_ev, got_ev):
     r = np.array(ref_tr[:n]); g = np.array([x[1:] for x in got_tr[:n]])
     d = np.abs(r - g).max(0)
     same = [x[:2] for x in ref_ev] == [x[:2] for x in got_ev]
-    # endpoint transcripts: the reference keeps only a turn's last 20 s, the engine transcribes a turn longer
-    # than SEG_S in segments (I-05), so only turns up to SEG_S must read the same
+    # endpoint transcripts: the reference transcribes a turn whole, the engine a turn longer than SEG_S in
+    # segments (I-05), so only turns up to SEG_S must read the same
     short = [(r[2], g[2]) for r, g in zip(ref_ev, got_ev) if r[0] == "ENDPOINT" and g[3] <= SEG_S]
     n_long = sum(1 for g in got_ev if g[0] == "ENDPOINT" and g[3] > SEG_S)
     print(f"  {name}: frames {len(ref_tr)}/{len(got_tr)} | max|diff| haz {d[0]:.4f} yield {d[1]:.4f} bc {d[2]:.4f} p_end {d[3]:.4f}"
@@ -111,15 +108,13 @@ def compare(name, ref_tr, got_tr, ref_ev, got_ev):
             print(f"    {src}: {kind} at frame {fi} | yield ref {[round(x[1],3) for x in ref_tr[lo:fi]]} got {[round(x[2],3) for x in got_tr[lo:fi]]}")
 
 print("== single session vs reference ==")
-s0 = EarsSession(0, **thr); s0.fallback_frames = int(e.get("fallback_sil_frames", 15))
+s0 = EarsSession(0, **thr)
 (got,), ticks1 = run_eng([s0], [scen[0]], [0])
 compare("session 0", refs[0][0], got[0], refs[0][1], got[1])
 print(f"  tick ms p50 {np.median([t for t,_ in ticks1[3:]]):.0f}  p90 {np.percentile([t for t,_ in ticks1[3:]],90):.0f}")
 
 print(f"== {S} sessions together (staggered starts) vs reference ==")
 sess = [EarsSession(k, **thr) for k in range(S)]
-for s in sess:
-    s.fallback_frames = int(e.get("fallback_sil_frames", 15))
 gots, ticksN = run_eng(sess, scen, [0, 3, 7, 11])
 for k in range(S):
     compare(f"session {k}", refs[k][0], gots[k][0], refs[k][1], gots[k][1])

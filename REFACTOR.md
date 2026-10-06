@@ -4,7 +4,7 @@
 plugins; the endpoint head is tied to nemotron, make them one plugin"). Implemented step by step on branch
 `plugins`, one commit per step (`R-NN: …` in the subject), each checked for parity before the next.
 
-**Progress:** R-00 plan, R-01, R-02, R-03, R-04a, R-04b, R-05, R-06a, R-06b done (2026-10-06).
+**Progress:** R-00 plan, R-01, R-02, R-03, R-04a, R-04b, R-05, R-06a, R-06b, R-06c done (2026-10-06).
 
 **Goal:** a reader can find where a thing happens from its name, and a new plugin is one package plus one registry
 line, with no edits to MOUTH, EARS's server or the web page.
@@ -55,7 +55,7 @@ app/
       engine.py            #   per-tick batching, RingKV / HeadBatch, the per-frame decision rule
       service.py           #   the GPU thread that gathers hops across conversations
       plugin.py            #   NemotronTyger: the EarsPlugin surface + its threshold / slider spec
-scripts/reference/         # research reference code the validators compare against (LiveEars, EndpointEars, …)
+scripts/ears_reference.py  # one conversation through the heads release the plain way: what the validators check the engine against
 ```
 
 ## Steps
