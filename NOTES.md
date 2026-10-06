@@ -379,6 +379,15 @@ Left for the user: the R-05 sliders on the page.
   - VoxCPM2's engine ran with the config's `max_seq_len=2048` and eager mode (vLLM-Omni's default is 4096), so
     `engine_config` is read.
 
+**VoxCPM2 `max_model_len` back to 4096** (2026-10-06, the user: intonation changes in the middle of a long
+sentence; `max_num_batched_tokens` is 4096). The 2048 limit wasn't reachable: VoxCPM2 is 6.25 tokens per second of
+audio, so a request (a ≤10 s reference clip, one text chunk of ≤220 characters, and its ≤~15 s of speech) is about
+200–300 tokens. The likelier cause is the chunk boundary. Each chunk is its own TTS request, and the first chunk of
+a reply is cut at a clause (or after 12 words), and a run-on sentence at 220 characters, so the prosody restarts
+there. Also: VoxCPM2 isn't eager in practice. `enforce_eager` turns off only vLLM's generic compile / graph layer;
+the model captures its own CUDA graphs (scaffold and residual LMs, batch 1–4) and `torch.compile`s LocDiT,
+feat_encoder and AudioVAE (startup log). The user chose to keep the engine options as they are.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

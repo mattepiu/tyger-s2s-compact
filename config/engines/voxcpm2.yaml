@@ -1,7 +1,8 @@
-# VoxCPM2 deploy config for tyger: up to 4 live conversations sharing the GPU with the LLM (+ EARS).
-# Based on vllm_omni/deploy/voxcpm2.yaml (vllm-omni 0.30.0); changes: max_num_seqs 8->4, KV 6GiB->2GiB,
-# gpu_memory_utilization 0.9->0.35 (start-up check only; KV is pinned by kv_cache_memory_bytes),
-# max_model_len 4096->2048 (ref clip + one text chunk), unified decode graph batch 8->4.
+# VoxCPM2's engine config (vLLM-Omni's "deploy config") for tyger: up to 4 live conversations sharing the GPU with
+# the LLM (+ EARS). Based on vllm_omni/deploy/voxcpm2.yaml (vllm-omni 0.30.0); changes: max_num_seqs 8->4,
+# KV 6GiB->2GiB, gpu_memory_utilization 0.9->0.35 (start-up check only; KV is pinned by kv_cache_memory_bytes),
+# max_tokens 4096->2048, unified decode graph off (see below). max_model_len is upstream's 4096 again (2026-10-06,
+# user): one request (ref clip + one text chunk + its audio, 6.25 tokens/s) needs ~200-300 tokens.
 # Measured at 1 session (RTX 5090): ~7.4 GB loaded, ~0.6 GB more after warmup; first-audio ~113 ms, RTF 0.12-0.2.
 async_chunk: false
 dtype: bfloat16
@@ -16,7 +17,7 @@ stages:
     enable_prefix_caching: false
     async_scheduling: true
     max_num_batched_tokens: 4096
-    max_model_len: 2048
+    max_model_len: 4096
     devices: "0"
     engine_extras:
       hf_overrides:
