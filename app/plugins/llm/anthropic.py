@@ -11,8 +11,9 @@ plugin; the startup log says which roles are remote. Bodies are never logged; AN
     spoken: they only show up as time before the first text. `max_tokens` covers thinking + text, so it comes from
     config per role, not from MOUTH's max_new. No temperature / top_p / top_k (rejected); tool_choice stays auto.
   * Tools: {name, description, input_schema, eager_input_streaming: true}, in the fixed order of app/tools.py.
-    With eager streaming the server doesn't validate inputs, so every input is checked against its schema here;
-    a bad one comes back with "error" set and MOUTH never runs it. stop_reason max_tokens: no call is run.
+    With eager streaming the server doesn't validate inputs, so every input is checked against its schema here
+    (_toolparse.check_arguments, as in openai); a bad one comes back with "error" set and MOUTH never runs it.
+    stop_reason max_tokens: no call is run.
   * Thinking blocks in history (preserved thinking): inside one tool round, phase B sends back the response's own
     content unchanged (the `native` of the tool_calls event). Completed turns are converted from the neutral
     fields only (text + tool_use / tool_result), so no thinking block is ever replayed after MOUTH edits history
@@ -29,6 +30,7 @@ from __future__ import annotations
 import json, logging
 from dataclasses import dataclass
 
+from app.plugins.llm._toolparse import flag_invalid
 from app.plugins.llm.hosted import HostedLLM
 
 log = logging.getLogger("llm")
@@ -81,33 +83,6 @@ def to_claude_tools(tools):
              "input_schema": t["function"]["parameters"], "eager_input_streaming": True} for t in tools or []]
 
 
-_JSON_TYPES = {"string": str, "object": dict, "array": list, "boolean": bool, "integer": int, "number": (int, float)}
-
-
-def check_input(name, args, tools):
-    """None if `args` fits tool `name`'s schema (an object, required keys present, declared types and enums
-    respected), else the reason. Eager streaming means the server didn't check it."""
-    if not isinstance(args, dict):
-        return "input is not an object"
-    for t in tools or []:
-        f = t["function"]
-        if f["name"] != name:
-            continue
-        params = f["parameters"]
-        missing = [k for k in params.get("required", []) if k not in args]
-        if missing:
-            return f"missing {', '.join(missing)}"
-        for k, v in args.items():
-            spec = params.get("properties", {}).get(k, {})
-            typ = _JSON_TYPES.get(spec.get("type"))
-            if typ and (not isinstance(v, typ) or (spec.get("type") in ("integer", "number") and isinstance(v, bool))):
-                return f"{k} is not a {spec['type']}"
-            if "enum" in spec and v not in spec["enum"]:
-                return f"{k} is not one of {spec['enum']}"
-        return None
-    return "unknown tool"
-
-
 def _d(x):
     """An SDK object or a dict -> dict (tests feed dicts)."""
     return x if isinstance(x, dict) else x.to_dict()
@@ -151,14 +126,8 @@ class ClaudeStreamParser:
             log.warning("tool input cut off at max_tokens; not run")
             return [("tool_calls", [], None)]
         native = [b for b in blocks[:last_fb + 1] if b.get("type") == "text"] + after
-        calls = []
-        for b in uses:
-            c = {"id": b["id"], "name": b["name"], "arguments": b.get("input")}
-            bad = check_input(c["name"], c["arguments"], self.tools)
-            if bad:
-                c["error"] = f"invalid arguments for '{c['name']}': {bad}"
-                c["arguments"] = c["arguments"] if isinstance(c["arguments"], dict) else {}
-            calls.append(c)
+        calls = [flag_invalid({"id": b["id"], "name": b["name"], "arguments": b.get("input")}, self.tools)
+                 for b in uses]
         return [("tool_calls", calls, native)]
 
 

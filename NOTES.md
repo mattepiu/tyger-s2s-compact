@@ -242,6 +242,21 @@ A plugin keeps only its request shape and stream parser. The anthropic plugin st
 that a stopped request gives its slot back, and both pass on the old code too. One live gpt-5.4-mini request
 through the ported plugin streamed text.
 
+**R-07c, one tool-argument check** (a behaviour change, hence its own commit). The hosted plugins checked a call's
+arguments differently, so the same bad call ran on one provider and not on the other:
+- `openai` checked only that the arguments are an object with the required keys;
+- `anthropic` also checked declared types and enums.
+
+`_toolparse.check_arguments` (anthropic's check) and `flag_invalid` are now the one validator, used by both stream
+parsers. The change: on `openai`, a call with a wrong type or a value outside an enum (`unit: kelvin`, `task_id:
+"1"`) now comes back with `"error"` set, and MOUTH returns that to the model instead of running the tool. The
+reason for a non-object is now "arguments are not an object" on both plugins (anthropic said "input"). The
+validator tests moved to `test_llm_parse.py`; `test_hosted_openai.py` has the new cases, which fail on the old
+plugin.
+
+The local plugins (gemma, fake) still don't check arguments: `execute_tool` catches a TypeError. Checking every
+plugin's calls in one place belongs in R-08's tool registry.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

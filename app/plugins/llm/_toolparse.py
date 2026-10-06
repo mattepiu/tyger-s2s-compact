@@ -7,7 +7,8 @@ speakable part off at a call's opening tag, parsing the two call formats in use,
     <tool_call>{"name": ..., "arguments": {...}}</tool_call>
 
 Each format's calls open with their own tag (TAGS), passed to the splitting / naming helpers. strip_think is the
-openai plugin's guard against a <think> block in the text (`strip_think: true`).
+openai plugin's guard against a <think> block in the text (`strip_think: true`). check_arguments / flag_invalid:
+the one check of a call's arguments against the offered tool's schema (the hosted plugins run it on every call).
 """
 from __future__ import annotations
 import json, logging, re, uuid
@@ -166,3 +167,40 @@ def names_tool(tools) -> bool:
 def new_call_id() -> str:
     """A tool-call ID unique for the session (the neutral format; Claude needs unique, matching IDs)."""
     return f"call_{uuid.uuid4().hex[:8]}"
+
+
+_JSON_TYPES = {"string": str, "object": dict, "array": list, "boolean": bool, "integer": int, "number": (int, float)}
+
+
+def check_arguments(name, args, tools):
+    """None if `args` fits tool `name`'s schema in `tools` (an object, its required keys present, declared types and
+    enums respected), else the reason."""
+    if not isinstance(args, dict):
+        return "arguments are not an object"
+    for t in tools or []:
+        f = t["function"]
+        if f["name"] != name:
+            continue
+        params = f["parameters"]
+        missing = [k for k in params.get("required", []) if k not in args]
+        if missing:
+            return f"missing {', '.join(missing)}"
+        for k, v in args.items():
+            spec = params.get("properties", {}).get(k, {})
+            typ = _JSON_TYPES.get(spec.get("type"))
+            if typ and (not isinstance(v, typ) or (spec.get("type") in ("integer", "number") and isinstance(v, bool))):
+                return f"{k} is not a {spec['type']}"
+            if "enum" in spec and v not in spec["enum"]:
+                return f"{k} is not one of {spec['enum']}"
+        return None
+    return "unknown tool"
+
+
+def flag_invalid(call: dict, tools) -> dict:
+    """The neutral call, with "error" set if its arguments don't fit (MOUTH returns that as the tool's result and
+    never runs it); arguments that aren't an object become {}."""
+    bad = check_arguments(call["name"], call["arguments"], tools)
+    if bad:
+        call = {**call, "error": f"invalid arguments for '{call['name']}': {bad}",
+                "arguments": call["arguments"] if isinstance(call["arguments"], dict) else {}}
+    return call

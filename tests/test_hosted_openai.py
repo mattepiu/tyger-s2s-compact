@@ -5,7 +5,7 @@ import asyncio, json, os, sys, threading, time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.plugins.base import LLMError, PluginContext  # noqa: E402
-from app.plugins.llm.openai_compat import (ChatStreamParser, OpenAICompatLLM, check_arguments,  # noqa: E402
+from app.plugins.llm.openai_compat import (ChatStreamParser, OpenAICompatLLM,  # noqa: E402
                                            to_openai_messages)
 from app.prompts import default_prompts  # noqa: E402
 from app.tools import build_tools  # noqa: E402
@@ -80,7 +80,12 @@ def test_invalid_arguments_flagged_not_dropped():
     assert "missing location" in c["error"] and c["arguments"] == {"unit": "celsius"}
     evs = parse([chunk(tool=tc(0, "x", "web_search", '{"query": "bt')), chunk(finish="tool_calls")])
     assert "not an object" in evs[-1][1][0]["error"]
-    assert check_arguments("fly", {}, TOOLS) == "unknown tool"
+    # the schema check anthropic always had (R-07c): types and enums, not just required keys
+    evs = parse([chunk(tool=tc(0, "x", "get_weather", '{"location": "Oslo", "unit": "kelvin"}')),
+                 chunk(finish="tool_calls")])
+    assert "unit is not one of" in evs[-1][1][0]["error"]
+    evs = parse([chunk(tool=tc(0, "x", "web_search", '{"query": 5}')), chunk(finish="tool_calls")])
+    assert "query is not a string" in evs[-1][1][0]["error"]
 
 
 def test_truncated_tool_call_not_run():

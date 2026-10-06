@@ -5,7 +5,7 @@ import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.plugins.llm._toolparse import split_speakable, parse_calls, strip_think, new_call_id, tool_start, \
-    NAME_WAIT, TAG, GEMMA_TAG, gemma_normalize, names_tool  # noqa: E402
+    NAME_WAIT, TAG, GEMMA_TAG, gemma_normalize, names_tool, check_arguments, flag_invalid  # noqa: E402
 from app.plugins.llm.vllm_base import to_template_messages  # noqa: E402
 
 
@@ -173,6 +173,23 @@ def test_tool_start_gives_up_on_a_garbled_call():
 def test_call_ids_unique():
     ids = {new_call_id() for _ in range(1000)}
     assert len(ids) == 1000 and all(i.startswith("call_") and len(i) == 13 for i in ids)
+
+
+def test_check_arguments():
+    """The one schema check of a call's arguments (both hosted plugins)."""
+    from app.prompts import default_prompts
+    from app.tools import build_tools
+    tools = build_tools(default_prompts())
+    assert check_arguments("get_weather", {"location": "Oslo"}, tools) is None
+    assert "missing location" in check_arguments("get_weather", {"unit": "celsius"}, tools)
+    assert "not one of" in check_arguments("get_weather", {"location": "Oslo", "unit": "kelvin"}, tools)
+    assert "not a string" in check_arguments("web_search", {"query": 5}, tools)
+    assert check_arguments("web_search", "btc", tools) == "arguments are not an object"
+    assert check_arguments("fly", {}, tools) == "unknown tool"
+    ok = {"id": "call_1", "name": "web_search", "arguments": {"query": "btc"}}
+    assert flag_invalid(ok, tools) == ok
+    bad = flag_invalid({"id": "call_2", "name": "web_search", "arguments": ["btc"]}, tools)
+    assert bad["arguments"] == {} and bad["error"].startswith("invalid arguments for 'web_search'")
 
 
 def test_template_messages_are_the_old_nested_shape():

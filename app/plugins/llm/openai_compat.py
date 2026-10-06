@@ -12,7 +12,8 @@ bodies are never logged; keep OPENAI_LOG unset (the SDK's debug logging prints b
     <tool_call> text in content are parsed too (logged once: the model lacks native tool calls); their tool_start
     waits for the written name, as in the local plugins.
   * Tool-call IDs are this plugin's own (call_<8 hex>), unique for the session whatever the server sends. A call
-    whose arguments don't parse or lack a required key is returned with "error" set: MOUTH never runs it.
+    whose arguments don't parse or don't fit the tool's schema (_toolparse.check_arguments: required keys, types,
+    enums) is returned with "error" set: MOUTH never runs it.
   * Reasoning models (gpt-5*, o-series): max_completion_tokens instead of max_tokens (guessed from the model name,
     `token_param` overrides); `reasoning_effort` / `verbosity` go in `extra_body`. Their thinking is never read.
   * Key, timeouts, concurrency, errors -> LLMError, shutdown: HostedLLM (hosted.py), as for anthropic.
@@ -23,7 +24,8 @@ import json, logging
 from dataclasses import dataclass
 
 from app.plugins.llm.hosted import HostedLLM
-from app.plugins.llm._toolparse import split_speakable, strip_think, parse_calls, new_call_id, tool_start
+from app.plugins.llm._toolparse import (flag_invalid, new_call_id, parse_calls, split_speakable, strip_think,
+                                         tool_start)
 
 log = logging.getLogger("llm")
 
@@ -45,18 +47,6 @@ def to_openai_messages(messages):
         else:
             out.append({"role": m["role"], "content": m.get("content")})
     return out
-
-
-def check_arguments(name, args, tools):
-    """None if `args` suits tool `name`'s schema (a dict with its required keys), else the reason."""
-    if not isinstance(args, dict):
-        return "arguments are not an object"
-    for t in tools or []:
-        f = t["function"]
-        if f["name"] == name:
-            missing = [k for k in f["parameters"].get("required", []) if k not in args]
-            return f"missing {', '.join(missing)}" if missing else None
-    return "unknown tool"
 
 
 def _get(obj, key):
@@ -131,14 +121,8 @@ class ChatStreamParser:
                 ChatStreamParser._warned = True
                 log.warning("model wrote tool calls as text, not structured tool_calls; parsing the text")
             calls = parse_calls(self._visible(final=True), "hermes_json")
-        events = []
-        for c in calls:
-            c = {"id": new_call_id(), "name": c["name"], "arguments": c["arguments"]}
-            bad = check_arguments(c["name"], c["arguments"], self.tools)
-            if bad:
-                c["error"] = f"invalid arguments for '{c['name']}': {bad}"
-                c["arguments"] = c["arguments"] if isinstance(c["arguments"], dict) else {}
-            events.append(c)
+        events = [flag_invalid({"id": new_call_id(), "name": c["name"], "arguments": c["arguments"]}, self.tools)
+                  for c in calls]
         return out + [("tool_calls", events, None)]
 
 

@@ -5,7 +5,7 @@ import asyncio, json, os, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.plugins.base import LLMError, PluginContext  # noqa: E402
-from app.plugins.llm.anthropic import (AnthropicLLM, ClaudeStreamParser, FALLBACK_BETA, check_input,  # noqa: E402
+from app.plugins.llm.anthropic import (AnthropicLLM, ClaudeStreamParser, FALLBACK_BETA,  # noqa: E402
                                        to_claude, to_claude_tools)
 from app.prompts import default_prompts  # noqa: E402
 from app.tools import build_tools  # noqa: E402
@@ -51,15 +51,6 @@ def test_tools_converted_in_order_with_eager_streaming():
     t = to_claude_tools(TOOLS)
     assert [x["name"] for x in t] == [x["function"]["name"] for x in TOOLS]
     assert all(x["eager_input_streaming"] is True and x["input_schema"]["type"] == "object" for x in t)
-
-
-def test_check_input():
-    assert check_input("get_weather", {"location": "Oslo"}, TOOLS) is None
-    assert "missing location" in check_input("get_weather", {"unit": "celsius"}, TOOLS)
-    assert "not one of" in check_input("get_weather", {"location": "Oslo", "unit": "kelvin"}, TOOLS)
-    assert "not a string" in check_input("web_search", {"query": 5}, TOOLS)
-    assert check_input("web_search", "btc", TOOLS) == "input is not an object"
-    assert check_input("fly", {}, TOOLS) == "unknown tool"
 
 
 # ---- the stream parser --------------------------------------------------------------------------------------
