@@ -7,13 +7,14 @@
 
 Checks: events in a valid order; stop_flag ends a stream within one item; tool-call IDs unique; text never carries
 tool-call or thinking markup; TTS audio is 1-D float32 at out_sr; EARS sessions open / close / reset and return
-well-formed events. Prompts are synthetic. Run: [TYGER_CONTRACT_LOCAL=1] .venv/bin/python tests/test_plugin_contract.py
+well-formed events. Prompts are synthetic. Run: [TYGER_CONTRACT_LOCAL=1] .venv/bin/python tests/plugins/test_contract.py
 """
 import asyncio, gc, os, sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 from app.config import load_config  # noqa: E402
 from app.plugins import plugin_class  # noqa: E402
 from app.plugins.base import PluginContext  # noqa: E402

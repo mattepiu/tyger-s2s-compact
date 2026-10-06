@@ -340,6 +340,25 @@ Left for the user: the R-05 sliders on the page.
   - `validate/ears_batched.py`: events match in all 5 sessions, max diff 0.0059, as before;
   - `bench/summary.py` finds `bench_runs/` at the repo root.
 
+**R-10d: `tests/` by part** (the user picked folders that keep pytest's `test_` prefix).
+- The layout:
+  - `tests/ears/`: `test_asr_jobs`, `test_floor`, `test_parts`, `test_rules`;
+  - `tests/mouth/`: `test_session`, `test_parts`, `test_tasks`, `test_chunker`;
+  - `tests/plugins/`: `test_contract` (was `test_plugin_contract`), `test_hosted_openai`, `test_hosted_anthropic`,
+    `test_llm_parse`, `test_plugins`;
+  - `test_config`, `test_prompts`, `test_tools` and `fakes.py` stay at the top.
+- Every test file now starts the same way, putting the repo and `tests/` on the path (`TESTS = ...`): there used
+  to be four variants. The tests run from any working directory.
+- Run them all with `for t in tests/test_*.py tests/*/test_*.py; do ...; done` (README, HANDOFF). If pytest is
+  ever used, the two `test_parts.py` need `--import-mode=importlib` (or `__init__.py` files): pytest's default
+  mode rejects duplicate basenames.
+- Checks:
+  - per-file test counts as before;
+  - local contract test 6/6;
+  - lint clean;
+  - stack: smoke PASS, `stack/load.py` turn p50 419 ms, `stack/load_ears.py` 885 ms at 1 conv;
+  - `scripts/stop.sh` leaves the GPU free.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

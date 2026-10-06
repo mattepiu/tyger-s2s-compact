@@ -3,8 +3,8 @@ context answers which call: a flagged call is never run, MOUTH's own tools answe
 they are unknown tools, as before R-08), everything else runs for real. Run: .venv/bin/python tests/test_tools.py"""
 import os, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TESTS = os.path.dirname(os.path.abspath(__file__))
+sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 from fakes import PROMPTS, stub_tools  # noqa: E402
 from app import tools  # noqa: E402
 from app.tools import registry  # noqa: E402

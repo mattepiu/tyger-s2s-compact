@@ -118,23 +118,29 @@ the voice picker. Browser DSP (echo cancellation, noise suppression, auto gain) 
 ### Tests
 
 ```bash
-.venv/bin/python tests/test_chunker.py          # text chunking (no GPU)
-.venv/bin/python tests/test_llm_parse.py        # tool-call splitting, both call formats, <think> guard (no GPU)
-.venv/bin/python tests/test_mouth_session.py    # MOUTH turns/barge/tools/backchannels on the fake plugins (no GPU)
-.venv/bin/python tests/test_config.py           # plugin config shape + every block's Options; old shape rejected (no GPU)
-.venv/bin/python tests/test_prompts.py          # prompts.yaml loader + checks (no GPU)
-.venv/bin/python tests/test_plugins.py          # plugin classes import light; off-rate TTS resampled (no GPU)
-.venv/bin/python tests/test_plugin_contract.py  # plugin contract on the fakes; TYGER_CONTRACT_LOCAL=1 adds the real
-                                                #   local plugins (GPU free: stop run.sh first)
-.venv/bin/python tests/test_mouth_parts.py      # MOUTH's History and Speaker on their own (no GPU)
-.venv/bin/python tests/test_tasks.py            # background tasks + their announcement on a fake smart model (no GPU)
-.venv/bin/python tests/test_tools.py            # the tool registry: order, which context answers which call (no GPU)
-.venv/bin/python tests/test_ears_floor.py       # EARS floor requests: the Conversation state machine, fake EARS (no GPU)
-.venv/bin/python tests/test_ears_parts.py       # EARS's AgentPlayback and the web app (busy page, voices) (no GPU)
-.venv/bin/python tests/test_ears_asr_jobs.py    # the EARS ASR thread finishes endpoint / partial jobs, even on failure
-.venv/bin/python tests/test_ears_rules.py       # nemotron-tyger's turn rules: endpoint, backchannel, barge-in (no GPU)
-CONFIG=config.fake.yaml ./run.sh                 # the whole stack on the fake plugins: no GPU, no downloads
-scripts/stop.sh                                  # stop run.sh (and any stage worker it leaves behind)
+# tests/: no GPU, no network (each file runs on its own; all of them:)
+for t in tests/test_*.py tests/*/test_*.py; do .venv/bin/python $t; done
+.venv/bin/python tests/test_config.py                     # config shape + every block's Options; old shape rejected
+.venv/bin/python tests/test_prompts.py                    # prompts.yaml loader + checks
+.venv/bin/python tests/test_tools.py                      # the tool registry: order, which context answers which call
+.venv/bin/python tests/mouth/test_session.py              # MOUTH turns / barge / tools / backchannels, fake plugins
+.venv/bin/python tests/mouth/test_parts.py                # MOUTH's History and Speaker on their own
+.venv/bin/python tests/mouth/test_tasks.py                # background tasks + their announcement, fake smart model
+.venv/bin/python tests/mouth/test_chunker.py              # text chunking
+.venv/bin/python tests/ears/test_floor.py                 # EARS floor requests: the Conversation state machine
+.venv/bin/python tests/ears/test_parts.py                 # EARS's AgentPlayback and the web app (busy page, voices)
+.venv/bin/python tests/ears/test_asr_jobs.py              # the ASR thread finishes its jobs, even on failure
+.venv/bin/python tests/ears/test_rules.py                 # nemotron-tyger's turn rules: endpoint, backchannel, barge-in
+.venv/bin/python tests/plugins/test_plugins.py            # base classes, light imports, off-rate TTS, thresholds
+.venv/bin/python tests/plugins/test_contract.py           # the plugin contract on the fakes; with
+                                                          #   TYGER_CONTRACT_LOCAL=1 the real local plugins too
+                                                          #   (GPU free: stop run.sh first)
+.venv/bin/python tests/plugins/test_llm_parse.py          # tool-call splitting, both call formats, <think> guard
+.venv/bin/python tests/plugins/test_hosted_openai.py      # the openai plugin on stubbed streams
+.venv/bin/python tests/plugins/test_hosted_anthropic.py   # the anthropic plugin on stubbed streams
+
+CONFIG=config.fake.yaml ./run.sh                          # the whole stack on the fake plugins: no GPU, no downloads
+scripts/stop.sh                                           # stop run.sh (and any stage worker it leaves behind)
 
 # scripts/stack/: the running stack (start run.sh first)
 .venv/bin/python scripts/stack/smoke.py                   # MOUTH tool turns + barge-in + EARS speech → audio
@@ -245,7 +251,7 @@ What the base gives you, and what is yours to write:
   stops start-up with the key named (`unknown option prefx (did you mean prefix?)`). A field without a default
   must be set. `plugin:` and `name:` belong to the config shape.
 - **Constructor.** If you write one, call `super().__init__(conf, ctx)` first, and import heavy dependencies (vllm,
-  an SDK) inside it, not at module level: the class must stay light to import (`tests/test_plugins.py` checks
+  an SDK) inside it, not at module level: the class must stay light to import (`tests/plugins/test_plugins.py` checks
   this).
 - **Defaults.** `warmup()` and `shutdown()` do nothing unless you override them. `remote` is False; set it True if
   transcripts leave the box (the startup log then names the role).
@@ -263,7 +269,7 @@ What the base gives you, and what is yours to write:
   them. Write `open_session(thresholds)`, `close`, `feed` (one hop in, events out: FRAME / ENDPOINT / BARGE /
   BACKCHANNEL) and `full` / `active`. `nemotron_tyger/` is the full example: a package that keeps its
   encoder, heads and rules together.
-- **Tests.** Add a run to `tests/test_plugin_contract.py` (`llm_suite`, `tts_suite` or `ears_suite`). The fakes in
+- **Tests.** Add a run to `tests/plugins/test_contract.py` (`llm_suite`, `tts_suite` or `ears_suite`). The fakes in
   `app/plugins/*/fake.py` are the smallest complete plugins of each kind.
 
 Per-model prompt changes go in `prompts/<instance name>.yaml`, never in code.

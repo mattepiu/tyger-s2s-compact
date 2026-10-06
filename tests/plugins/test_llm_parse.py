@@ -1,9 +1,10 @@
 """Text-level LLM helpers (no GPU): speakable splitting at a call tag, the two tool-call formats (Gemma 4, Hermes
 JSON), the <think> guard, and the neutral -> chat-template history conversion.
-Run: .venv/bin/python tests/test_llm_parse.py"""
+Run: .venv/bin/python tests/plugins/test_llm_parse.py"""
 import os, sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 from app.plugins.llm._toolparse import split_speakable, parse_calls, strip_think, new_call_id, tool_start, \
     NAME_WAIT, TAG, GEMMA_TAG, gemma_normalize, names_tool, check_arguments, flag_invalid  # noqa: E402
 from app.plugins.llm.vllm_base import to_template_messages  # noqa: E402

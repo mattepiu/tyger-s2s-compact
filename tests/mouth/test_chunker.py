@@ -1,11 +1,12 @@
-"""Chunker tests. Run: .venv/bin/python -m pytest tests/  (or plain: .venv/bin/python tests/test_chunker.py)
+"""Chunker tests. Run: .venv/bin/python -m pytest tests/  (or plain: .venv/bin/python tests/mouth/test_chunker.py)
 
 Replays text through the chunker the way Mouth._tts_tail does while the LLM streams (a few chars at a time),
 then flushes the tail like Mouth._flush_tail, so streaming-only bugs (cutting "0." before "50" arrives) show up.
 """
 import os, sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 from app.mouth.chunker import next_chunk, next_sentence, say_clean  # noqa: E402
 
 

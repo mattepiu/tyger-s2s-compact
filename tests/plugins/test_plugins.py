@@ -1,11 +1,11 @@
 """Plugin plumbing (no GPU): plugin classes import without their heavy dependencies, and a TTS that isn't at the
-24 kHz wire rate is resampled. Run: .venv/bin/python tests/test_plugins.py"""
+24 kHz wire rate is resampled. Run: .venv/bin/python tests/plugins/test_plugins.py"""
 import os, subprocess, sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 from fakes import FakeTTS  # noqa: E402
 from app.plugins import REGISTRY  # noqa: E402
 from app.plugins.tts import AtWireRate, WIRE_SR  # noqa: E402

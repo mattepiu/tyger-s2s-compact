@@ -86,16 +86,17 @@ tests/                     # (R-10d) fakes.py; test_config / test_prompts / test
 
 ## Steps
 
-Each step is one commit and keeps behaviour identical unless it says otherwise. "GPU-free" = every
-`tests/test_*.py`. "Stack" = `scripts/stack/smoke.py` + `scripts/stack/load.py --sessions 4` (3 runs) + `scripts/stack/load_ears.py` at 1 and
-4 conversations, compared against NOTES.md → "Box (2026-10-06)" on the config without `llm.smart`.
+Each step is one commit and keeps behaviour identical unless it says otherwise. "GPU-free" = every test in
+`tests/`. "Stack" = `scripts/stack/smoke.py` + `scripts/stack/load.py --sessions 4` (3 runs) +
+`scripts/stack/load_ears.py` at 1 and 4 conversations, compared against NOTES.md → "Box (2026-10-06)" on the
+config without `llm.smart`.
 
 | step | what | parity check |
 |---|---|---|
 | R-01 | **Fix the review's correctness bugs** (the only behaviour change before R-08): ASR finals and partials in separate `try` blocks; a lost MOUTH connection ends the conversation (`error` to the page, socket closed) instead of a silent dead hop loop; `ears.nemotron` is read; an empty `say_clean` backchannel is not sent to the TTS. (Not a bug: the anthropic plugin ignoring `max_new` is deliberate, since Claude's thinking can't be turned off and `max_tokens` must cover it.) | GPU-free + new tests; stack |
 | R-02 | **`app/messages.py`**: move the message builders out of `mouth.py` (no logic change); `tasks.py` imports them at the top (the cycle is gone). | GPU-free |
 | R-03 | **`app/mouth/` package**: split `mouth.py` into service / session / turn / speech / `__main__`. Per-turn state becomes a `Speaker` object made per turn. `python -m app.mouth` unchanged. | GPU-free; stack |
-| R-04 | **`app/ears/` package**: `Conversation` class replacing the `_conversation` closure; the 2nd-ear resampler becomes the stateful `StreamingAudioResampler` (a model-input change: measured with `scripts/validate/barge.py` and `scripts/stack/load_ears.py`). | GPU-free (`test_ears_floor.py`); stack |
+| R-04 | **`app/ears/` package**: `Conversation` class replacing the `_conversation` closure; the 2nd-ear resampler becomes the stateful `StreamingAudioResampler` (a model-input change: measured with `scripts/validate/barge.py` and `scripts/stack/load_ears.py`). | GPU-free (`tests/ears/test_floor.py`); stack |
 | R-05 | **Plugin-owned thresholds**: an EARS plugin declares its tunable thresholds (name, type, range, step, label); the server sends that spec in `ready`, and the page builds its sliders from it. The fake plugin drops its dummy thresholds. | GPU-free; the page by hand with `?debug=1` (the user) |
 | R-06 | **`nemotron_tyger` package**: the encoder and the heads become one plugin package; constants in one module; one checkpoint load (weights check included); research-only code (`LiveEars`, `EndpointEars`, `EncoderStream`, `StateEndpointModel`) moves to `scripts/reference/`. | `scripts/validate/ears_batched.py`, `scripts/validate/rnnt.py`, `scripts/validate/barge.py`, `scripts/validate/long_turn.py`; contract test; stack |
 | R-07 | **Plugin bases and options**: ABC bases with the shared defaults; each plugin declares an `Options` dataclass (typed, defaulted, unknown keys rejected at config load with the key named); `HostedLLM` base for `openai` / `anthropic`; one tool-argument validator. | GPU-free (config tests for unknown keys); contract test |

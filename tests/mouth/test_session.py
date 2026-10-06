@@ -1,9 +1,10 @@
 """MOUTH Session flow with fake engines (no GPU): barge-in history (I-01), barge during tools (I-03), backchannel
-cancelled by a turn (I-07). Run: .venv/bin/python tests/test_mouth_session.py
+cancelled by a turn (I-07). Run: .venv/bin/python tests/mouth/test_session.py
 """
 import os, sys, json, socket, threading, time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 from fakes import FakeLLM, FakeTTS, FakeMouth, PROMPTS, make_session, run_turn, stub_tools, slow_tools  # noqa: E402
 from app import mouth as M  # noqa: E402
 from app.mouth.messages import reply_prefix  # noqa: E402

@@ -2,7 +2,8 @@
 that replace it, roles resolve. Run: .venv/bin/python tests/test_config.py"""
 import copy, os, sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TESTS = os.path.dirname(os.path.abspath(__file__))
+sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 from app.config import ROOT, load_config, validate_config, llm_roles, ConfigError  # noqa: E402
 from app.plugins import REGISTRY, plugin_class  # noqa: E402
 

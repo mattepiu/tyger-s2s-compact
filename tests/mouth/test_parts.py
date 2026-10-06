@@ -1,9 +1,10 @@
 """MOUTH's small parts on their own (no GPU, no threads): History (turns trimmed whole, barged turns marked) and
 Speaker (what was said when, what the user heard at a barge, playback timing). Run:
-.venv/bin/python tests/test_mouth_parts.py"""
+.venv/bin/python tests/mouth/test_parts.py"""
 import os, sys, time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 import numpy as np  # noqa: E402
 from fakes import FakeTTS, PROMPTS  # noqa: E402
 from app.mouth.history import History  # noqa: E402

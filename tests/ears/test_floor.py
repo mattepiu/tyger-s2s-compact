@@ -2,11 +2,12 @@
 on the `fake` EARS plugin (energy endpointer), a fake browser WebSocket and a fake MOUTH over real TCP. Covers:
 F -> silence -> G, a user turn winning over a waiting request, silence counted only while both sides are quiet, a
 backchannel holding the grant, barge-in during an announcement, a lost MOUTH. Audio is synthetic (zeros / a tone).
-Run: .venv/bin/python tests/test_ears_floor.py
+Run: .venv/bin/python tests/ears/test_floor.py
 """
 import os, sys, json, asyncio, copy
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 import numpy as np  # noqa: E402
 from aiohttp import WSMsgType  # noqa: E402
 from app.ears.conversation import Conversation  # noqa: E402
@@ -17,7 +18,7 @@ from app.wire import async_send_msg, async_recv_msg  # noqa: E402
 
 SIL_MS = 480                                   # announce_after_silence_ms here: 6 frames
 HOP = 5120
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(TESTS)
 EARS = None                                    # the fake EARS plugin of the running test
 
 

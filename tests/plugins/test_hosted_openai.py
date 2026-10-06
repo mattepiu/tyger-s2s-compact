@@ -1,9 +1,10 @@
 """The `openai` LLM plugin without a network (no GPU, no key, no cost): message conversion, the stream parser on
 synthetic chunk sequences, and the plugin driven by a stub client (stop closes the stream, errors become
-LLMError, the concurrency cap). Run: .venv/bin/python tests/test_hosted_openai.py"""
+LLMError, the concurrency cap). Run: .venv/bin/python tests/plugins/test_hosted_openai.py"""
 import asyncio, json, os, sys, threading, time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 from app.plugins.base import LLMError, PluginContext  # noqa: E402
 from app.plugins.llm.openai_compat import (ChatStreamParser, OpenAICompatLLM,  # noqa: E402
                                            to_openai_messages)

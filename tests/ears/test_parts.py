@@ -1,9 +1,10 @@
 """EARS's small parts on their own, GPU-free: AgentPlayback (the browser's playback estimate and the 2nd ear's hops)
 and EarsApp (the page, the busy page, the voice list) over a real aiohttp test server with the fake EARS plugin.
-Run: .venv/bin/python tests/test_ears_parts.py"""
+Run: .venv/bin/python tests/ears/test_parts.py"""
 import os, sys, asyncio, copy, time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 import numpy as np  # noqa: E402
 from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 from app.config import load_config  # noqa: E402
@@ -12,7 +13,7 @@ from app.ears.web import EarsApp  # noqa: E402
 from app.plugins.base import PluginContext  # noqa: E402
 from app.plugins.ears.fake import EnergyEars  # noqa: E402
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(TESTS)
 
 
 def test_playback_estimate():

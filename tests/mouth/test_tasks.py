@@ -1,10 +1,11 @@
 """Background tasks (PLUGINS.md step 12), GPU-free: the reply model starts / cancels tasks, each runs as an agentic
 loop on a fake `smart` model, the status note reaches the next reply request, caps / timeout / cancel / session
-close, and nothing about a task's content is logged. Run: .venv/bin/python tests/test_tasks.py
+close, and nothing about a task's content is logged. Run: .venv/bin/python tests/mouth/test_tasks.py
 """
 import os, sys, json, logging, socket, threading, time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 from fakes import FakeLLM, FakeTTS, FakeMouth, PROMPTS, make_session, run_turn, stub_tools  # noqa: E402
 from app import mouth as M  # noqa: E402
 from app.mouth.tasks import TaskSlots  # noqa: E402
@@ -317,7 +318,7 @@ def test_tasks_never_imports_the_session():
     """The task runner gets the message builders from app.mouth.messages and tools from app.tools. It never imports
     the Session, the turns or the Mouth service, which import it: no import cycle (it used to import the old
     mouth.py inside its functions)."""
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root = os.path.dirname(TESTS)
     with open(os.path.join(root, "app", "mouth", "tasks.py")) as f:
         got = tasks_imports(f.read())
     banned = {"app.mouth", "app.mouth.session", "app.mouth.service", "app.mouth.turns", "app.mouth.reply",

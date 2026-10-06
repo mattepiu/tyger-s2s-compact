@@ -1,9 +1,10 @@
 """The `anthropic` LLM plugin without a network (no GPU, no key, no cost): message / tool conversion, input checks,
 the stream parser on synthetic events (tool round, mid-stream fallback, refusal, truncation), the request it would
-send, and the plugin on a stub client. Run: .venv/bin/python tests/test_hosted_anthropic.py"""
+send, and the plugin on a stub client. Run: .venv/bin/python tests/plugins/test_hosted_anthropic.py"""
 import asyncio, json, os, sys, time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 from app.plugins.base import LLMError, PluginContext  # noqa: E402
 from app.plugins.llm.anthropic import (AnthropicLLM, ClaudeStreamParser, FALLBACK_BETA,  # noqa: E402
                                        to_claude, to_claude_tools)
@@ -218,7 +219,6 @@ def test_plugin_errors_become_llmerror():
 def test_mouth_tool_turn_through_the_plugin():
     """A whole MOUTH tool turn on the plugin (stub client): the lead-in, the tool, phase B with the round's own
     thinking blocks sent back unchanged, then a next turn whose history carries no thinking at all."""
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from fakes import FakeTTS, PROMPTS, make_session, run_turn, stub_tools
     p = make_plugin(); sent = []
     round_content = [THINK, {"type": "tool_use", "id": "toolu_w", "name": "get_weather", "input": {"location": "Oslo"}}]

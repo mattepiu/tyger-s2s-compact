@@ -64,7 +64,7 @@ contains the first question. A unit test can drive `stream_turn` with a fake LLM
 **Status: fixed (2026-10-03).** Reproduced on the box: after a barged "octopuses" turn, "which animal were you
 telling me about?" got "I wasn't telling you about any animal". Now the transcript + heard part of the reply (EARS
 sends `played_s` with `B`) are remembered, marked with " —"; the follow-up answers "Octopuses". Tests:
-`tests/test_mouth_session.py`, `scripts/stack/smoke.py` (MOUTH barge).
+`tests/mouth/test_session.py`, `scripts/stack/smoke.py` (MOUTH barge).
 
 ### I-02 — Start of a barge-in utterance is cut from the transcript (high, likely)
 **Where:**
@@ -237,7 +237,7 @@ never.
 
 **Fix (2026-10-03):** history is a list of turns (trimmed whole, so a tool message never loses its call), and a
 tool turn keeps the assistant `tool_calls` message plus a compact result (no raw search hits, ≤ 600 chars). Now
-6/6 and 24/24. Tests: `tests/test_mouth_session.py`.
+6/6 and 24/24. Tests: `tests/mouth/test_session.py`.
 
 ### I-14 — `run.sh` giving up on a slow first start orphans the LLM engine (low, confirmed on the box)
 **Where:** `run.sh` `wait_tcp` (900 tries, ~15 min) and `cleanup` (kills the PIDs it started).
@@ -253,7 +253,7 @@ group by hand. The next start would have failed vLLM's free-memory check.
 log shows progress), since `wait_tcp` already fails fast when MOUTH exits.
 
 ### I-15 — Local contract test aborts at exit after the EARS engine ran in the process (low, confirmed on the box)
-**Where:** `TYGER_CONTRACT_LOCAL=1 tests/test_plugin_contract.py`, at interpreter exit.
+**Where:** `TYGER_CONTRACT_LOCAL=1 tests/plugins/test_contract.py`, at interpreter exit.
 
 **What happens (box of 2026-10-06):** every check passes (`ok` for all six suites), then the process prints
 `terminate called without an active exception` and exits 134 (SIGABRT), so a script that reads the exit code sees
@@ -469,6 +469,6 @@ tool-turn first audio p50 640 → 408 ms, worst dead air 2584 → 1265 ms; with 
     session flow. Several issues above (I-01, I-02, I-03, I-07) live there.
   - A fake-engine harness would let them run without a GPU.
   - There is no CI.
-  - **Status (2026-10-03):** `tests/fakes.py` + `tests/test_mouth_session.py` cover the MOUTH session (barge
+  - **Status (2026-10-03):** `tests/fakes.py` + `tests/mouth/test_session.py` cover the MOUTH session (barge
     history, tool barge, fillers, backchannel cancel, tool history), no GPU. The EARS server state machine is
     still only covered by GPU scripts (`scripts/validate/barge.py`, `scripts/stack/smoke.py`). No CI.

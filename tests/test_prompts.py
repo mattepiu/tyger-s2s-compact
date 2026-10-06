@@ -4,7 +4,8 @@ deleted when the prompts were first edited on purpose (step 11: reply language, 
 """
 import copy, os, sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TESTS = os.path.dirname(os.path.abspath(__file__))
+sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 from app.prompts import Prompts, PromptError, default_prompts, deep_merge, load_prompts  # noqa: E402
 
 P = default_prompts()
