@@ -323,6 +323,23 @@ Left for the user: the R-05 sliders on the page.
   - stack (no-smart config): smoke PASS, `load_test.py` turn p50 409 ms, `load_test_ears.py` 871 ms at 1 conv;
   - `validate_heads.py` OK with the same diffs as before (0.0071 / 0.0065).
 
+**R-10c: `scripts/` by kind.**
+- The folder replaces the name prefix (the user's call):
+  - `stack/`: `smoke.py`, `load.py`, `load_ears.py` (were smoke_test, load_test, load_test_ears);
+  - `validate/`: `heads.py`, `rnnt.py`, `ears_batched.py`, `barge.py`, `long_turn.py`, `second_ear.py` and their
+    `reference.py` (were validate_* and ears_reference);
+  - `bench/`: `tts_voice.py`, `llm_weights.py`, `stack.sh`, `summary.py`, and `escalation.py` with its
+    `escalation_set.yaml` (were bench_* and eval_escalation).
+- `stop.sh` stays at `scripts/`.
+- The scripts find the repo with `parents[2]`; `ears_batched.py` imports `scripts.validate.reference`.
+- Commands are updated in README (the list is grouped now), HANDOFF, ISSUES, REFACTOR, the docstrings and agent
+  memory. NOTES (this file) and PLUGINS keep the old paths as history.
+- Checks:
+  - every argparse script starts (`--help`);
+  - `validate/heads.py` OK, `validate/rnnt.py` 40/40 twice;
+  - `validate/ears_batched.py`: events match in all 5 sessions, max diff 0.0059, as before;
+  - `bench/summary.py` finds `bench_runs/` at the repo root.
+
 ## Box (2026-10-06) — another new RTX 5090; the losing LLM plugins removed
 NVIDIA RTX 5090 (32 607 MiB), driver 595.71.05 / CUDA 13.2; AMD EPYC 9B14, 384 threads, 503 GB RAM. Idle P8; the
 clocks under load were not sampled this round, but latency matches the healthy boxes. Fresh-box install (README

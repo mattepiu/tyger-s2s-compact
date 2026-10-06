@@ -1,8 +1,8 @@
-"""The comparison numbers from scripts/bench_stack.sh's logs (bench_runs/<tag>/), numbers only.
-Run: .venv/bin/python scripts/bench_summary.py TAG [TAG...]"""
+"""The comparison numbers from scripts/bench/stack.sh's logs (bench_runs/<tag>/), numbers only.
+Run: .venv/bin/python scripts/bench/summary.py TAG [TAG...]"""
 import re, sys, glob, os, statistics
 
-S = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bench_runs")
+S = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "bench_runs")
 
 
 def grab(path, pat, n=1):
@@ -23,7 +23,7 @@ for tag in sys.argv[1:]:
             peak.append(grab(f, r"GPU memory peak\s+(\d+)")[0])
             dead.append(grab(f, r"dead air / turn p50 (\d+) / max (\d+)", 2))
             err.append(grab(f, r"errors=(\d+)")[0])
-        print(f"  load_test {kind}: turn first-audio p50 {' / '.join(str(x[0]) for x in fa)} "
+        print(f"  load {kind}: turn first-audio p50 {' / '.join(str(x[0]) for x in fa)} "
               f"(median {statistics.median(x[0] for x in fa):.0f}), max {max(x[1] for x in fa)}; "
               f"bc p50 {' / '.join(map(str, bc))}; dead air max {max(x[1] for x in dead)}; GPU peak {max(peak)} MiB; "
               f"errors {sum(err)}")

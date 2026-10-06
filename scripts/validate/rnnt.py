@@ -2,11 +2,11 @@
 on 40 single windows (1-20 s) and 10 padded mixed-length batches, plus timings. Public LibriSpeech test audio, in
 memory. Needs the GPU free (stop run.sh) and `datasets` (pip install datasets).
 
-  .venv/bin/python scripts/validate_rnnt.py              # expect "40/40 identical" twice
+  .venv/bin/python scripts/validate/rnnt.py              # expect "40/40 identical" twice
 """
 import sys, time, numpy as np, torch, logging
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1])); logging.basicConfig(level=logging.ERROR); torch.set_num_threads(4)
+sys.path.insert(0, str(Path(__file__).resolve().parents[2])); logging.basicConfig(level=logging.ERROR); torch.set_num_threads(4)
 from datasets import load_dataset
 from transformers import AutoModel, AutoProcessor
 from app.plugins.ears.nemotron_tyger.rnnt import greedy_rnnt, GraphedRNNT

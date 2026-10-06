@@ -130,29 +130,35 @@ the voice picker. Browser DSP (echo cancellation, noise suppression, auto gain) 
 .venv/bin/python tests/test_tasks.py            # background tasks + their announcement on a fake smart model (no GPU)
 .venv/bin/python tests/test_tools.py            # the tool registry: order, which context answers which call (no GPU)
 .venv/bin/python tests/test_ears_floor.py       # EARS floor requests: the Conversation state machine, fake EARS (no GPU)
-.venv/bin/python tests/test_ears_parts.py      # EARS's AgentPlayback and the web app (busy page, voices) (no GPU)
-.venv/bin/python tests/test_ears_asr_jobs.py    # EARS's ASR thread resolves endpoint / partial jobs, also on failure (no GPU)
+.venv/bin/python tests/test_ears_parts.py       # EARS's AgentPlayback and the web app (busy page, voices) (no GPU)
+.venv/bin/python tests/test_ears_asr_jobs.py    # the EARS ASR thread finishes endpoint / partial jobs, even on failure
 .venv/bin/python tests/test_ears_rules.py       # nemotron-tyger's turn rules: endpoint, backchannel, barge-in (no GPU)
 CONFIG=config.fake.yaml ./run.sh                 # the whole stack on the fake plugins: no GPU, no downloads
-.venv/bin/python scripts/smoke_test.py          # needs run.sh up: MOUTH tool turns + barge-in + EARS speech → audio
-.venv/bin/python scripts/load_test.py --sessions 4       # needs run.sh up: concurrent MOUTH turns + backchannels
-                                                         #   --tools: tool turns (+ --fresh: empty history each)
-.venv/bin/python scripts/load_test_ears.py --sessions 4  # needs run.sh up: N real-time WebSocket conversations;
-                                                         #   hop lag, end of speech -> endpoint -> first audio
-                                                         #   (fixed utterance and reply: runs compare)
-.venv/bin/python scripts/validate_ears_batched.py        # GPU free: batched EARS == single-session reference
-.venv/bin/python scripts/validate_rnnt.py                # GPU free: graphed RNN-T == nemotron generate()
-.venv/bin/python scripts/validate_heads.py               # GPU free: the heads release loads and is consistent (real speech features)
-.venv/bin/python scripts/validate_barge.py               # GPU free: a barge-in keeps the start of the utterance
-.venv/bin/python scripts/validate_second_ear.py          # GPU free: the 2nd ear's 24->16 kHz step, old vs new, on the heads
-.venv/bin/python scripts/validate_long_turn.py           # GPU free: > 20 s turns transcribed whole
-.venv/bin/python scripts/bench_tts_voice.py              # GPU free: cloned-voice TTS first-audio per request
-.venv/bin/python scripts/eval_escalation.py --samples 8  # GPU free: routing (local / tool / expert / background) and
-                                                         #   reply language on 140 synthetic cases; local model only
-.venv/bin/python scripts/bench_llm_weights.py <hf repo>  # GPU free: an LLM's GPU memory per module + single-stream tok/s
-scripts/bench_stack.sh TAG CONFIG STACK_LOG              # needs run.sh up (CONFIG): smoke + load tests, logs in bench_runs/TAG
-.venv/bin/python scripts/bench_summary.py TAG [TAG...]   # the numbers from bench_runs/, side by side
-scripts/stop.sh                                          # stop run.sh (and any stage worker it leaves behind)
+scripts/stop.sh                                  # stop run.sh (and any stage worker it leaves behind)
+
+# scripts/stack/: the running stack (start run.sh first)
+.venv/bin/python scripts/stack/smoke.py                   # MOUTH tool turns + barge-in + EARS speech → audio
+.venv/bin/python scripts/stack/load.py --sessions 4       # concurrent MOUTH turns + backchannels
+                                                          #   --tools: tool turns (+ --fresh: empty history each)
+.venv/bin/python scripts/stack/load_ears.py --sessions 4  # N real-time WebSocket conversations; hop lag,
+                                                          #   end of speech -> endpoint -> first audio
+                                                          #   (fixed utterance and reply: runs compare)
+
+# scripts/validate/: GPU parity checks (GPU free: stop run.sh first)
+.venv/bin/python scripts/validate/ears_batched.py         # batched EARS == single-session reference
+.venv/bin/python scripts/validate/rnnt.py                 # graphed RNN-T == nemotron generate()
+.venv/bin/python scripts/validate/heads.py                # the heads release loads and is consistent
+.venv/bin/python scripts/validate/barge.py                # a barge-in keeps the start of the utterance
+.venv/bin/python scripts/validate/second_ear.py           # the 2nd ear's 24->16 kHz step, old vs new
+.venv/bin/python scripts/validate/long_turn.py            # > 20 s turns transcribed whole
+
+# scripts/bench/: measurements (GPU free, except stack.sh, which needs run.sh up)
+.venv/bin/python scripts/bench/tts_voice.py               # cloned-voice TTS first-audio per request
+.venv/bin/python scripts/bench/escalation.py --samples 8  # routing (local / tool / expert / background) and
+                                                          #   reply language on 140 synthetic cases
+.venv/bin/python scripts/bench/llm_weights.py <hf repo>   # an LLM's GPU memory per module + tok/s
+scripts/bench/stack.sh TAG CONFIG STACK_LOG               # smoke + load tests, logs in bench_runs/TAG
+.venv/bin/python scripts/bench/summary.py TAG [TAG...]    # the numbers from bench_runs/, side by side
 ```
 
 The EARS half of the smoke test speaks one fixed sentence with the MOUTH's TTS (held in memory) as the "user"
@@ -304,7 +310,7 @@ mouth:
           announce_after_silence_ms: 1200}
 ```
 
-Routing is measured by `scripts/eval_escalation.py` (local model only, no cost): with Gemma 4 E4B, 98% of 140
+Routing is measured by `scripts/bench/escalation.py` (local model only, no cost): with Gemma 4 E4B, 98% of 140
 synthetic EN / RU / ES cases × 8 samples go the right way, 0.4% of hard questions are answered locally, no easy
 one is escalated (`NOTES.md` → steps 11 and 14). Cost on ordinary turns: the longer prompt adds ~30 ms (expert) and
 ~90 ms (expert + tasks) to first audio. Without `llm.smart` neither tool is offered and the prompt is the plain one.
@@ -340,7 +346,7 @@ for that data.
   conversations keep EARS real time (hop lag p50 ~90 / p90 ~200 ms); see `NOTES.md`.
 - `set_reminder` / `send_message` are **placeholders** — the model says they aren't connected yet.
 - The user waits **~1.0 s** from the end of their speech to the first reply audio at 1 conversation and
-  **~1.25 s** at 4 (`load_test_ears.py`), and ~700–850 ms of that is endpoint detection. Live threshold tuning
+  **~1.25 s** at 4 (`scripts/stack/load_ears.py`), and ~700–850 ms of that is endpoint detection. Live threshold tuning
   should cut it (targets in `NOTES.md` → Response gap). MOUTH's part is small: first audio ~265 ms after the endpoint for a plain or a tool
   turn (smoke test, cloned voice), ~410 ms p50 with 4 busy sessions.
 - Endpoint thresholds are not yet live-tuned (see Configure).

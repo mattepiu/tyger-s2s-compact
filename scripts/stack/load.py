@@ -5,11 +5,11 @@ reply audio A), the longest dead air inside a turn (a gap in the client's playba
 the previous audio would have finished playing) and peak GPU memory. Test prompts only; no audio is written.
 --tools uses weather questions, so every turn is a tool turn (lead-in filler, Tavily, phase B).
 
-  .venv/bin/python scripts/load_test.py --sessions 4 [--turns 3] [--tools]
+  .venv/bin/python scripts/stack/load.py --sessions 4 [--turns 3] [--tools]
 """
 import sys, json, time, socket, argparse, threading, subprocess, statistics
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.wire import send_msg, recv_msg
 from app.config import load_config
 

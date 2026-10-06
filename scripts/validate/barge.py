@@ -6,12 +6,12 @@ listen (app/ears/conversation.py), and the turn runs to its ENDPOINT. The endpoi
 reference text: word recall overall and of its first 3 words. Prints numbers only, never words.
 Needs the GPU free (stop run.sh).
 
-  .venv/bin/python scripts/validate_barge.py                  # current server protocol
-  .venv/bin/python scripts/validate_barge.py --double-reset   # the old server: reset again when MOUTH's D arrives
+  .venv/bin/python scripts/validate/barge.py                  # current server protocol
+  .venv/bin/python scripts/validate/barge.py --double-reset   # the old server: reset again when MOUTH's D arrives
 """
 import sys, re, argparse, numpy as np, torch, logging
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1])); torch.set_num_threads(4)
+sys.path.insert(0, str(Path(__file__).resolve().parents[2])); torch.set_num_threads(4)
 logging.basicConfig(level=logging.WARNING)
 from datasets import load_dataset
 from app.config import load_config

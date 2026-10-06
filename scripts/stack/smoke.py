@@ -9,11 +9,11 @@
               sentence has no inner pause for the endpoint to fire at, whatever model wrote the earlier replies.
   (default) : run both. Requires `run.sh` (EARS + MOUTH) to be up for --ears; only MOUTH for --mouth.
 
-Run: HF_HOME=/workspace/.hf_home .venv/bin/python scripts/smoke_test.py [--mouth|--ears] [--wav x.wav]
+Run: HF_HOME=/workspace/.hf_home .venv/bin/python scripts/stack/smoke.py [--mouth|--ears] [--wav x.wav]
 """
 import sys, json, time, socket, argparse, wave
 from pathlib import Path
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 import numpy as np
 from app.wire import send_msg, recv_msg

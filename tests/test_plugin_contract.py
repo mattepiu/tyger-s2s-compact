@@ -72,7 +72,7 @@ def check_llm_events(evs):
 def llm_suite(llm, plain=True, tool_turn=True):
     msgs = [{"role": "system", "content": P.text("system", "voice_tools")},
             {"role": "user", "content": "Can you tell me a short joke?"}]     # nothing to look up: routing is
-    # eval_escalation.py's job (a trivia question went to web_search 8 / 8 on gemma-4-e4b-nvfp4, NOTES.md)
+    # scripts/bench/escalation.py's job (a trivia question went to web_search 8 / 8 on gemma-4-e4b-nvfp4, NOTES.md)
     text = check_llm_events(list(llm.stream(msgs, tools=TOOLS, max_new=64)))
     assert text.strip() or not plain, "no text for a plain question"
     n = 0                                                    # stop after the first item: at most one more

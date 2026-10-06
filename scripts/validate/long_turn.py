@@ -6,11 +6,11 @@ joined with short gaps into one ~N s turn, then silence until the endpoint (the 
 reference text and the endpoint hop's latency (the final ASR) next to an ordinary hop's. Numbers only.
 Needs the GPU free (stop run.sh).
 
-  .venv/bin/python scripts/validate_long_turn.py [--seconds 30 45 12]
+  .venv/bin/python scripts/validate/long_turn.py [--seconds 30 45 12]
 """
 import sys, re, time, asyncio, argparse, numpy as np, torch, logging
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1])); torch.set_num_threads(4)
+sys.path.insert(0, str(Path(__file__).resolve().parents[2])); torch.set_num_threads(4)
 logging.basicConfig(level=logging.WARNING)
 from datasets import load_dataset
 from app.config import load_config

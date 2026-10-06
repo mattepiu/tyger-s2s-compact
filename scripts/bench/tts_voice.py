@@ -2,11 +2,11 @@
 building the prompt and generate() -> first audio output, on short sentences (one TTS chunk each). Needs the GPU
 free (stop run.sh) and a clip in voices/. Prints timings only.
 
-  .venv/bin/python scripts/bench_tts_voice.py [--voice en] [--n 12]
+  .venv/bin/python scripts/bench/tts_voice.py [--voice en] [--n 12]
 """
 import sys, time, uuid, argparse, logging, statistics
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 logging.basicConfig(level=logging.WARNING)
 from app.config import load_config
 from app.runtime.event_loop import EngineLoop

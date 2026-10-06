@@ -1,20 +1,20 @@
 """Validate the batched multi-session EARS engine (app/plugins/ears/nemotron_tyger) against a plain single-session run
-of the same TYGER-S2S-endpointer release (scripts/ears_reference.py: CPU features, the full encoder, eager heads, HF
+of the same TYGER-S2S-endpointer release (scripts/validate/reference.py: CPU features, the full encoder, eager heads, HF
 generate; the same turn rules): per-frame head outputs and events, alone and 4 sessions with staggered starts, plus
 tick timing.
 Mic input = public LibriSpeech test clips (hf-internal-testing/librispeech_asr_dummy), in memory; prints numbers
 and event kinds only. Needs the GPU free (stop run.sh) and `datasets` (pip install datasets).
 
-  .venv/bin/python scripts/validate_ears_batched.py      # expect "events match: True" for every session
+  .venv/bin/python scripts/validate/ears_batched.py      # expect "events match: True" for every session
 """
 import sys, time, argparse, numpy as np, torch, logging
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1])); torch.set_num_threads(4)
+sys.path.insert(0, str(Path(__file__).resolve().parents[2])); torch.set_num_threads(4)
 logging.basicConfig(level=logging.WARNING)
 from datasets import load_dataset
 from app.config import load_config
 from app.plugins.ears.nemotron_tyger.release import heads_release
-from scripts.ears_reference import ReferenceEars
+from scripts.validate.reference import ReferenceEars
 from app.plugins.ears.nemotron_tyger.constants import HOP_N, SEG_S
 from app.plugins.ears.nemotron_tyger.engine import EarsEngine
 from app.plugins.ears.nemotron_tyger.session import EarsSession

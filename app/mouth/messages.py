@@ -1,7 +1,7 @@
 """The neutral message format MOUTH speaks to every LLM plugin (app/plugins/base.py has the format), and every
 builder of it: the reply request's fixed prefix and few-shot turns, tool rounds, the smart model's request, the
 backchannel and filler requests. Pure functions over a Prompts (app/prompts/): no I/O, no model, no state, so
-MOUTH, background tasks, tests and scripts/eval_escalation.py build exactly the same requests.
+MOUTH, background tasks, tests and scripts/bench/escalation.py build exactly the same requests.
 """
 from __future__ import annotations
 import json
@@ -48,7 +48,7 @@ def turns_messages(p, turns, id_prefix="shot"):
     """Structured turns -> neutral messages: {user, reply} is answered locally; {user, expert, answer} is an
     ask_expert call (with `expert` as its question, ID call_<id_prefix><n>), its tool result, then the answer;
     {user, call: {name, arguments}, result, answer} is any other tool call with its (compacted) result. Used for
-    the escalation few-shot turns and for the history of eval_escalation.py cases."""
+    the escalation few-shot turns and for the history of scripts/bench/escalation.py cases."""
     msgs = []
     for i, t in enumerate(turns, 1):
         msgs.append({"role": "user", "content": t["user"]})

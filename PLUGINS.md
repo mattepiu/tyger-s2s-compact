@@ -21,6 +21,12 @@
 > - `app/ears_core/` is the plugin package `ears/nemotron_tyger/`, which loads the heads release
 >   `nineninesix/TYGER-S2S-endpointer`.
 >
+> - `app/` is grouped by who uses each module (R-10): MOUTH's `chunker` / `messages` / `tasks` are in `app/mouth/`,
+>   the prompts loader is `app/prompts/`, and the engine loop and the resampler are in `app/runtime/`. `scripts/` is
+>   split into `stack/`, `validate/` and `bench/` (e.g. `scripts/validate_heads.py` is now
+>   `scripts/validate/heads.py`), and `tests/` into `ears/`, `mouth/` and `plugins/`. Paths in the text below are
+>   as they were.
+>
 > README → "Adding a plugin" shows the current pattern with a worked example.
 
 **Goal:** swap the LLM, TTS and turn-taking (EARS) models through config, without touching the orchestration.

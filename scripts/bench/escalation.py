@@ -1,5 +1,5 @@
 """Escalation routing eval (PLUGINS.md steps 11, 14): does the `reply` model answer locally, call a lookup tool,
-call ask_expert, or start a background task, on the labelled synthetic set in scripts/escalation_set.yaml?
+call ask_expert, or start a background task, on the labelled synthetic set in scripts/bench/escalation_set.yaml?
 
 Routes: local (no call), tool (any lookup / action, cancel_task included), expert (ask_expert), background
 (start_task). A case may list `also` routes that count as right too (planning: answered now by the expert, or
@@ -16,13 +16,13 @@ expert, or call markup leaking into speech. For tool-route samples it also runs 
 result (phase B), with fixed English stub results (the real reminder / message stubs; a canned answer for
 lookups), and scores that answer's speech the same way: English tool output must not pull the reply language.
 
-  .venv/bin/python scripts/eval_escalation.py [--plugin gemma-4-e4b-nvfp4 --opt quantization=null] [--samples 3]
+  .venv/bin/python scripts/bench/escalation.py [--plugin gemma-4-e4b-nvfp4 --opt quantization=null] [--samples 3]
       [--split heldout] [--prompts prompts.yaml,/path/candidate.yaml]   several prompt files: one model load
 """
 import sys, re, json, argparse, logging, collections
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 logging.basicConfig(level=logging.WARNING)
 import yaml
 from app.config import load_config, repo_path

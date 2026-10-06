@@ -8,13 +8,13 @@ the reference) with AgentPlayback's stateful polyphase resampler, at several chu
     reply: barges and the median time from the user's start to BARGE.
 Agent and user clips are public LibriSpeech (held in memory); prints numbers only. Needs the GPU free (stop run.sh).
 
-  .venv/bin/python scripts/validate_second_ear.py [--trials 12] [--chunk-ms 40,80,160]
+  .venv/bin/python scripts/validate/second_ear.py [--trials 12] [--chunk-ms 40,80,160]
 """
 import sys, argparse, logging
 from pathlib import Path
 
 import numpy as np, torch
-sys.path.insert(0, str(Path(__file__).resolve().parents[1])); torch.set_num_threads(4)
+sys.path.insert(0, str(Path(__file__).resolve().parents[2])); torch.set_num_threads(4)
 logging.basicConfig(level=logging.WARNING)
 from datasets import load_dataset  # noqa: E402
 from app.plugins.ears.nemotron_tyger.release import heads_release  # noqa: E402

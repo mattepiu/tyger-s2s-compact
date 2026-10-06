@@ -25,7 +25,7 @@ Architecture:
 EARS<->MOUTH wire: T/C/B/V in; X/A/D out, plus K = backchannel audio (kept apart from reply audio A, since the
 two can now be generated at the same time). Background tasks (step 13): F out = a finished task asks for the floor;
 G in = EARS granted it, and the announcement runs as a turn (A audio, then D with "proactive": task id). S in = speak this text, TTS only (no LLM, no history): EARS never
-sends it; test tools use it for a fixed utterance (load_test_ears.py). Audio is 24 kHz float32. No audio or
+sends it; test tools use it for a fixed utterance (scripts/stack/load_ears.py). Audio is 24 kHz float32. No audio or
 transcript is written to disk or logs; only timings and event types.
 
 Run: HF_HOME=/workspace/.hf_home .venv/bin/python -m app.mouth

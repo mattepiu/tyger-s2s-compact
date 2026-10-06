@@ -1,5 +1,5 @@
 """ReferenceEars: one conversation through the TYGER-S2S-endpointer release, computed the plain way, for
-scripts/validate_ears_batched.py to check the live engine against. Same release, same turn rules (rules.py); every
+scripts/validate/ears_batched.py to check the live engine against. Same release, same turn rules (rules.py); every
 step the engine speeds up is done here without the speed-up:
   * features: the HF processor on the CPU (the engine computes them on the GPU);
   * encoder: the full nemotron forward pass with output_hidden_states, layer 15 taken from it (the engine stops at

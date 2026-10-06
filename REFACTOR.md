@@ -6,7 +6,7 @@ step by step on branch `plugins`, one commit per step (`R-NN: …` in the subjec
 the next.
 
 **Progress:** all steps done (2026-10-06): R-00 plan, R-01, R-02, R-03, R-04a, R-04b, R-05, R-06a, R-06b, R-06c,
-R-07a, R-07b, R-07c, R-08, R-09. Per-step results and measurements: NOTES.md → "Readability refactor". The layout
+R-07a, R-07b, R-07c, R-08, R-09, and the extra R-10a/b/c/d. Per-step results and measurements: NOTES.md → "Readability refactor". The layout
 below is the code as built.
 
 **Goal:** a reader can find where a thing happens from its name, and a new plugin is one package plus one registry
@@ -29,7 +29,12 @@ protocol between EARS, MOUTH and the browser (message kinds stay as they are).
 
 ```
 app/
-  messages.py              # the neutral message format + every builder (reply prefix, shots, rounds, smart, bc)
+  config.py                # loading and checking config.yaml (every plugin block against its Options)
+  wire.py                  # the EARS <-> MOUTH protocol (framing, message kinds)
+  runtime/                 # what both processes' code runs on (R-10b)
+    event_loop.py          #   EngineLoop: one asyncio loop for MOUTH's in-process engines and API clients
+    audio.py               #   StreamingAudioResampler: chunk-invariant resampling (the 24 kHz wire, the 2nd ear)
+  prompts/                 # prompts.yaml loader + checks (__init__.py) and the language guess (lang.py) (R-10a)
   mouth/                   # the MOUTH process (python -m app.mouth)
     __main__.py            #   Server: accepts EARS connections, one Session thread each; signal handling
     service.py             #   Mouth: the loaded plugins, prompts, tool lists (shared by sessions); shutdown()
@@ -39,6 +44,9 @@ app/
     reply.py               #   ReplyTurn: plain reply, tool rounds (ToolRound), escalation
     speech.py              #   speech_audio (the one path to the TTS) + Speaker (one reply's audio book-keeping)
     threads.py             #   Prefetch, spawn: streams run on helper threads
+    messages.py            #   the neutral message format + every builder (reply prefix, shots, rounds, smart, bc)
+    chunker.py             #   the streaming sentence / clause chunker for the TTS
+    tasks.py               #   background tasks on the smart model (TaskRunner, TaskSlots)
   ears/                    # the EARS process (python -m app.ears; run.sh starts it)
     __main__.py            #   the process: load the plugin, run the web app
     web.py                 #   EarsApp: the page, the voice list, one Conversation per WebSocket (no module globals)
@@ -66,13 +74,20 @@ app/
       engine.py            #   per-tick batching of encoder + heads, the ASR jobs
       service.py           #   the GPU thread that gathers hops across conversations
       plugin.py            #   NemotronTyger: the EarsPlugin surface + its threshold / slider spec
-scripts/ears_reference.py  # one conversation through the heads release the plain way: what the validators check the engine against
+      release.py           #   heads_release: fetch the heads release from the Hub
+scripts/                   # (R-10c)
+  stack/                   # smoke.py, load.py, load_ears.py: the running stack
+  validate/                # GPU parity checks (heads, rnnt, ears_batched, barge, long_turn, second_ear) and
+                           #   reference.py: one conversation through the heads release, the plain way
+  bench/                   # measurements (tts_voice, llm_weights, stack.sh + summary) and escalation.py + its set
+  stop.sh                  # stop run.sh
+tests/                     # (R-10d) fakes.py; test_config / test_prompts / test_tools; ears/, mouth/, plugins/
 ```
 
 ## Steps
 
 Each step is one commit and keeps behaviour identical unless it says otherwise. "GPU-free" = every
-`tests/test_*.py`. "Stack" = `smoke_test.py` + `load_test.py --sessions 4` (3 runs) + `load_test_ears.py` at 1 and
+`tests/test_*.py`. "Stack" = `scripts/stack/smoke.py` + `scripts/stack/load.py --sessions 4` (3 runs) + `scripts/stack/load_ears.py` at 1 and
 4 conversations, compared against NOTES.md → "Box (2026-10-06)" on the config without `llm.smart`.
 
 | step | what | parity check |
@@ -80,14 +95,15 @@ Each step is one commit and keeps behaviour identical unless it says otherwise. 
 | R-01 | **Fix the review's correctness bugs** (the only behaviour change before R-08): ASR finals and partials in separate `try` blocks; a lost MOUTH connection ends the conversation (`error` to the page, socket closed) instead of a silent dead hop loop; `ears.nemotron` is read; an empty `say_clean` backchannel is not sent to the TTS. (Not a bug: the anthropic plugin ignoring `max_new` is deliberate, since Claude's thinking can't be turned off and `max_tokens` must cover it.) | GPU-free + new tests; stack |
 | R-02 | **`app/messages.py`**: move the message builders out of `mouth.py` (no logic change); `tasks.py` imports them at the top (the cycle is gone). | GPU-free |
 | R-03 | **`app/mouth/` package**: split `mouth.py` into service / session / turn / speech / `__main__`. Per-turn state becomes a `Speaker` object made per turn. `python -m app.mouth` unchanged. | GPU-free; stack |
-| R-04 | **`app/ears/` package**: `Conversation` class replacing the `_conversation` closure; the 2nd-ear resampler becomes the stateful `StreamingAudioResampler` (a model-input change: measured with `validate_barge.py` and `load_test_ears.py`). | GPU-free (`test_ears_floor.py`); stack |
+| R-04 | **`app/ears/` package**: `Conversation` class replacing the `_conversation` closure; the 2nd-ear resampler becomes the stateful `StreamingAudioResampler` (a model-input change: measured with `scripts/validate/barge.py` and `scripts/stack/load_ears.py`). | GPU-free (`test_ears_floor.py`); stack |
 | R-05 | **Plugin-owned thresholds**: an EARS plugin declares its tunable thresholds (name, type, range, step, label); the server sends that spec in `ready`, and the page builds its sliders from it. The fake plugin drops its dummy thresholds. | GPU-free; the page by hand with `?debug=1` (the user) |
-| R-06 | **`nemotron_tyger` package**: the encoder and the heads become one plugin package; constants in one module; one checkpoint load (weights check included); research-only code (`LiveEars`, `EndpointEars`, `EncoderStream`, `StateEndpointModel`) moves to `scripts/reference/`. | `validate_ears_batched.py`, `validate_rnnt.py`, `validate_barge.py`, `validate_long_turn.py`; contract test; stack |
+| R-06 | **`nemotron_tyger` package**: the encoder and the heads become one plugin package; constants in one module; one checkpoint load (weights check included); research-only code (`LiveEars`, `EndpointEars`, `EncoderStream`, `StateEndpointModel`) moves to `scripts/reference/`. | `scripts/validate/ears_batched.py`, `scripts/validate/rnnt.py`, `scripts/validate/barge.py`, `scripts/validate/long_turn.py`; contract test; stack |
 | R-07 | **Plugin bases and options**: ABC bases with the shared defaults; each plugin declares an `Options` dataclass (typed, defaulted, unknown keys rejected at config load with the key named); `HostedLLM` base for `openai` / `anthropic`; one tool-argument validator. | GPU-free (config tests for unknown keys); contract test |
 | R-08 | **Tool registry**: `app/tools/` with one `Tool` per name; Tavily, time, stubs and the MOUTH-handled tools register handlers, so `Session` stops switching on tool names. | GPU-free; smoke |
 | R-09 | **Docs**: README "Adding a plugin" rewritten for the new pattern (a worked example), PLUGINS.md dated note, this file marked done. | — |
 | R-10 | **Extra (user, 2026-10-06): `app/` grouped by who uses each module.** R-10a: `chunker`, `messages`, `tasks` into `app/mouth/`; `prompts` + `lang` become `app/prompts/`. R-10b: `engines` + `resample` into `app/runtime/` (`event_loop.py`, `audio.py`); `weights` into the nemotron-tyger package (`release.py`). `config.py` and `wire.py` stay at the top. Pure moves (`git mv`), no aliases for the old paths. | GPU-free; lint; smoke |
-| R-10c | **`scripts/` by kind**: `validate/`, `bench/`, `load/`. | each script still starts; README / HANDOFF commands updated |
+| R-10c | **`scripts/` by kind**: `stack/` (smoke + load tests on the running stack), `validate/` (GPU parity checks + their reference), `bench/` (measurements + the escalation eval); the folder replaces the name prefix (`validate/heads.py`, `bench/summary.py`, `stack/load_ears.py`); `stop.sh` stays. | each script starts; validators rerun; README / HANDOFF / ISSUES commands updated |
+| R-10d | **`tests/` by part**: `ears/`, `mouth/`, `plugins/` with the part prefix dropped and pytest's `test_` kept; config / prompts / tools tests stay at the top. | GPU-free suite; README / HANDOFF commands updated |
 
 Order: R-01 first so the refactor commits are pure moves. R-02 → R-03 (MOUTH) and R-04 → R-06 (EARS) are
 independent; R-07 / R-08 touch both sides and come after them.

@@ -14,12 +14,12 @@ for a reply the LLM can't vary (counting to ten), so every turn gets the same re
 reply texts by hash (never printed) and warns if they differ. The reply AUDIO still varies a little with load:
 VoxCPM2 isn't batch-invariant, so the same text renders 8.8-9.8 s depending on what it is batched with.
 
-  .venv/bin/python scripts/load_test_ears.py --sessions 4 [--turns 4] [--full-speech]
+  .venv/bin/python scripts/stack/load_ears.py --sessions 4 [--turns 4] [--full-speech]
 """
 import sys, json, time, socket, asyncio, hashlib, argparse, statistics
 from pathlib import Path
 import numpy as np
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.wire import send_msg, recv_msg
 from app.config import load_config
 

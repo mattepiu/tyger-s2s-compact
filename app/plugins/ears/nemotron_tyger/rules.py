@@ -1,6 +1,6 @@
 """The turn rules: what one conversation's audio and the heads' per-frame outputs mean for the turn. Plain bookkeeping
 on an EarsSession (no GPU, no threads), shared by the engine and by the plain single-session reference that checks it
-(scripts/ears_reference.py). Where the heads' context must start over, the functions say so and the caller resets
+(scripts/validate/reference.py). Where the heads' context must start over, the functions say so and the caller resets
 it (the engine its KV ring slot, the reference its cache).
 
   * listening: ENDPOINT when p_end >= ep_thr for ep_deb frames (or fallback_frames of silence) once the user has

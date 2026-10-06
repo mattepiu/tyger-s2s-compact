@@ -1,4 +1,4 @@
-# Escalation routing test set (PLUGINS.md step 11), read by scripts/eval_escalation.py. Synthetic prompts only,
+# Escalation routing test set (PLUGINS.md step 11), read by scripts/bench/escalation.py. Synthetic prompts only,
 # never user data. Each case is one user turn with the route the `reply` model should take:
 #   local  - chit-chat, simple facts, opinions, short how-tos: answered by the local model
 #   tool   - weather, time, prices, news, reminders, messages: a lookup / action tool (not ask_expert)

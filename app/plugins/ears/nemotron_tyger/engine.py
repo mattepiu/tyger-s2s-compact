@@ -5,8 +5,8 @@ equal-length windows batched), then the tyger heads step frame by frame for all 
 slot per conversation, CUDA graphs), and each frame's outputs become events by the turn rules (rules.py). Transcription
 runs on the ASR thread (Job queue): an ENDPOINT's hop resolves when its transcript is ready; long turns are
 transcribed in segments as they grow (I-05); the rolling partial for backchannels lands asynchronously.
-scripts/validate_ears_batched.py checks the engine against a plain single-session run of the same release
-(scripts/ears_reference.py: CPU features, the full encoder, eager heads, HF generate).
+scripts/validate/ears_batched.py checks the engine against a plain single-session run of the same release
+(scripts/validate/reference.py: CPU features, the full encoder, eager heads, HF generate).
 Privacy: audio and transcripts stay in memory; logs carry counts and timings only.
 """
 from __future__ import annotations

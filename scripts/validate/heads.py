@@ -9,13 +9,13 @@ The last two are bf16 matmuls in a different order: they agree within a toleranc
 rules read). Random features are no use here: far outside what the heads saw, they push the state logits to |40|+
 and amplify bf16 noise (in fp32 the same comparisons agree to ~2e-4). Needs the GPU free (stop run.sh).
 
-  .venv/bin/python scripts/validate_heads.py
+  .venv/bin/python scripts/validate/heads.py
 """
 import sys, logging
 from pathlib import Path
 
 import torch
-sys.path.insert(0, str(Path(__file__).resolve().parents[1])); logging.basicConfig(level=logging.WARNING)
+sys.path.insert(0, str(Path(__file__).resolve().parents[2])); logging.basicConfig(level=logging.WARNING)
 from app.plugins.ears.nemotron_tyger.release import heads_release  # noqa: E402
 from app.config import load_config  # noqa: E402
 from app.plugins.ears.nemotron_tyger.heads import TygerHeads  # noqa: E402

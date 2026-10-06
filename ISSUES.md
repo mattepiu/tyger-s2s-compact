@@ -23,7 +23,7 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | I-10 | EARS | low | likely | `play_until` is a server-side guess at client playback |
 | I-11 | security | low (demo) / high (public) | confirmed in code | No auth, no message-size or buffer limits on :7860 |
 | I-12 | MOUTH | high | **fixed** | Tool calls never enter history, so later turns stop calling tools and invent answers |
-| I-13 | metrics | medium | **fixed** | `load_test_ears.py` runs don't compare: LLM-made speech and replies, random hop phase |
+| I-13 | metrics | medium | **fixed** | `scripts/stack/load_ears.py` runs don't compare: LLM-made speech and replies, random hop phase |
 | I-14 | ops | low | confirmed on the box | `run.sh` giving up on a slow first start orphans the LLM engine on the GPU |
 | I-15 | tests | low | confirmed on the box | Local contract test aborts at exit after the EARS engine ran in the process |
 | L-01 | perf | lever | **partly done** | Encoder re-encodes the full 8 s window, twice, every hop, in fp32 |
@@ -64,7 +64,7 @@ contains the first question. A unit test can drive `stream_turn` with a fake LLM
 **Status: fixed (2026-10-03).** Reproduced on the box: after a barged "octopuses" turn, "which animal were you
 telling me about?" got "I wasn't telling you about any animal". Now the transcript + heard part of the reply (EARS
 sends `played_s` with `B`) are remembered, marked with " —"; the follow-up answers "Octopuses". Tests:
-`tests/test_mouth_session.py`, `smoke_test.py` (MOUTH barge).
+`tests/test_mouth_session.py`, `scripts/stack/smoke.py` (MOUTH barge).
 
 ### I-02 — Start of a barge-in utterance is cut from the transcript (high, likely)
 **Where:**
@@ -90,16 +90,16 @@ sends `played_s` with `B`) are remembered, marked with " —"; the follow-up ans
 - Don't reset again in `finish_turn` when the turn was barged and EARS already reset on the barge. Reset only
   the head/agent state, not `turn_u`.
 
-**Verify:** play a reply, inject user speech mid-reply (`load_test_ears.py`-style), and compare the endpoint
-transcript to the injected text. Check event parity with `scripts/validate_ears_batched.py` for the
+**Verify:** play a reply, inject user speech mid-reply (`scripts/stack/load_ears.py`-style), and compare the endpoint
+transcript to the injected text. Check event parity with `scripts/validate/ears_batched.py` for the
 non-barge path.
 
-**Status: fixed (2026-10-03).** Confirmed: `scripts/validate_barge.py` (12 LibriSpeech barge-ins, engine-level, the
+**Status: fixed (2026-10-03).** Confirmed: `scripts/validate/barge.py` (12 LibriSpeech barge-ins, engine-level, the
 server's reset protocol) recalled only 14% of the utterances' first 3 words (69% of all words) with the old code.
 Now the engine keeps the last 2 s of user audio while the agent speaks and seeds the barge's turn with it
 (crediting its voiced frames), and `finish_turn` no longer resets again on a barged `D`: first 3 words 83%, all
 words 94%. Barge fires a median 1.22 s after the user starts, so 2 s covers it. Dropping only the second reset gave
-22% / 72%. `validate_ears_batched.py` parity unchanged.
+22% / 72%. `scripts/validate/ears_batched.py` parity unchanged.
 
 ### I-03 — Barge during a tool call waits for the tool (medium, confirmed in code)
 **Where:**
@@ -141,10 +141,10 @@ event says so.
 
 **Status: fixed (2026-10-03), option A.** Past 15 s (`SEG_S`) a listening turn is cut at the quietest 80 ms frame
 of its last 4 s and that block is transcribed on the ASR thread right away; the endpoint transcribes only the tail
-and joins. `scripts/validate_long_turn.py` (public LibriSpeech, 27 / 33 / 51 s turns): word recall 0.85 / 0.67 /
+and joins. `scripts/validate/long_turn.py` (public LibriSpeech, 27 / 33 / 51 s turns): word recall 0.85 / 0.67 /
 0.42 → 1.00 / 0.97 / 0.94, first 10 words 0.60 / 0.40 / 0.20 → 1.00; the endpoint hop (final ASR) stays 127–156 ms
 at any length. The ENDPOINT event and the EARS log carry a segment count (no words).
-`validate_ears_batched.py` now matches events by kind + frame and transcripts for turns ≤ 15 s (its single-session
+`scripts/validate/ears_batched.py` now matches events by kind + frame and transcripts for turns ≤ 15 s (its single-session
 reference still keeps only a turn's last 20 s).
 
 ### I-07 — Backchannel keeps generating after the reply turn starts (low, confirmed in code)
@@ -163,11 +163,11 @@ reference still keeps only a turn's last 20 s).
   explicitly.
 - Use `stop = lambda: self.closed.is_set() or self.bc_stop.is_set()`.
 
-**Verify:** in `scripts/load_test.py`, fire the backchannel just before the turn. Check that the backchannel
+**Verify:** in `scripts/stack/load.py`, fire the backchannel just before the turn. Check that the backchannel
 request is aborted in the logs and that turn first-audio p50 doesn't regress.
 
 **Status: fixed (2026-10-03).** Done with a per-session turn counter instead of a `bc_stop` event (a `C` sent
-after `T`, as `load_test.py` does mid-reply, still runs). `load_test.py --bc-first` at 4 sessions: 12/12
+after `T`, as `scripts/stack/load.py` does mid-reply, still runs). `scripts/stack/load.py --bc-first` at 4 sessions: 12/12
 backchannels aborted; turn first-audio p50 769 → 559 ms.
 
 ### I-08 — 2nd-ear agent audio leads what the user hears (low, likely)
@@ -231,7 +231,7 @@ no auth on `/`, `/ws` or `/voices`.
 
 **What happened:** the history kept `user` + final `assistant` text and dropped the tool call and its result. The
 model then copied its own history: weather questions answered directly, without a tool, i.e. invented values.
-Measured with `load_test.py --tools` (6 weather questions per session, different cities): tool called on 2/6
+Measured with `scripts/stack/load.py --tools` (6 weather questions per session, different cities): tool called on 2/6
 turns at 1 session and 9/24 at 4 sessions. At 4 sessions turns 1–2 called it every time, turn 3 once, turns 4–6
 never.
 
@@ -278,7 +278,7 @@ after flushing, since the results are already printed.
 
 ### I-04 — "Onset" excludes endpoint detection (medium, confirmed in code)
 **Where:**
-- `scripts/load_test_ears.py:85-86` starts the clock at the `endpoint` event.
+- `scripts/stack/load_ears.py:85-86` starts the clock at the `endpoint` event.
 - `server.py` `response_onset` starts at `send_turn`.
 
 **What happens:**
@@ -297,11 +297,11 @@ after flushing, since the results are already printed.
 - Also report endpoint detection delay (end of speech to the `endpoint` event) on its own. It's the number
   live tuning (O-01) should drive down.
 
-**Status: fixed (2026-10-03).** `load_test_ears.py` reports both. Healthy box: end of speech → endpoint p50 779 ms
+**Status: fixed (2026-10-03).** `scripts/stack/load_ears.py` reports both. Healthy box: end of speech → endpoint p50 779 ms
 (1 conv) / 773 ms (4 conv), end of speech → first audio p50 1013 / 1022 ms, against endpoint → audio 229 / 257 ms.
 Table in NOTES.md → "Response gap (I-04)". The test also injects one sentence now (the whole reply hit inner pauses).
 
-### I-13 — `load_test_ears.py` runs don't compare (medium, found on the box)
+### I-13 — `scripts/stack/load_ears.py` runs don't compare (medium, found on the box)
 **What happened:**
 - The utterance was the LLM's reply to a "Say: …" prompt, and the agent's reply to it was free text, so both
   lengths changed run to run (hop lag p90 190–260 ms between identical runs).
@@ -314,7 +314,7 @@ LLM can't vary (count to ten), checked by comparing reply-text hashes; lead-in s
 fixed hop phase (cycling ¼ hop steps over turns).
 
 **Status: fixed (2026-10-04).** 4 conversations, 3 runs: end of speech → first audio p50 1250–1268 ms (was
-1208–1356 with the fixed speech alone); 1 conversation, 2 runs within 4 ms. NOTES.md → "`load_test_ears.py` made
+1208–1356 with the fixed speech alone); 1 conversation, 2 runs within 4 ms. NOTES.md → "`scripts/stack/load_ears.py` made
 deterministic (I-13)".
 
 ---
@@ -345,7 +345,7 @@ the clip as a tuple, as an `np.float32` array, and with no clip.
 **Status (2026-10-03): the hypothesis didn't hold; the resample did.** Building the prompt from the tuple took 2 ms.
 Per request, generate → first audio was 146 ms with the 44.1 kHz clip, 97 ms with the clip resampled once at load
 to the VAE's 16 kHz (the stage worker resampled it on the CPU every time), 78 ms with L-03 on top (zero-shot: 81).
-`scripts/bench_tts_voice.py`.
+`scripts/bench/tts_voice.py`.
 
 ### L-01 — Encoder re-encodes the full 8 s window, twice, every hop, in fp32
 **Where:**
@@ -359,7 +359,7 @@ to the VAE's 16 kHz (the stage worker resampled it on the CPU every time), 78 ms
    p90 hop lag above one hop.
 
 **Options, cheapest first:**
-1. **bf16 encoder.** Validate with `scripts/validate_ears_batched.py`: event parity and head-output diff. The
+1. **bf16 encoder.** Validate with `scripts/validate/ears_batched.py`: event parity and head-output diff. The
    heads were trained on fp32 features, so the threshold decisions must hold.
 2. **In speaking mode, precompute the agent channel's features.** The TTS audio is known ahead of
    playback.
@@ -434,7 +434,7 @@ Smoke plain-turn first audio 354 → 263 ms. No voice-derived files on disk.
    that stays the right behaviour: don't speak both.
 
 **Measure:**
-- Tool-turn first-audio before and after (`smoke_test.py` weather turn, and `load_test.py` at 4 sessions).
+- Tool-turn first-audio before and after (`scripts/stack/smoke.py` weather turn, and `scripts/stack/load.py` at 4 sessions).
 - The longest silence during a tool turn with a stubbed tool that sleeps 3 s.
 
 **Status: done (2026-10-03).** As proposed, plus: the filler prompts use few-shot turns instead of a quoted example
@@ -471,4 +471,4 @@ tool-turn first audio p50 640 → 408 ms, worst dead air 2584 → 1265 ms; with 
   - There is no CI.
   - **Status (2026-10-03):** `tests/fakes.py` + `tests/test_mouth_session.py` cover the MOUTH session (barge
     history, tool barge, fillers, backchannel cancel, tool history), no GPU. The EARS server state machine is
-    still only covered by GPU scripts (`validate_barge.py`, `smoke_test.py`). No CI.
+    still only covered by GPU scripts (`scripts/validate/barge.py`, `scripts/stack/smoke.py`). No CI.

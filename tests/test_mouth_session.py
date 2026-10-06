@@ -153,7 +153,7 @@ def test_history_trimmed_by_whole_turns():
 
 # ---- L-04: filler starts at the <tool_call> tag, covers slow tools, stops on barge ---------------------------
 def dead_air(evs, sr=24000):
-    """Longest gap in a client playback queue fed by the turn's audio events (as load_test.py measures it)."""
+    """Longest gap in a client playback queue fed by the turn's audio events (as scripts/stack/load.py measures it)."""
     end = None; gap = 0.0
     for kind, val, t in evs:
         if kind == "audio":
@@ -250,7 +250,7 @@ def test_turn_cancels_backchannel():
 
 
 def test_backchannel_alongside_turn_still_runs():
-    """A C that arrives after T (EARS never sends one, but load_test does) is not cancelled by that T."""
+    """A C that arrives after T (EARS never sends one, but scripts/stack/load.py does) is not cancelled by that T."""
     s, peer, m = live_session(FakeLLM(), FakeTTS(n=3))
     send_msg(peer, b"T", {"transcript": "tell me a story"})
     send_msg(peer, b"C", {"partial": "and then the dog ran off"})
@@ -470,7 +470,7 @@ def test_smart_failure_and_refusal_are_spoken():
         assert s.history.messages[0]["content"] == "a hard question"
 
 
-# ---- S: TTS only, for test tools (load_test_ears.py's fixed utterance) --------------------------------------
+# ---- S: TTS only, for test tools (scripts/stack/load_ears.py's fixed utterance) --------------------------------------
 def test_say_is_tts_only():
     s, peer, m = live_session(FakeLLM(), FakeTTS(n=3))
     send_msg(peer, b"S", {"text": "Could you count to ten for me?"})
