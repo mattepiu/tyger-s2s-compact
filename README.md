@@ -5,8 +5,8 @@ Real-time spoken conversation in the browser: your mic → live turn-taking → 
 it, and when to drop in a quick "mm-hm" — then answers in a voice cloned from a reference clip you provide.
 
 This repo is the **inference / serving** project. The turn-taking model itself (the endpoint head and the
-chain it sits on) is trained elsewhere; v1 only *runs* it. `NOTES.md` has the full design rationale and the
-benchmark history behind every choice here.
+chain it sits on) is trained elsewhere; v1 only *runs* it. `CHANGELOG.md` lists what changed and why, with the
+numbers; `NOTES.md` has the older, longer benchmark history.
 
 ```
 browser mic ──ws──▶ EARS    nemotron L15 → endpoint head: endpoint / barge / backchannel decisions
