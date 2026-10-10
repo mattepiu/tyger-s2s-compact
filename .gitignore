@@ -18,3 +18,7 @@ venv*/
 
 # Benchmark logs (scripts/bench_stack.sh)
 bench_runs/
+
+# The page check's npm install (tests/page)
+node_modules/
+tests/page/package-lock.json

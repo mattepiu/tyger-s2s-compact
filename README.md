@@ -170,6 +170,8 @@ for t in tests/test_*.py tests/*/test_*.py; do .venv/bin/python $t; done
 .venv/bin/python tests/plugins/test_llm_parse.py          # tool-call splitting, both call formats, <think> guard
 .venv/bin/python tests/plugins/test_hosted_openai.py      # the openai plugin on stubbed streams
 .venv/bin/python tests/plugins/test_hosted_anthropic.py   # the anthropic plugin on stubbed streams
+(cd tests/page && npm install && node page_check.mjs)     # the page in jsdom: mic worklet, playback tags, int16
+                                                          #   frames, the played report, Stop -> Start (needs node)
 
 CONFIG=config/fake.yaml ./run.sh                          # the whole stack on the fake plugins: no GPU, no downloads
 ./stop.sh                                                 # stop run.sh (and any stage worker it leaves behind)

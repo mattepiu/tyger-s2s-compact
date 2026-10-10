@@ -378,6 +378,7 @@ and the expert's answer was announced 7.0 s after the barge. Numbers in CHANGELO
   slow downlink not ending it early, the timeout safety net, backchannel audio untagged.
 
 `scripts/stack/load_ears.py --downlink-ms 500` counts turns that ended before the page had played them.
+`tests/page/page_check.mjs` checks the page itself in jsdom (needs node), including Stop → Start without a reload.
 
 **Live** (the user over the SSH tunnel, 2026-10-10):
 - The page's audio latency is 55–60 ms. The logged arrival-order offset was +316 to +783 ms (median 566 ms, 52

@@ -133,7 +133,8 @@ Box: a new RTX 5090 (driver 610.57.04, CUDA 13.3; 32 CPU threads, 60 GB RAM). Un
     - On the Conversation: 1000-sample blocks that straddle hops line up with a gap; a barge's `played_s` comes
       from the tags; the turn ends on the page's report; a 0.5 s slow downlink doesn't end it early; the timeout
       safety net; backchannel audio stays untagged.
-    - The page's logic in jsdom with fake audio APIs (a one-off check, not in the repo) passes 124 / 124 checks:
+    - The page's logic in jsdom with fake audio APIs (`tests/page/page_check.mjs`, needs node) passes 124 / 124
+      checks:
       - the worklet's 16 kHz output (exact at 48 kHz, < 3e-3 at 44.1 kHz) and its block times;
       - the tags around chunks, the lead-in and a backchannel, the int16 frames;
       - a report only once the queue drains (after the output latency), none after a stop;

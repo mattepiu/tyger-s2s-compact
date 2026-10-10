@@ -1,0 +1,8 @@
+{
+  "name": "tyger-page-check",
+  "private": true,
+  "description": "The page's own check: static/index.html in jsdom (page_check.mjs)",
+  "dependencies": {
+    "jsdom": "26.1.0"
+  }
+}
