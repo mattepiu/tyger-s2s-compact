@@ -125,7 +125,7 @@ class EarsEngine:
             i = j - HOP_FRAMES                                 # the hop's newest n frames: -n..-1
             out = self.head.step([(p[0].slot, p[2][i], p[3][i], float(p[4][i]), p[0].prev_state) for p in live])
             for sess, mode, hu, ha, act, n in live:
-                events, final, reset = rules.on_frame(sess, mode, out[sess.slot], float(act[i]))
+                events, final, reset = rules.on_frame(sess, mode, out[sess.slot], float(act[i]), left=-i - 1)
                 res[sess][0].extend(events)
                 if final is not None:
                     res[sess][1].append(final)

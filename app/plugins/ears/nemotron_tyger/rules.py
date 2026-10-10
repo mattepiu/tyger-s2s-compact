@@ -5,15 +5,17 @@ it (the engine its KV ring slot, the reference its cache).
 
   * listening: ENDPOINT when p_end >= ep_thr for ep_deb frames (or fallback_frames of silence) once the user has
     spoken MIN_SPEECH_MS; BACKCHANNEL when the bc head fires for bc_deb frames (then bc_refractory frames of quiet);
-  * speaking: BARGE when the yield head fires for barge_deb frames;
+  * speaking: BARGE when the yield head fires for barge_deb frames, with `onset_s`: how long the user had been
+    talking by then (their current stretch of speech, by frame energy), since the head takes a second or more to be
+    sure, and EARS tells MOUTH what had played when they started;
   * every frame: a FRAME event with the state the page shows and the heads' probabilities.
 """
 from __future__ import annotations
 
 import numpy as np
 
-from .constants import (BACKCHANNEL, BARGE_PRE_S, FRAME_S, HOLD, LISTEN, MIN_SPEECH_MS, SPEAK, SR, STATE_NAMES,
-                        VAD_DB, WARMUP_FRAMES, WINDOW_S)
+from .constants import (BACKCHANNEL, BARGE_PRE_S, FRAME_S, HOLD, LISTEN, MIN_SPEECH_MS, ONSET_GAP_FRAMES,
+                        ONSET_MAX_S, SPEAK, SR, STATE_NAMES, VAD_DB, WARMUP_FRAMES, WINDOW_S)
 
 
 def frame_energy(wav):
@@ -70,15 +72,29 @@ def switch_mode(sess, mode) -> bool:
     if mode == sess._mode:
         return False
     sess.warm = 0; sess.yield_run = 0; sess.bc_run = 0; sess.bc_cooldown = 0; sess.ep_run = 0
+    sess.talk_frames = sess.quiet_frames = 0
     sess.prev_state = SPEAK if mode == "speaking" else LISTEN
     sess._mode = mode
     return True
 
 
-def on_frame(sess, mode, outputs, act_db):
+def track_talk(sess, voiced):
+    """Speaking mode, every frame: how long the user has been talking. A stretch of speech starts at a voiced frame
+    and lasts through pauses of up to ONSET_GAP_FRAMES."""
+    if sess.talk_frames:
+        sess.talk_frames += 1
+        sess.quiet_frames = 0 if voiced else sess.quiet_frames + 1
+        if sess.quiet_frames > ONSET_GAP_FRAMES:
+            sess.talk_frames = sess.quiet_frames = 0
+    elif voiced:
+        sess.talk_frames, sess.quiet_frames = 1, 0
+
+
+def on_frame(sess, mode, outputs, act_db, left=0):
     """One frame's decision from the heads' outputs (state logits x4, hazard, yield, bc, p_end) and the frame's
-    energy. Returns (events, final, reset): `final` is (the ENDPOINT event, the turn's audio) when the turn ended (the
-    caller fills in its transcript), and `reset` says the heads' context must start over."""
+    energy; `left`: the hop's frames after this one (a barge's onset counts to the hop's end, the newest audio EARS
+    has when it reads the event). Returns (events, final, reset): `final` is (the ENDPOINT event, the turn's audio)
+    when the turn ended (the caller fills in its transcript), and `reset` says the heads' context must start over."""
     events = []
     slog = outputs[:4]; haz, yp, bcp, pep = (float(v) for v in outputs[4:8])
     if sess.trace is not None:
@@ -87,10 +103,12 @@ def on_frame(sess, mode, outputs, act_db):
     voiced = act_db > VAD_DB
     if mode == "speaking":                                 # BARGE path (yield head)
         sess.warm += 1
+        track_talk(sess, voiced)
         if sess.warm > WARMUP_FRAMES:
             sess.yield_run = sess.yield_run + 1 if yp >= sess.barge_thr else 0
             if sess.yield_run >= sess.barge_deb:
-                events.append(dict(kind="BARGE", yield_prob=round(yp, 3)))
+                onset_s = min((sess.talk_frames + left) * FRAME_S, ONSET_MAX_S) if sess.talk_frames else 0.0
+                events.append(dict(kind="BARGE", yield_prob=round(yp, 3), onset_s=round(onset_s, 2)))
                 sess.yield_run = 0; sess.seed_u = sess.pre_u.copy()
         events.append(dict(kind="FRAME", state="SPEAK", yield_prob=round(yp, 3), hazard=round(haz, 3),
                            p_end=round(pep, 3)))

@@ -139,6 +139,7 @@ for t in tests/test_*.py tests/*/test_*.py; do .venv/bin/python $t; done
 .venv/bin/python tests/mouth/test_session.py              # MOUTH turns / barge / tools / backchannels, fake plugins
 .venv/bin/python tests/mouth/test_parts.py                # MOUTH's History and Speaker on their own
 .venv/bin/python tests/mouth/test_tasks.py                # background tasks + their announcement, fake smart model
+.venv/bin/python tests/mouth/test_barged_round.py         # a round cut in on before its answer goes on as a task
 .venv/bin/python tests/mouth/test_chunker.py              # text chunking
 .venv/bin/python tests/ears/test_floor.py                 # EARS floor requests: the Conversation state machine
 .venv/bin/python tests/ears/test_parts.py                 # EARS's AgentPlayback and the web app (busy page, voices)
@@ -162,6 +163,8 @@ CONFIG=config/fake.yaml ./run.sh                          # the whole stack on t
 .venv/bin/python scripts/stack/load_ears.py --sessions 4  # N real-time WebSocket conversations; hop lag,
                                                           #   end of speech -> endpoint -> first audio
                                                           #   (fixed utterance and reply: runs compare)
+.venv/bin/python scripts/stack/barged_round.py --stack-log LOG   # cut in on the expert's lead-in: the answer
+                                                          #   comes at the next pause (calls `smart`: ask first)
 
 # scripts/validate/: GPU parity checks (GPU free: stop run.sh first)
 .venv/bin/python scripts/validate/ears_batched.py         # batched EARS == single-session reference
@@ -169,6 +172,7 @@ CONFIG=config/fake.yaml ./run.sh                          # the whole stack on t
 .venv/bin/python scripts/validate/heads.py                # the heads release loads and is consistent
 .venv/bin/python scripts/validate/barge.py                # a barge-in keeps the start of the utterance
 .venv/bin/python scripts/validate/second_ear.py           # the 2nd ear's 24->16 kHz step, old vs new
+.venv/bin/python scripts/validate/silent_wait.py          # barge-in while the agent waits in silence on a tool
 .venv/bin/python scripts/validate/long_turn.py            # > 20 s turns transcribed whole
 
 # scripts/bench/: measurements (GPU free, except stack.sh, which needs run.sh up)
@@ -280,7 +284,8 @@ What the base gives you, and what is yours to write:
 - **EARS.** Set `sr` and `hop_samples`, and declare the tunable thresholds as `THRESHOLDS` (`Threshold`, each
   with an optional `Slider`): the base reads their defaults from config, and the page builds its sliders from
   them. Write `open_session(thresholds)`, `close`, `feed` (one hop in, events out: FRAME / ENDPOINT / BARGE /
-  BACKCHANNEL) and `full` / `active`. `nemotron_tyger/` is the full example: a package that keeps its
+  BACKCHANNEL; a BARGE may say how long the user had been talking, `onset_s`, so MOUTH learns what had played
+  when they started) and `full` / `active`. `nemotron_tyger/` is the full example: a package that keeps its
   encoder, heads and rules together.
 - **Tests.** Add a run to `tests/plugins/test_contract.py` (`llm_suite`, `tts_suite` or `ears_suite`). The fakes in
   `app/plugins/*/fake.py` are the smallest complete plugins of each kind.
@@ -318,6 +323,10 @@ calling a tool, so easy turns pay nothing extra:
   background (its own web searches, `mouth.tasks.max_steps` rounds, `max_wall_s`). When it finishes, EARS gives it
   the floor once the user has been quiet for `announce_after_silence_ms`, and it speaks a short summary; the user
   can barge in as usual. "How's it going?" is answered locally from a status note; "drop it" cancels it.
+- **A round the user cuts in on** before hearing any of its answer (during the lead-in or a still-looking line)
+  isn't lost: it goes on as a background task of the conversation, counted against the task caps. The task gets
+  the expert's question, or the user's words with what the round already looked up, and is announced at the next
+  pause. Where no task can start (tasks off, a cap reached), history keeps the round's results instead.
 
 ```yaml
 llm:
@@ -354,7 +363,8 @@ onset ms, barge, backchannel, tool name). Voice reference clips and their transc
 turn's transcript, the conversation history and tool results; a hosted `filler` gets the user's question (tool
 lead-ins) and the running ASR partial (backchannels). A `smart` model gets only escalated turns and background
 tasks: the user's words, the question or goal, and the last `context_turns` turns as plain text (tool results
-left out), plus its own tool results. Audio and voice clips are never sent. The startup log names
+left out), plus its own tool results, and for a round the user cut in on, what that round looked up. Audio and
+voice clips are never sent. The startup log names
 the remote roles; request and response bodies are never logged, and MOUTH refuses to start with the SDKs' debug
 logging on (`OPENAI_LOG` / `ANTHROPIC_LOG` = `debug`). Run hosted plugins only with the provider terms you accept
 for that data.

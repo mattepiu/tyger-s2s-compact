@@ -28,6 +28,8 @@ class EarsSession:
         self.segs = []                         # their texts, filled in by the ASR thread (None until done)
         self.pre_u = np.zeros(0, np.float32)   # last BARGE_PRE_S of user audio in speaking mode
         self.seed_u = None                     # set on BARGE: the next reset starts turn_u with it
+        self.talk_frames = 0                   # speaking mode: frames since the user's current stretch of speech began
+        self.quiet_frames = 0                  #   (0: none), and its trailing unvoiced frames
         self.prev_state = LISTEN; self.yield_run = 0
         self.voiced_ms = 0.0; self.sil_run = 0; self.in_turn = False; self.warm = 0
         self._mode = "listen"; self.bc_run = 0; self.bc_cooldown = 0; self.ep_run = 0

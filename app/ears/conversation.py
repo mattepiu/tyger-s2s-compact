@@ -6,7 +6,8 @@ States (the plugin decides from the audio, this class decides what happens):
     agent starts speaking; BACKCHANNEL asks MOUTH for a short ack (C) while the user keeps the floor.
   * speaking: from the turn's start until the browser has finished PLAYING the reply (not when MOUTH is done
     generating: see AgentPlayback). The plugin hears the user and the agent's own audio (the 2nd ear) in "speaking"
-    mode; BARGE stops playback in the browser and the reply in MOUTH (B, with how much was heard).
+    mode; BARGE stops playback in the browser and the reply in MOUTH (B, with how much had played when the user
+    started talking: the plugin's onset, as detecting a barge takes a second or more).
   * halting: after a barge, until MOUTH confirms the stop (its D). An ENDPOINT meanwhile is held (`pending`) and
     sent as soon as the halt ends.
 Taking the floor (PLUGINS.md step 13): when a background task finishes, MOUTH asks for the floor (F {"task": id}).
@@ -188,8 +189,11 @@ class Conversation:
 
     async def _on_barge(self, e):
         self.speaking = False; self.halting = True; self.reset_due = True
+        played = self.playback.played_s(); onset = float(e.get("onset_s") or 0.0)
+        heard = max(0.0, played - onset)              # what had played when the user started talking
         self.playback.clear_ear(); self.barge_t0 = time.perf_counter()
-        log.info("barge yield=%.2f", e.get("yield_prob", 0.0))
+        log.info("barge yield=%.2f onset %.2f s: played %.2f s, by the user's onset %.2f s", e.get("yield_prob", 0.0),
+                 onset, played, heard)
         await self.ws.send_json({"type": "barge", "yield": e["yield_prob"]})   # the page stops playback
         if self.mouth_done:
             # MOUTH already finished generating (its D was held for playback): no D will come back for this turn,
@@ -199,7 +203,7 @@ class Conversation:
             self.halting = False
             await self._finish_turn(True)
         elif self.have_mouth:            # + how much of the reply had played, so MOUTH remembers what was heard
-            await self.to_mouth(b"B", {"played_s": round(self.playback.played_s(), 2)})
+            await self.to_mouth(b"B", {"played_s": round(heard, 2)})
 
     # ---- the agent's turn ----
     def _start_speaking(self):

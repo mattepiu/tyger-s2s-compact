@@ -154,6 +154,9 @@ escalation:
   tool_result: >-
     The expert answered the user directly; that answer follows. Hand follow-up questions on this topic to the
     expert too.
+  # the ask_expert result kept in history when the user cut in before the expert answered and the question could not
+  # go on as a background task (tasks off, or a cap reached; I-16)
+  interrupted: The user cut in before the expert answered, so they heard none of its answer.
 # the `filler` role: the lead-in when the tool is ask_expert (tool_leadin is for lookups)
 expert_leadin:
   system: >-
@@ -274,7 +277,14 @@ tasks:
     language the note in the task names. Don't ask the user anything: make reasonable assumptions and mention them
     in the result.
   user: "The user said: \"$transcript\"\n\nTask: $goal\n\n[The user speaks $language. Write the summary and the result in $language.]"
+  # appended to the task's user message when it continues a round the user cut in on (I-16): what that round
+  # already looked up ($results: one per tool, name: compacted result)
+  looked_up: "\n\n[Already looked up for this task: $results]"
   limit: No more lookups for this task; call finish_task now with what you have.
+  # I-16, in history: a tool or expert round the user cut in on before its answer goes on as a background task (the
+  # status of each call's result, next to the task's number), or, if it can't, a result that was still out then
+  continued: the user cut in before the answer; it goes on in the background and they will be told the result
+  result_pending: the result was not back yet when the user cut in
   # start_task / cancel_task results the reply model sees (errors: it tells the user it can't right now)
   cap_concurrent: A background task is already running; only one at a time.
   cap_session: The limit of background tasks for this conversation has been reached.

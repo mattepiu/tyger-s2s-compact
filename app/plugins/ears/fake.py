@@ -78,7 +78,8 @@ class EnergyEars(EarsPlugin):
             if mode == "speaking":
                 s.voice_run = s.voice_run + 1 if voiced else 0
                 if s.voice_run >= o.barge_frames:
-                    events.append(dict(kind="BARGE", yield_prob=1.0)); s.voice_run = 0
+                    events.append(dict(kind="BARGE", yield_prob=1.0, onset_s=round(s.voice_run * FRAME_N / SR, 2)))
+                    s.voice_run = 0
                 events.append(dict(kind="FRAME", state="SPEAK", yield_prob=float(voiced), hazard=0.0, p_end=0.0))
                 continue
             if voiced:

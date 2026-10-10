@@ -167,8 +167,9 @@ class EarsPlugin(Plugin):
     """Turn-taking for up to N conversations. A session (from open) has reset(): start a new turn before its next
     hop. feed() takes one hop of user mic audio and of the agent's own audio (the 2nd ear; zeros when it isn't
     speaking) with mode "listen" | "speaking", and returns events: {"kind": "FRAME" | "ENDPOINT" | "BARGE" |
-    "BACKCHANNEL", ...} (ENDPOINT carries "transcript", "turn_s", "by"; BACKCHANNEL "partial"; FRAME "state" and
-    the meters' "p_end", "yield_prob", "bc_prob"). Its tunable thresholds are its THRESHOLDS: the page builds its
+    "BACKCHANNEL", ...} (ENDPOINT carries "transcript", "turn_s", "by"; BACKCHANNEL "partial"; BARGE "onset_s", how
+    long the user had been talking when it fired (optional, default 0); FRAME "state" and the meters' "p_end",
+    "yield_prob", "bc_prob"). Its tunable thresholds are its THRESHOLDS: the page builds its
     sliders from them, so EARS's server and the page know no plugin's threshold names. Their defaults come from
     the config block (beside the Options), and a session holds its own values as attributes of those names."""
     hop_samples: int                       # user/agent samples per feed() call

@@ -225,6 +225,24 @@ def test_barge_during_announcement():
     run(go())
 
 
+def test_barge_tells_mouth_what_played_when_the_user_started():
+    """B carries what had played when the user started talking (the plugin's onset), not when the barge fired."""
+    async def go():
+        ws, mouth, conv = await setup()
+        ws.push(speech(3)); ws.push(silence(2)); await settle()            # a user turn -> the agent's turn
+        assert b"T" in mouth.kinds()
+        t_sent = asyncio.get_running_loop().time()
+        await mouth.send(b"A", np.zeros(24000 * 3, np.float32).tobytes()); await settle(1.0)   # 1 s of it plays
+        ws.push(speech(1)); await settle()                                 # the fake barges on 4 voiced frames
+        t_barge = asyncio.get_running_loop().time()
+        b = [d for k, d in mouth.got if k == b"B"]
+        assert len(b) == 1, mouth.kinds()
+        heard = (t_barge - t_sent - 0.04) - 4 * 0.08                       # played (lead-in aside), minus the onset
+        assert abs(b[0]["played_s"] - heard) < 0.15, (b[0], heard)
+        await teardown(ws, conv)
+    run(go())
+
+
 def test_two_requests_take_turns():
     async def go():
         ws, mouth, conv = await setup()

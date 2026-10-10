@@ -72,6 +72,12 @@ def names(*groups) -> list[str]:
     return [n for n, t in TOOLS.items() if not groups or t.group in groups]
 
 
+def runs_for_real(name) -> bool:
+    """A lookup or action (execute_tool runs it), not a tool MOUTH answers itself."""
+    t = TOOLS.get(name)
+    return t is not None and t.fn is not None
+
+
 def build_tools(prompts, expert=False, tasks=False, finish=False):
     """The OpenAI function schemas with their descriptions from `prompts` (app.prompts.Prompts): the lookup /
     action tools, then ask_expert if `expert`, start_task / cancel_task if `tasks`, finish_task if `finish` (the

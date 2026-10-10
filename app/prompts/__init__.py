@@ -27,6 +27,7 @@ TEMPLATES = {
     ("language", "filler"): {"language"},
     ("language", "status_note"): {"language"},
     ("tasks", "user"): {"goal", "language", "transcript"},
+    ("tasks", "looked_up"): {"results"},
     ("tasks", "status_block"): {"tasks"},
     ("tasks", "status_running"): {"id", "goal", "seconds"},
     ("tasks", "status_done"): {"id", "goal", "summary"},
@@ -44,11 +45,12 @@ TEXTS = [("system", "voice_tools"), ("tool_leadin", "system"), ("still_looking",
          ("still_looking", "said_none"), ("backchannel", "system"), ("backchannel", "user_empty"),
          ("markers", "interrupted"), ("markers", "empty_reply"), ("warmup", "user"),
          ("spoken", "error"), ("spoken", "refusal"),
-         ("escalation", "system"), ("escalation", "tool_result"), ("expert_leadin", "system"),
-         ("expert_still", "system"), ("expert_still", "said_none"), ("smart", "system"), ("smart", "limit"),
-         ("language", "tool_note_any"), ("language", "unknown"), ("tasks", "reply_system"), ("tasks", "system"),
-         ("tasks", "limit"), ("tasks", "cap_concurrent"), ("tasks", "cap_session"), ("tasks", "cap_global"),
-         ("tasks", "unknown_task"), ("task_failed", "system")]
+         ("escalation", "system"), ("escalation", "tool_result"), ("escalation", "interrupted"),
+         ("expert_leadin", "system"), ("expert_still", "system"), ("expert_still", "said_none"), ("smart", "system"),
+         ("smart", "limit"), ("language", "tool_note_any"), ("language", "unknown"), ("tasks", "reply_system"),
+         ("tasks", "system"), ("tasks", "limit"), ("tasks", "cap_concurrent"), ("tasks", "cap_session"),
+         ("tasks", "cap_global"), ("tasks", "unknown_task"), ("tasks", "continued"), ("tasks", "result_pending"),
+         ("task_failed", "system")]
 SHOTS = ["tool_leadin", "still_looking", "backchannel", "expert_leadin", "expert_still", "task_failed"]
 
 

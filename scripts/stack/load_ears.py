@@ -57,9 +57,11 @@ def longest_pause(x, sr=16000):
     return best * 0.02
 
 
-def speech_from_mouth(cfg, text):
-    """`text` spoken by MOUTH's TTS (S: no LLM), resampled to 16 kHz, in memory."""
+def speech_from_mouth(cfg, text, voice=None):
+    """`text` spoken by MOUTH's TTS (S: no LLM) in `voice` (default: MOUTH's), resampled to 16 kHz, in memory."""
     s = socket.create_connection((cfg["server"]["mouth_host"], int(cfg["server"]["mouth_port"])), timeout=120)
+    if voice:
+        send_msg(s, b"V", {"voice": voice})
     send_msg(s, b"S", {"text": text})
     chunks = []
     while True:

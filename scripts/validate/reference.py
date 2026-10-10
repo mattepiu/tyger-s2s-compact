@@ -65,7 +65,7 @@ class ReferenceEars:
         events = []
         for i in range(-min(HOP_FRAMES, len(hu), len(ha), len(act)), 0):
             out = self.head_step(hu[i], ha[i], act[i], sess.prev_state)
-            evs, final, reset = rules.on_frame(sess, mode, out, float(act[i]))
+            evs, final, reset = rules.on_frame(sess, mode, out, float(act[i]), left=-i - 1)
             if final is not None:
                 ev, wav = final
                 ev.pop("seg_texts", None)

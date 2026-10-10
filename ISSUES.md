@@ -26,6 +26,7 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | I-13 | metrics | medium | **fixed** | `scripts/stack/load_ears.py` runs don't compare: LLM-made speech and replies, random hop phase |
 | I-14 | ops | low | confirmed on the box | `run.sh` giving up on a slow first start orphans the LLM engine on the GPU |
 | I-15 | tests | low | confirmed on the box | Local contract test aborts at exit after the EARS engine ran in the process |
+| I-16 | MOUTH | high | **fixed** | The answer is lost when the user cuts in during a tool or expert round |
 | L-01 | perf | lever | **partly done** | Encoder re-encodes the full 8 s window, twice, every hop, in fp32 |
 | L-02 | latency | lever | — | Decisions quantised to 320 ms hops |
 | L-03 | latency | lever | **done** | Per-request voice encode (precomputed voice profile) |
@@ -271,6 +272,56 @@ VoxCPM2 is not involved.
 look at what that shutdown leaves running in-process (no ptrace in this container, so no gdb / py-spy; try
 `threading.enumerate()` and `faulthandler` at exit). As a stopgap, end the test's `__main__` with `os._exit(code)`
 after flushing, since the results are already printed.
+
+### I-16 — The answer is lost when the user cuts in during a tool or expert round (high, user, 2026-10-10)
+**Where:** `app/mouth/reply.py` `ReplyTurn._tool_turn` (the barge check after the lead-in and still-looking lines).
+
+**What happened:** a barge sets the turn's stop flag. A tool turn still in its lead-in or "still looking" lines
+returned there: the tool results were thrown away, an `ask_expert` request was aborted, and history kept only the
+user's words and the lines heard, without the tool call, so the next turn didn't know it had been asked. A barge
+during the call's decoding also aborted the call itself, and tools that hadn't started never ran. Separately, the
+user's speech while the agent waits in silence (on a tool or the expert) can only end as a BARGE: in speaking mode
+there is no ENDPOINT (`app/plugins/ears/nemotron_tyger/rules.py`).
+
+**Fix (the user's call, 2026-10-10):** a round the user cuts in on before hearing any of its answer goes on as a
+background task of the conversation (`TaskRunner.continue_round`), counted against the task caps:
+- "Before any of the answer was heard" is judged from EARS's `played_s` against the offset where the answer's
+  first line started; still-looking lines over the smart model's own lookups don't count as the answer.
+- Once a call has started decoding, the barge no longer aborts the reply stream: the call decodes to the end and
+  its tools run as they would have (a barge stops what is said, not what was asked). No new model request starts
+  after a barge.
+- The task gets the expert's question (`ask_expert`'s `question`, plus the user's words), or the user's words with
+  what the round looked up. It waits for results still out and gets them in its request ("Already looked up"), so
+  it doesn't redo them. An aborted expert stream is re-run as the task, not kept alive across the barge.
+- History records the tool call with a note that it goes on in the background (task id), so the reply model sees
+  the task in its status note and can `cancel_task` it after "never mind"; otherwise it is announced at the next
+  pause like any task.
+- Where no task can start (tasks off, a cap reached): history keeps the round's results (written in when they come
+  back; an expert that never answered is noted as such), logged with counts only.
+- A barge during an announcement is unchanged (the task is marked partial).
+
+**Speech during a silent wait, measured** (`scripts/validate/silent_wait.py`, 36 trials, box of 2026-10-10): the
+yield head fires on user speech while the agent channel is silent at least as often as on a normal barge-in, and
+sooner when the user starts early in the wait: 34 / 32 / 29 of 36 for a start 0.3 / 0.8 / 1.5 s into the silence
+(median 0.90 / 1.04 / 1.94 s), against 29 / 36 (1.70 s) with the agent talking; no false barge in silence. The
+trials it misses are mostly the same user clips in every case, so the silent channel isn't the cause, and no
+silence rule was added (an energy rule would also fire on a short "okay" during a wait).
+
+**Verify:** `tests/mouth/test_barged_round.py` (GPU-free): a slow lookup and a slow smart model cut in on during the
+lead-in become tasks announced in the same session with the call in history; "never mind" cancels without an
+announcement; tasks off and a cap keep the results in history; a barge mid-call keeps the whole call; an answer
+generated but not heard goes on, a partly heard one doesn't. 10 of its 11 tests fail on the old code (the 11th
+guards the unchanged partly-heard case).
+
+**Barge timing (the user's call, after the first live runs):** detecting a barge takes the yield head 1–3.6 s, so
+`played_s` taken when the barge fires counted the start of the expert's answer as heard by a user who had cut in on
+the lead-in. The BARGE event now carries `onset_s` (how long the user had been talking), and EARS sends what had
+played at that onset. I-17 is to make it exact with the page's clock.
+
+**Status: fixed (2026-10-10), checked live** (`scripts/stack/barged_round.py`, TTS speech, the production config,
+`barge_thr` 0.4 for the script's conversation). The user cut in 0.08 s into the expert's lead-in; the barge fired
+1.88 s later with `played_s` at the onset 0.32 s. The question went on as task #1, the cut-in question was answered,
+and the expert's answer was announced 7.0 s after the barge. Numbers in CHANGELOG (2026-10-10).
 
 ---
 

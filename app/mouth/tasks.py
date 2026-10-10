@@ -8,6 +8,9 @@ hosted model's own content (`native`, e.g. Claude's thinking) stays valid within
 tool rounds (then the `limit` note instead of results, one more round), max_wall_s, the plugin's own max_tokens;
 max_concurrent and max_per_session per conversation, max_global across them (TaskSlots, shared by all sessions).
 
+A tool or expert round the user cut in on before its answer goes on as a task too (continue_round, I-16): the
+expert's question or the user's words, with what the round already looked up, so the task doesn't redo it.
+
 A conversation's tasks live in memory only and are cancelled when it ends. The reply model sees them through a
 status note on the user's latest message (status_block). Logs carry task IDs, timings, counts and status: never
 goals, results or summaries.
@@ -16,7 +19,7 @@ from __future__ import annotations
 import logging, threading, time
 
 from app import tools
-from app.mouth.messages import plain_context, round_messages
+from app.mouth.messages import compact_result, plain_context, round_messages
 from app.plugins.base import LLMError
 from app.tools import FINISH
 
@@ -41,10 +44,11 @@ class TaskSlots:
 
 
 class Task:
-    def __init__(self, tid, goal, transcript="", lang_text=None):
+    def __init__(self, tid, goal, transcript="", lang_text=None, known=None):
         self.id = tid; self.goal = goal; self.t0 = time.monotonic(); self.t_end = None
         self.transcript = transcript    # the words that started it
         self.lang_text = lang_text or transcript   # what its language is guessed from (app/prompts/lang.language_text)
+        self.known = known              # an interrupted round's: known(stop) -> [(tool name, result)] looked up
         self.status = "running"         # running / done / failed / cancelled
         self.announced = "no"           # no / yes / partial (step 13)
         self.summary = self.result = None
@@ -68,24 +72,42 @@ class TaskRunner:
     # ---- the reply model's tools ----
     def start(self, goal, transcript="", lang_text=None):
         """start_task: the tool result for the reply model ({task_id, status} or {error})."""
-        p = self.m.prompts["reply"]
+        task = self._admit(goal, transcript, lang_text)
+        if isinstance(task, str):                       # the cap's prompts key: the model tells the user
+            return {"error": self.m.prompts["reply"].text("tasks", task)}
+        return {"task_id": task.id, "status": "started"}
+
+    def continue_round(self, goal, transcript, lang_text, known):
+        """A tool or expert round the user cut in on goes on as a task (I-16): `goal` is the expert's question or the
+        user's words, and known(stop) gives what the round looked up (it may wait for results still out). Counts
+        against the caps like start_task. Returns the Task, or None if a cap stops it (logged)."""
+        task = self._admit(goal, transcript, lang_text, known)
+        if isinstance(task, str):
+            log.info("barged tool round: no task (%s), results kept in history", task)
+            return None
+        return task
+
+    def _admit(self, goal, transcript, lang_text, known=None):
+        """Start a task under the caps (max_concurrent and max_per_session here, max_global across conversations):
+        the running Task, or the prompts key of the cap that stopped it."""
         goal = (goal or "").strip() or (transcript or "").strip()
         with self.lock:
             if self.closed:
-                return {"error": p.text("tasks", "cap_global")}
+                return "cap_global"
             running = sum(t.status == "running" for t in self.tasks)
             if running >= self.max_concurrent:
-                return {"error": p.text("tasks", "cap_concurrent")}
+                return "cap_concurrent"
             if len(self.tasks) >= self.max_per_session:
-                return {"error": p.text("tasks", "cap_session")}
+                return "cap_session"
             if not self.m.task_slots.take():
                 log.info("task refused: global cap (%d) reached", self.m.task_slots.n)
-                return {"error": p.text("tasks", "cap_global")}
-            task = Task(len(self.tasks) + 1, goal, transcript, lang_text)
+                return "cap_global"
+            task = Task(len(self.tasks) + 1, goal, transcript, lang_text, known)
             self.tasks.append(task)
-        log.info("task #%d started (this conversation: %d running)", task.id, running + 1)
+        log.info("task #%d started%s (this conversation: %d running)", task.id,
+                 " from an interrupted round" if known else "", running + 1)
         threading.Thread(target=self._run, args=(task, list(self.context())), daemon=True).start()
-        return {"task_id": task.id, "status": "started"}
+        return task
 
     def cancel(self, task_id):
         """cancel_task: the tool result for the reply model."""
@@ -137,10 +159,14 @@ class TaskRunner:
             return next((t for t in self.tasks if t.id == task_id), None)
 
     # ---- the agentic loop, on its own thread ----
-    def _messages(self, task, turns):
+    def _messages(self, task, turns, known=()):
+        """The task's first request: the task system prompt, the conversation's recent turns as plain text, then the
+        user's words, the goal and the language, plus what was already looked up for it (an interrupted round)."""
         p = self.m.prompts["smart"]
         user = p.fill("tasks", "user", goal=task.goal, transcript=task.transcript or task.goal,
                       language=p.language_or_unknown(task.lang_text))
+        if known:
+            user += p.fill("tasks", "looked_up", results="; ".join(f"{n}: {compact_result(r)}" for n, r in known))
         return [{"role": "system", "content": p.text("tasks", "system")}] + plain_context(turns) + \
             [{"role": "user", "content": user}]
 
@@ -148,8 +174,10 @@ class TaskRunner:
         m = self.m; smart = m.llms["smart"]; p = m.prompts["smart"]
         deadline = task.t0 + self.max_wall_s
         stop = lambda: task.stop.is_set() or time.monotonic() > deadline   # noqa: E731
-        msgs = self._messages(task, turns)
         try:
+            msgs = self._messages(task, turns, task.known(stop) if task.known else ())
+            if task.stop.is_set():
+                return                                         # cancelled while the round's results were out
             for rnd in range(self.max_steps + 2):
                 text, calls, native = "", [], None
                 for ev in smart.stream(msgs, tools=m.task_tools, max_new=m.max_gen, stop_flag=stop):

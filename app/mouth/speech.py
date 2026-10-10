@@ -46,7 +46,8 @@ class Speaker:
         """Whether everything said so far has finished playing at least `seconds` ago."""
         return time.perf_counter() >= self.play_end + seconds
 
-    def heard(self, played_s):
+    def heard(self, played_s, since=0):
         """The lines the user heard (at least the start of) when they cut in after `played_s` seconds of reply
-        audio; every line said if that isn't known (None)."""
-        return [t for t, at in self.said if played_s is None or at < played_s]
+        audio; every line said if that isn't known (None). `since`: only lines from that index on (len(said) when a
+        part of the reply began, e.g. the answer after the fillers)."""
+        return [t for t, at in self.said[since:] if played_s is None or at < played_s]

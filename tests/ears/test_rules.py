@@ -8,7 +8,8 @@ TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 import numpy as np  # noqa: E402
 from app.plugins.ears.nemotron_tyger import rules  # noqa: E402
-from app.plugins.ears.nemotron_tyger.constants import LISTEN, SPEAK, SR, WARMUP_FRAMES  # noqa: E402
+from app.plugins.ears.nemotron_tyger.constants import (FRAME_S, LISTEN, ONSET_GAP_FRAMES, ONSET_MAX_S, SPEAK,  # noqa: E402
+                                                       SR, WARMUP_FRAMES)
 from app.plugins.ears.nemotron_tyger.session import EarsSession  # noqa: E402
 
 VOICED, SILENT = -20.0, -80.0                       # frame energy (dB) above / below VAD_DB
@@ -88,6 +89,39 @@ def test_barge_seeds_the_next_turn_with_the_users_speech():
     assert rules.begin_hop(s, np.zeros(5120, np.float32), np.zeros(5120, np.float32), "listen")
     assert s.in_turn and s.voiced_ms > 0 and len(s.turn_u) == 2 * 5120    # the seed, then this hop
     assert s.turn_len_s() == 2 * 5120 / SR
+
+
+def barge_onsets(s, plan):
+    """Feed speaking-mode frames per plan [(n, act, yield)]; the BARGE events' onset_s."""
+    out = []
+    for n, act, y in plan:
+        for _ in range(n):
+            evs, _, _ = rules.on_frame(s, "speaking", outputs(yield_=y), act)
+            out += [e["onset_s"] for e in evs if e["kind"] == "BARGE"]
+    return out
+
+
+def test_barge_onset_is_when_the_user_started_talking():
+    """A barge says how long the user had been talking when it fired: their stretch of speech, through pauses of up
+    to ONSET_GAP_FRAMES, from its first voiced frame; a longer pause starts a new stretch; capped at ONSET_MAX_S."""
+    s = session(); rules.switch_mode(s, "speaking")
+    plan = [(10, SILENT, 0.0), (3, VOICED, 0.0), (ONSET_GAP_FRAMES, SILENT, 0.0), (5, VOICED, 0.0),
+            (2, VOICED, 0.9)]                                       # the head is sure 14 frames after the start
+    assert barge_onsets(s, plan) == [round((3 + ONSET_GAP_FRAMES + 5 + 2) * FRAME_S, 2)]
+    s = session(); rules.switch_mode(s, "speaking")
+    plan = [(10, SILENT, 0.0), (3, VOICED, 0.0), (ONSET_GAP_FRAMES + 1, SILENT, 0.0), (5, VOICED, 0.0),
+            (2, VOICED, 0.9)]                                       # the pause was too long: a new stretch
+    assert barge_onsets(s, plan) == [round(7 * FRAME_S, 2)]
+    s = session(); rules.switch_mode(s, "speaking")
+    assert barge_onsets(s, [(80, VOICED, 0.0), (2, VOICED, 0.9)]) == [ONSET_MAX_S]
+    s = session(); rules.switch_mode(s, "speaking")
+    assert barge_onsets(s, [(10, SILENT, 0.0), (2, SILENT, 0.9)]) == [0.0]   # the head alone: no stretch
+    s = session(); rules.switch_mode(s, "speaking")                      # fired 2 frames before the hop's end:
+    for _ in range(10):                                                  # counted to the end (EARS reads it then)
+        rules.on_frame(s, "speaking", outputs(), VOICED)
+    rules.on_frame(s, "speaking", outputs(yield_=0.9), VOICED, left=3)
+    evs, _, _ = rules.on_frame(s, "speaking", outputs(yield_=0.9), VOICED, left=2)
+    assert [e["onset_s"] for e in evs if e["kind"] == "BARGE"] == [round((12 + 2) * FRAME_S, 2)]
 
 
 def test_frame_energy():

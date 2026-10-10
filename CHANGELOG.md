@@ -31,6 +31,86 @@ detection, which live tuning of the endpoint thresholds is meant to cut.
 
 ## [Unreleased]
 
+### 2026-10-10 — A round the user cuts in on goes on as a background task (I-16)
+
+Box: a new RTX 5090 (driver 610.57.04, CUDA 13.3; 32 CPU threads, 60 GB RAM). Under load: P1, SM 2887 MHz, memory
+13 801 MHz, so not throttled.
+
+#### Fixed
+- **A tool or expert round lost its answer when the user cut in** (I-16; the fix is the user's call). A barge during
+  the lead-in or a still-looking line threw the tool results away and aborted an `ask_expert` request. It also left
+  the tool call out of history, so the next turn didn't know it had been asked. Now a round the user cuts in on
+  before hearing any of its answer goes on as a background task of the conversation:
+  - **When it applies.** "Before any of the answer was heard" is judged from EARS's `played_s` against where the
+    answer's first line started. Still-looking lines over the smart model's own lookups don't count as the answer.
+  - **The call and its tools.** Once a call has started decoding, a barge no longer aborts the reply stream: the
+    call decodes to the end and its tools run as they would have. Before, a barge mid-call lost the call, and tools
+    that hadn't started never ran. No new model request starts after a barge.
+  - **What the task gets.** The expert's question plus the user's words, or the user's words plus what the round
+    already looked up. It waits for results still out and doesn't redo them. An aborted expert stream is re-run as
+    the task, not kept alive across the barge: none of it had been heard, and the task's summary opens with what it
+    is about, which an announcement at a later pause needs.
+  - **History and the floor.** History records the call with a note that it goes on in the background, so after
+    "never mind" the reply model cancels it. Otherwise it is announced at the next pause, in the conversation's
+    language. It counts against the task caps.
+  - **When no task can start** (tasks off, a cap reached): history keeps the round's results, written in when they
+    come back, and the log says why (counts only).
+  - **Tests:** `tests/mouth/test_barged_round.py`, 11 GPU-free tests on the fakes. 10 fail on the old code; the 11th
+    guards the unchanged case where part of the answer was heard.
+  - **Checked live** (new `scripts/stack/barged_round.py`: TTS speech over the WebSocket, the production config; 5
+    OpenAI requests over 4 runs, with the user's OK). The final run is in the table below the next item.
+- **A barge tells MOUTH what had played when the user started talking**, not when the barge fired (the user's call,
+  after the first live runs of I-16).
+  - Why: detecting a barge takes the yield head a second or more (here up to 3.6 s). A user who cut in during the
+    expert's lead-in therefore counted as having heard the start of its answer, and the round wasn't carried over.
+  - How: the BARGE event carries `onset_s`, how long the user had been talking, from the start of their current
+    stretch of speech (by frame energy, through pauses up to 640 ms, at most 4 s, counted to the end of the hop).
+    EARS subtracts it from its playback estimate before sending `played_s`. The plugin API documents the field; the
+    fake plugin sets it too. I-17 is to replace the playback estimate with the page's own clock.
+  - Before → after, the same synthetic cut-in on a counting reply (no OpenAI): `played_s` was 3.62 s for a barge
+    that fired 3.63 s after the user started; at the onset it is 0.26 s. With the barge firing 0.78 s in, it is
+    0.30 s.
+  - Tests: `test_barge_onset_is_when_the_user_started_talking` (rules) and
+    `test_barge_tells_mouth_what_played_when_the_user_started` (EARS). Both fail on the old code.
+
+  The final live run, with `barge_thr` 0.4 set by the script for its own conversation (the page's slider command).
+  At the default 0.5 this synthetic cut-in barged in 1 of 2 runs (the head peaked at 0.65 for one hop, then held
+  at ~0.2); tuning the threshold is O-01.
+
+  | step | time |
+  |---|---|
+  | the expert question's endpoint → the expert lead-in's first audio | 0.26 s |
+  | the user starts the cut-in | 0.08 s into the lead-in |
+  | the cut-in start → barge | 1.88 s (`played_s` at the user's onset: 0.32 s, so none of the answer was heard) |
+  | the expert's question goes on as task #1 | done 1.2 s later, 0 tool rounds |
+  | the cut-in question answered (Canberra) | yes |
+  | barge → the announcement takes the floor | 7.0 s (granted after 1280 ms of quiet) |
+  | the announcement gives the amount | yes (its turn ended 11.7 s after its first audio) |
+
+  Two lessons from the earlier runs:
+  - A cut-in spoken in the agent's own voice never barged (1 run), as if it were the agent's echo. The script speaks
+    the user's lines in another clip's voice.
+  - With `played_s` taken at the barge, the one cut-in that barged (3.1 s in) left the round in history with nothing
+    said later. That is what the onset change above fixes.
+
+#### Measured
+- **Barge-in while the agent waits in silence** (new `scripts/validate/silent_wait.py`: the EARS engine, public
+  LibriSpeech, 36 trials per case, the config's thresholds). The yield head fires on user speech while the agent
+  channel is silent at least as often as on a normal barge-in, so no silence rule was added:
+
+  | case | barged | median to the barge | p90 |
+  |---|---|---|---|
+  | the agent talking, the user cuts in 1.5 s in | 29 / 36 | 1.70 s | 3.68 s |
+  | a 2 s line, then silence; the user starts 0.3 s into it | 34 / 36 | 0.90 s | 1.12 s |
+  | the same, 0.8 s into it | 32 / 36 | 1.04 s | 1.62 s |
+  | the same, 1.5 s into it | 29 / 36 | 1.94 s | 3.92 s |
+  | no agent audio yet; the user talks from 0.3 s | 36 / 36 | 0.98 s | 0.98 s |
+
+  - No false barge in silence (the line, then 6 s of silence, the user silent).
+  - The missed trials are mostly the same user clips in every case. So the limit is barge recall at the untuned
+    `barge_thr` (O-01), not the silent channel.
+  - An energy rule would also fire on a short "okay" said during a wait, and send the round to the background.
+
 ### 2026-10-06 — Readability refactor; Gemma-only responders; whole sentences to the TTS
 
 #### Changed

@@ -27,3 +27,7 @@ TURN_MAX_S = 20.0                # longest audio one transcription gets (sizes t
 SEG_S = 15.0                     # a turn longer than this is transcribed in blocks as it grows (I-05),
 SEG_SEARCH_S = 4.0               #   cut at the quietest frame of the block's last SEG_SEARCH_S
 BARGE_PRE_S = 2.0                # user audio kept while the agent speaks: seeds the turn a barge-in starts (I-02)
+ONSET_GAP_FRAMES = 8             # while the agent speaks, a pause longer than this (640 ms: more than a pause inside an
+                                 # utterance) ends a stretch of the user's speech
+ONSET_MAX_S = 4.0                # a barge's onset (when the user started talking) reaches back at most this far (the
+                                 # barge's p90 latency is ~3.5 s: scripts/validate/silent_wait.py)
