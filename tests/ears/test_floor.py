@@ -4,88 +4,21 @@ F -> silence -> G, a user turn winning over a waiting request, silence counted o
 backchannel holding the grant, barge-in during an announcement, a lost MOUTH. Audio is synthetic (zeros / a tone).
 Run: .venv/bin/python tests/ears/test_floor.py
 """
-import os, sys, json, asyncio, copy
+import os, sys, asyncio, copy
 
 TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 import numpy as np  # noqa: E402
-from aiohttp import WSMsgType  # noqa: E402
 from app.ears.conversation import Conversation  # noqa: E402
 from app.config import load_config  # noqa: E402
 from app.plugins.ears.fake import EnergyEars  # noqa: E402
 from app.plugins.base import PluginContext  # noqa: E402
-from app.wire import async_send_msg, async_recv_msg  # noqa: E402
+from fakes import FakePage, MouthServer  # noqa: E402
 
 SIL_MS = 480                                   # announce_after_silence_ms here: 6 frames
 HOP = 5120
 ROOT = os.path.dirname(TESTS)
 EARS = None                                    # the fake EARS plugin of the running test
-
-
-class Msg:
-    def __init__(self, data):
-        self.type = WSMsgType.BINARY; self.data = data
-
-
-class FakeWS:
-    """The browser side: audio in (push), JSON / audio out (sent)."""
-    def __init__(self):
-        self.q = asyncio.Queue(); self.sent = []; self.closed = False
-
-    def push(self, f32):
-        self.q.put_nowait(Msg(np.asarray(f32, np.float32).tobytes()))
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        m = await self.q.get()
-        if m is None:
-            raise StopAsyncIteration
-        return m
-
-    async def send_json(self, d):
-        self.sent.append(d)
-
-    async def send_bytes(self, b):
-        self.sent.append(("audio", len(b)))
-
-    async def close(self):                         # like aiohttp: closing ends the message loop
-        self.closed = True; self.q.put_nowait(None)
-
-    def types(self):
-        return [x["type"] for x in self.sent if isinstance(x, dict) and x["type"] not in ("state",)]
-
-
-class FakeMouth:
-    """A TCP server standing in for MOUTH: records what EARS sends, and lets the test send F / A / D."""
-    def __init__(self):
-        self.got = []; self.writer = None; self.connected = asyncio.Event()
-
-    async def start(self):
-        self.srv = await asyncio.start_server(self.handle, "127.0.0.1", 0)
-        return self.srv.sockets[0].getsockname()[1]
-
-    async def handle(self, reader, writer):
-        self.writer = writer; self.connected.set()
-        try:
-            while True:
-                kind, payload = await async_recv_msg(reader)
-                if kind is None:
-                    break
-                self.got.append((kind, json.loads(payload) if payload else {}))
-        except (asyncio.IncompleteReadError, ConnectionError):
-            pass
-
-    async def send(self, kind, obj):
-        await async_send_msg(self.writer, kind, obj if isinstance(obj, (bytes, bytearray)) else obj)
-
-    def kinds(self):
-        return [k for k, _ in self.got]
-
-    async def drop(self):
-        """MOUTH goes away (restart / crash): close its end of the connection."""
-        self.writer.close(); await self.writer.wait_closed()
 
 
 def silence(hops=1):
@@ -106,10 +39,10 @@ async def setup():
     cfg = load_config(os.path.join(ROOT, "config/fake.yaml"))
     cfg = copy.deepcopy(cfg)
     cfg["mouth"]["tasks"] = {"announce_after_silence_ms": SIL_MS}
-    mouth = FakeMouth(); port = await mouth.start()
+    mouth = MouthServer(); port = await mouth.start()
     cfg["server"]["mouth_port"] = port
     EARS = EnergyEars(cfg["ears"], PluginContext(None, cfg, "fake"))
-    ws = FakeWS()
+    ws = FakePage()
     conv = asyncio.create_task(Conversation(ws, EARS, EARS.open(), cfg).run())
     await asyncio.wait_for(mouth.connected.wait(), 2)
     return ws, mouth, conv
@@ -221,24 +154,6 @@ def test_barge_during_announcement():
         assert b"B" in mouth.kinds() and "barge" in ws.types()
         await mouth.send(b"D", {"text": "x", "barged": True, "proactive": 4}); await settle()
         assert {"type": "turn_done", "barged": True} in ws.sent
-        await teardown(ws, conv)
-    run(go())
-
-
-def test_barge_tells_mouth_what_played_when_the_user_started():
-    """B carries what had played when the user started talking (the plugin's onset), not when the barge fired."""
-    async def go():
-        ws, mouth, conv = await setup()
-        ws.push(speech(3)); ws.push(silence(2)); await settle()            # a user turn -> the agent's turn
-        assert b"T" in mouth.kinds()
-        t_sent = asyncio.get_running_loop().time()
-        await mouth.send(b"A", np.zeros(24000 * 3, np.float32).tobytes()); await settle(1.0)   # 1 s of it plays
-        ws.push(speech(1)); await settle()                                 # the fake barges on 4 voiced frames
-        t_barge = asyncio.get_running_loop().time()
-        b = [d for k, d in mouth.got if k == b"B"]
-        assert len(b) == 1, mouth.kinds()
-        heard = (t_barge - t_sent - 0.04) - 4 * 0.08                       # played (lead-in aside), minus the onset
-        assert abs(b[0]["played_s"] - heard) < 0.15, (b[0], heard)
         await teardown(ws, conv)
     run(go())
 

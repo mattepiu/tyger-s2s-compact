@@ -1,4 +1,4 @@
-"""EARS's small parts on their own, GPU-free: AgentPlayback (the browser's playback estimate and the 2nd ear's hops)
+"""EARS's small parts on their own, GPU-free: AgentPlayback (the reply at the EARS rate, the server's playback guess)
 and EarsApp (the page, the busy page, the voice list) over a real aiohttp test server with the fake EARS plugin.
 Run: .venv/bin/python tests/ears/test_parts.py"""
 import os, sys, asyncio, copy, time
@@ -17,34 +17,33 @@ ROOT = os.path.dirname(TESTS)
 
 
 def test_playback_estimate():
+    """The server's own guess at the page's playback: only the safety net and the logs now (I-17)."""
     pb = AgentPlayback(16000)
     pb.start()
-    pb.add(np.zeros(24000, np.float32))                         # 1 s of reply audio, queued after a 40 ms lead-in
-    assert pb.sent_s == 1.0 and pb.played_s() < 0.05
+    pb.add(np.zeros(24000, np.float32), 0)                      # 1 s of reply audio, queued after a 40 ms lead-in
+    assert pb.sent24 == 24000 and pb.estimate_s() < 0.05
     assert abs(pb.play_until - (time.perf_counter() + 1.04)) < 0.02
-    pb.add(np.zeros(12000, np.float32))                         # queued back to back
-    assert pb.sent_s == 1.5 and abs(pb.play_until - (time.perf_counter() + 1.54)) < 0.02
+    pb.add(np.zeros(12000, np.float32), 0)                      # queued back to back
+    assert pb.sent24 == 36000 and abs(pb.play_until - (time.perf_counter() + 1.54)) < 0.02
     pb.start()
-    assert pb.sent_s == 0.0 and pb.played_s() == 0.0
+    assert pb.sent24 == 0 and pb.estimate_s() == 0.0 and pb.n16 == 0
 
 
-def test_second_ear_hops():
-    pb = AgentPlayback(16000)
-    pb.add(np.ones(2400, np.float32))                           # 0.1 s at 24 kHz -> ~1600 samples at 16 kHz
-    hop = pb.take_hop(5120)
-    n = int(np.count_nonzero(hop))
-    assert hop.shape == (5120,) and 1580 <= n <= 1600, n        # a few held back for the filter's future input
-    assert np.allclose(hop[40:n - 40], 1.0, atol=1e-3)          # the level is kept inside the clip
-    assert not pb.take_hop(5120).any()                          # nothing left: zeros
-    pb.add(np.ones(2400, np.float32)); pb.clear_ear()
-    assert not pb.take_hop(16).any()
+def test_reply_at_the_ears_rate():
+    pb = AgentPlayback(16000); pb.start()
+    pb.add(np.ones(2400, np.float32), 0)                        # 0.1 s at 24 kHz -> ~1600 samples at 16 kHz
+    ear = pb.audio[:pb.n16]
+    assert 1580 <= len(ear) <= 1600, len(ear)                   # a few held back for the filter's future input
+    assert np.allclose(ear[40:-40], 1.0, atol=1e-3)             # the level is kept inside the clip
+    pb.start()
+    assert pb.n16 == 0                                          # a new reply starts empty
 
 
 def ear_audio(chunks):
     pb = AgentPlayback(16000); pb.start()
     for c in chunks:
-        pb.add(c)
-    return pb.take_hop(len(pb.ear))
+        pb.add(c, 0)
+    return pb.audio[:pb.n16].copy()
 
 
 def test_second_ear_does_not_depend_on_chunk_edges():
@@ -57,9 +56,9 @@ def test_second_ear_does_not_depend_on_chunk_edges():
     cuts = np.sort(rng.choice(np.arange(1, len(a24)), 60, replace=False))
     pieces = ear_audio(np.split(a24, cuts))
     assert len(whole) == len(pieces) and np.allclose(whole, pieces, atol=1e-5)
-    pb = AgentPlayback(16000); pb.add(a24[:24000]); pb.clear_ear(); pb.start()   # a new reply starts clean
-    pb.add(a24)
-    assert np.allclose(pb.take_hop(len(pb.ear)), whole, atol=1e-5)
+    pb = AgentPlayback(16000); pb.start(); pb.add(a24[:24000], 0); pb.start()   # a new reply starts clean
+    pb.add(a24, 0)
+    assert np.allclose(pb.audio[:pb.n16], whole, atol=1e-5)
 
 
 def app(max_sessions=1):

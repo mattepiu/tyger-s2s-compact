@@ -18,15 +18,17 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | I-05 | EARS | medium | **fixed** | User turns > 20 s silently keep only the last 20 s |
 | I-06 | MOUTH | medium | **not reproduced** (real cost elsewhere, fixed) | Voice clip copied as ~480k Python floats on every TTS request |
 | I-07 | MOUTH | low | **fixed** | Backchannel keeps generating after the reply turn starts |
-| I-08 | EARS | low | likely | 2nd-ear agent audio leads what the user actually hears |
+| I-08 | EARS | low | **fixed** (by I-17) | 2nd-ear agent audio leads what the user actually hears |
 | I-09 | EARS | low | confirmed in code | MOUTH dying leaves the conversation silently dead |
-| I-10 | EARS | low | likely | `play_until` is a server-side guess at client playback |
+| I-10 | EARS | low | **fixed** (by I-17) | `play_until` is a server-side guess at client playback |
 | I-11 | security | low (demo) / high (public) | confirmed in code | No auth, no message-size or buffer limits on :7860 |
 | I-12 | MOUTH | high | **fixed** | Tool calls never enter history, so later turns stop calling tools and invent answers |
 | I-13 | metrics | medium | **fixed** | `scripts/stack/load_ears.py` runs don't compare: LLM-made speech and replies, random hop phase |
 | I-14 | ops | low | confirmed on the box | `run.sh` giving up on a slow first start orphans the LLM engine on the GPU |
 | I-15 | tests | low | confirmed on the box | Local contract test aborts at exit after the EARS engine ran in the process |
 | I-16 | MOUTH | high | **fixed** | The answer is lost when the user cuts in during a tool or expert round |
+| I-17 | EARS | high | **fixed** | The 2nd ear runs ahead of what the user heard |
+| I-18 | EARS | medium | open (accepted for now) | With a clean mic, an "mm-hm" in the agent's pause barges; the threshold can't separate it |
 | L-01 | perf | lever | **partly done** | Encoder re-encodes the full 8 s window, twice, every hop, in fp32 |
 | L-02 | latency | lever | — | Decisions quantised to 320 ms hops |
 | L-03 | latency | lever | **done** | Per-request voice encode (precomputed voice profile) |
@@ -189,6 +191,9 @@ backchannels aborted; turn first-audio p50 769 → 559 ms.
 - Use a proper polyphase resampler, such as `scipy.signal.resample_poly` or a stateful one like MOUTH's.
 - Check barge false-positive and false-negative rates before and after.
 
+**Status: fixed by I-17 (2026-10-10).** The page tags its mic blocks with what it was playing, and EARS builds the
+2nd ear from the tags. The resampler was fixed in R-04b.
+
 ### I-09 — MOUTH dying leaves the conversation silently dead (low, confirmed in code)
 **Where:**
 - `app/server.py:185-186`: `pump_mouth` swallows the disconnect.
@@ -211,6 +216,9 @@ try to reconnect.
 
 **Fix:** have the client report its playback end (`nextPlay - ctx.currentTime`) with each audio ack, or send
 a `played` message when its queue drains.
+
+**Status: fixed by I-17 (2026-10-10).** The page sends `played:<id>:<samples>` when a reply's queue drains, and EARS
+ends the turn on it. `play_until` (now plus `PLAYBACK_TIMEOUT_S`, 2 s) is only the safety net.
 
 ### I-11 — No auth, no limits on :7860 (low for the SSH-tunnel demo, high if public)
 **Where:** `app/server.py:81` sets `max_msg_size=0` (unlimited); line 261 grows `buf` without a cap; there is
@@ -316,12 +324,102 @@ guards the unchanged partly-heard case).
 **Barge timing (the user's call, after the first live runs):** detecting a barge takes the yield head 1–3.6 s, so
 `played_s` taken when the barge fires counted the start of the expert's answer as heard by a user who had cut in on
 the lead-in. The BARGE event now carries `onset_s` (how long the user had been talking), and EARS sends what had
-played at that onset. I-17 is to make it exact with the page's clock.
+played at that onset. I-17 made it exact: what had played is now read from the page's tags.
 
 **Status: fixed (2026-10-10), checked live** (`scripts/stack/barged_round.py`, TTS speech, the production config,
 `barge_thr` 0.4 for the script's conversation). The user cut in 0.08 s into the expert's lead-in; the barge fired
 1.88 s later with `played_s` at the onset 0.32 s. The question went on as task #1, the cut-in question was answered,
 and the expert's answer was announced 7.0 s after the barge. Numbers in CHANGELOG (2026-10-10).
+
+### I-17 — The 2nd ear runs ahead of what the user heard (high, user, 2026-10-10)
+**Where:** `app/ears/conversation.py` (`_on_reply_audio`, `_hop_loop`, `_finish_after_playback`),
+`app/ears/playback.py` (`AgentPlayback.take_hop`), `static/index.html` (the ScriptProcessor capture).
+
+**What happened:**
+- EARS added MOUTH's reply audio to the agent channel as it arrived, and paired each mic hop with the agent
+  channel's next hop in arrival order.
+- The page plays the reply later: the downlink, its 40 ms lead-in, the output latency. The mic's audio of that
+  moment arrives later still: the uplink, ~85 ms ScriptProcessor blocks, the input latency. Hop quantization adds
+  0–320 ms.
+- So the agent channel the yield head saw ran ahead of what the user heard: by 219–300 ms on localhost (the fake
+  stack), and an estimated 150–700 ms live.
+- Only barge decisions were affected: in listen mode the agent channel is zeros.
+- Side effects of the same cause (I-08, I-10):
+  - a hop where the agent channel ran dry was padded with silence the user never heard;
+  - `played_s` on a barge ignored the network;
+  - `speaking` ended at the server's guess + 0.25 s, so a slower downlink ended it while the page still played.
+
+**Fix (2026-10-10): the 2nd ear on the page's clock.**
+- **The page** plays the reply and records the mic on one AudioContext.
+  - An AudioWorklet (`mic16k`) replaces ScriptProcessor and resamples to 16 kHz continuously.
+  - Every 20 ms block carries `[int32 reply id][int32 reply sample at 24 kHz, or -1]`: the sample the user was
+    hearing at the block's first sample, corrected by `baseLatency` + `outputLatency` + the track's input latency.
+- **EARS** numbers each reply and announcement (`AgentPlayback.start`), and sends `[int32 id][int16 at 24 kHz]`.
+  Id 0 is backchannel audio, which is never tagged. EARS keeps the current reply at 16 kHz and builds each agent
+  hop from the blocks' tags (`agent_block`), with silence exactly where nothing played.
+- **A barge's `played_s`** is what the tags say had been heard at the user's onset (`heard_s`).
+- **The turn ends** on the page's `played:<id>:<samples>`. `PLAYBACK_TIMEOUT_S` (2 s past the server's guess) is
+  only the safety net.
+- **int16 both ways:** the mic 512 → 256 kbit/s, the reply 768 → 384 kbit/s.
+- **The log:** each turn logs how far arrival-order pairing would have put the 2nd ear ahead, as a timing.
+
+**Measured** (`scripts/validate/second_ear.py`, the EARS engine on the box of 2026-10-10, 24 trials, `barge_thr`
+0.5; tables in CHANGELOG):
+- With echo at −30 or −40 dB in the mic, arrival order 400 ms ahead cut off 17–18 of 24 replies while the user said
+  nothing. By the tags, none at any offset; cut-ins barge as at 0 ms.
+- A finding: with a clean mic, aligned acknowledgements in the agent's pauses barge 46 / 48. The heads yield to
+  speech in the agent's silence. A 2nd ear 400 ms ahead had hidden this (2 / 48), and residual echo hides it too
+  (2 / 48 at −30 dB).
+
+**Verify:** `tests/ears/test_second_ear.py` (11, GPU-free):
+- the ear from the tags: gaps, a reply-id change, past what has arrived, a tag past what was sent;
+- what was heard by a mic position, the page's report, the logged offset, the wire frames;
+- on the Conversation: blocks straddling hops, a barge's `played_s`, the turn ending on the page's report, a 0.5 s
+  slow downlink not ending it early, the timeout safety net, backchannel audio untagged.
+
+`scripts/stack/load_ears.py --downlink-ms 500` counts turns that ended before the page had played them.
+
+**Live** (the user over the SSH tunnel, 2026-10-10):
+- The page's audio latency is 55–60 ms. The logged arrival-order offset was +316 to +783 ms (median 566 ms, 52
+  turns).
+- Every turn ended on the page's report.
+- The live check found a page bug, now fixed: on Stop → Start without a reload, the page kept its per-reply counts
+  while EARS restarted reply ids at 1. The page now clears them on Start, and EARS treats a tag past what it has
+  sent as nothing playing.
+- The yield slider re-checked: `barge_thr` 0.5 → 0.4. The offline sweep and the slider re-check found I-18.
+- After the fixes, at 0.4: offsets +324 to +656 ms over 42 turns, all positive. The user talked a median 0.80 s
+  before a barge fired (1.1 s at 0.5).
+
+**Status: fixed (2026-10-10), checked live.**
+
+### I-18 — With a clean mic, an "mm-hm" in the agent's pause barges (medium, found on the box, 2026-10-10)
+**Where:** the yield head and the barge rule (`app/plugins/ears/nemotron_tyger/rules.py`, `barge_thr`).
+
+**What happens** (`scripts/validate/second_ear.py --pairing tags`, 24 trials):
+- The setup: the 2nd ear is aligned (I-17), and the mic carries no echo, as with headphones or echo cancellation
+  that leaves nothing.
+- A short "Mm-hm.", "Yeah." or "Right." 0.1 s into a 0.5 s pause between the agent's sentences then barges 46 of 48
+  times, and the agent stops.
+- The heads read user speech in the agent's silence as taking the turn. The silent-wait study under I-16 found the
+  same.
+- Residual echo makes the heads cautious: 13 / 48 at −40 dB, 2 / 48 at −30 dB.
+- The old misaligned 2nd ear hid it: 2 / 48 at 400 ms ahead, where the agent channel already carried the next
+  sentence.
+
+**The threshold can't separate them.** At `barge_thr` 0.8 with a clean mic, 38 / 48 acks still barge, while cut-ins
+over the agent's speech fall to 3 / 24 (CHANGELOG 2026-10-10 has the sweep). The heads are surer about speech in
+the agent's silence than about speech over it.
+
+**Live** (the user, 2026-10-10, with the default then at 0.5): an "mm-hm" or "yeah" while the agent speaks
+generally didn't stop it. At 0.4, the new default, an "mhm" stops it, which the user accepts for now (they listen
+silently). The test's pauses are 0.5 s. The stack queues each sentence's audio straight after the last, so its
+pauses are the TTS's own silence at sentence edges, which hasn't been measured.
+
+**Fix options (not decided):**
+- Measure first: acks in the live check of I-17, with headphones and with speakers.
+- Hold a barge until the user has spoken longer than an acknowledgement, or said more than one. Duck the agent
+  meanwhile, and resume if the user stops.
+- On the ML side, train the yield head on acknowledgements in pauses.
 
 ---
 

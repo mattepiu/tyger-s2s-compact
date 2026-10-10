@@ -1,11 +1,17 @@
-"""Driving MOUTH's Session without a GPU (tests only). FakeLLM / FakeTTS are the `fake` plugins (app/plugins/*/
-fake.py); FakeMouth carries the attributes Session reads from Mouth. Test text is synthetic.
+"""Driving MOUTH's Session and EARS's Conversation without a GPU (tests only). FakeLLM / FakeTTS are the `fake`
+plugins (app/plugins/*/fake.py); FakeMouth carries the attributes Session reads from Mouth. For EARS: FakePage is
+the browser's side of the WebSocket, behaving like static/index.html, and MouthServer a TCP server standing in for
+MOUTH. Test text and audio are synthetic.
 """
-import os, sys, threading, time
+import os, sys, asyncio, json, threading, time
 from contextlib import contextmanager
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import numpy as np  # noqa: E402
+from aiohttp import WSMsgType  # noqa: E402
 from app import mouth as M  # noqa: E402
+from app.ears.playback import AUDIO_HEADER, BACKCHANNEL_ID, LEAD_IN_S, MIC_HEADER, to_pcm16  # noqa: E402
+from app.wire import async_send_msg, async_recv_msg  # noqa: E402
 from app.tools import registry as T  # noqa: E402
 from app.prompts import default_prompts  # noqa: E402
 from app.tools import build_tools  # noqa: E402
@@ -102,3 +108,109 @@ def run_turn(sess, transcript, stop_at=None):
         if stop_at and stop_at(kind, n_audio):
             stop.set()
     return evs, stop
+
+
+# ---- EARS: the page and MOUTH around a Conversation -----------------------------------------------------------
+class Msg:
+    def __init__(self, kind, data):
+        self.type = kind; self.data = data
+
+
+class FakePage:
+    """The browser's side of EARS's WebSocket, as static/index.html behaves (I-17): mic blocks go in tagged with the
+    reply sample this page is playing when the block is pushed (or an explicit tag); reply audio "plays" in real time
+    from its arrival, back to back (LEAD_IN_S when nothing is queued); when a reply's queue drains it reports
+    `played:<id>:<samples>` (unless report=False); a barge or endpoint stops playback. `downlink_s` delays playback as
+    a slow network would. Received JSON is in `sent`, audio as ("audio", id, samples)."""
+    def __init__(self, report=True, downlink_s=0.0):
+        self.q = asyncio.Queue(); self.sent = []; self.closed = False; self.report = report
+        self.downlink_s = downlink_s
+        self.sched = []                 # (id, t0, t1, first sample): the chunks queued, on the loop's clock
+        self.next_play = 0.0; self.queued = {}; self.timers = []
+
+    def tag_now(self):
+        """(id, sample at 24 kHz) of the reply playing now; (last id, -1) when nothing is."""
+        now = asyncio.get_running_loop().time()
+        for rid, t0, t1, first in self.sched:
+            if t0 <= now < t1:
+                return rid, first + int((now - t0) * 24000)
+        return (self.sched[-1][0] if self.sched else 0), -1
+
+    def push(self, f32, tag=None):
+        rid, at24 = tag if tag is not None else self.tag_now()
+        self.q.put_nowait(Msg(WSMsgType.BINARY, MIC_HEADER.pack(rid, at24) + to_pcm16(np.asarray(f32)).tobytes()))
+
+    def command(self, text):
+        self.q.put_nowait(Msg(WSMsgType.TEXT, text))
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        m = await self.q.get()
+        if m is None:
+            raise StopAsyncIteration
+        return m
+
+    async def send_json(self, d):
+        self.sent.append(d)
+        if d.get("type") in ("barge", "endpoint"):        # the page stops playback
+            self.sched = []; self.next_play = 0.0
+            for h in self.timers:
+                h.cancel()
+            self.timers = []
+
+    async def send_bytes(self, b):
+        rid = AUDIO_HEADER.unpack_from(b)[0]; n = (len(b) - AUDIO_HEADER.size) // 2
+        self.sent.append(("audio", rid, n))
+        if rid == BACKCHANNEL_ID:
+            return                                         # played, never tagged
+        loop = asyncio.get_running_loop(); now = loop.time()
+        if self.next_play < now + self.downlink_s:
+            self.next_play = now + self.downlink_s + LEAD_IN_S
+        t0 = self.next_play; t1 = t0 + n / 24000; self.next_play = t1
+        first = self.queued.get(rid, 0); self.queued[rid] = first + n
+        self.sched.append((rid, t0, t1, first))
+        if self.report:
+            self.timers.append(loop.call_later(t1 - now, self._ended, rid, t1))
+
+    def _ended(self, rid, t1):
+        if self.next_play <= t1 + 1e-6:                    # the last chunk queued: the reply has played out
+            self.command(f"played:{rid}:{self.queued[rid]}")
+
+    async def close(self):                                 # like aiohttp: closing ends the message loop
+        self.closed = True; self.q.put_nowait(None)
+
+    def types(self):
+        return [x["type"] for x in self.sent if isinstance(x, dict) and x["type"] not in ("state",)]
+
+
+class MouthServer:
+    """A TCP server standing in for MOUTH: records what EARS sends, and lets the test send F / A / D."""
+    def __init__(self):
+        self.got = []; self.writer = None; self.connected = asyncio.Event()
+
+    async def start(self):
+        self.srv = await asyncio.start_server(self.handle, "127.0.0.1", 0)
+        return self.srv.sockets[0].getsockname()[1]
+
+    async def handle(self, reader, writer):
+        self.writer = writer; self.connected.set()
+        try:
+            while True:
+                kind, payload = await async_recv_msg(reader)
+                if kind is None:
+                    break
+                self.got.append((kind, json.loads(payload) if payload else {}))
+        except (asyncio.IncompleteReadError, ConnectionError):
+            pass
+
+    async def send(self, kind, obj):
+        await async_send_msg(self.writer, kind, obj)
+
+    def kinds(self):
+        return [k for k, _ in self.got]
+
+    async def drop(self):
+        """MOUTH goes away (restart / crash): close its end of the connection."""
+        self.writer.close(); await self.writer.wait_closed()

@@ -18,6 +18,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.config import load_config  # noqa: E402
 from scripts.stack.load_ears import speech_from_mouth, CHUNK  # noqa: E402
+from scripts.stack.page import PageSim  # noqa: E402
 
 ASK = "If I save three hundred dollars every month for fifteen years at five percent interest, how much will I have?"
 CUT_IN = "Wait, sorry, quick one first: what is the capital of Australia?"
@@ -38,7 +39,7 @@ async def run(port, ask, cut_in, cut_in_after, timeout_s, barge_thr=None, turns=
             assert json.loads((await ws.receive()).data)["type"] == "ready"
             if barge_thr is not None:                       # the page's live-tuning command, this conversation only
                 await ws.send_str(f"set:barge_thr:{barge_thr}")
-            stop = asyncio.Event()
+            stop = asyncio.Event(); page = PageSim(ws)
 
             async def mic():
                 n = 0; buf = np.zeros(0, np.float32); start = time.perf_counter()
@@ -49,7 +50,7 @@ async def run(port, ask, cut_in, cut_in_after, timeout_s, barge_thr=None, turns=
                             mark("cut-in speech starts")
                         buf = np.concatenate([buf, seg])
                     chunk = buf[:CHUNK]; buf = buf[CHUNK:]
-                    await ws.send_bytes(np.pad(chunk, (0, CHUNK - len(chunk))).astype(np.float32).tobytes())
+                    await page.send_mic(np.pad(chunk, (0, CHUNK - len(chunk))), time.perf_counter() - CHUNK / 16000)
                     n += 1
                     await asyncio.sleep(max(0.0, start + n * CHUNK / 16000 - time.perf_counter()))
 
@@ -60,6 +61,9 @@ async def run(port, ask, cut_in, cut_in_after, timeout_s, barge_thr=None, turns=
                 except asyncio.TimeoutError:
                     continue
                 if msg.type == aiohttp.WSMsgType.BINARY:
+                    rid, _ = page.on_audio(msg.data)
+                    if not rid:
+                        continue                                # a backchannel
                     if state["phase"] == "leadin" and not state["audio_after_ask"]:
                         state["audio_after_ask"] = True; mark("lead-in audio")
                         await asyncio.sleep(cut_in_after)
@@ -73,11 +77,11 @@ async def run(port, ask, cut_in, cut_in_after, timeout_s, barge_thr=None, turns=
                 if m["type"] == "state" and state["phase"] == "leadin":
                     yields.append((time.perf_counter() - t0, m.get("yield") or 0.0))
                 elif m["type"] == "endpoint":
-                    mark(f"endpoint ({m.get('by')})")
+                    mark(f"endpoint ({m.get('by')})"); page.stop()
                     if state["phase"] == "ask":
                         state["phase"] = "leadin"
                 elif m["type"] == "barge":
-                    mark("barge")
+                    mark("barge"); page.stop()
                 elif m["type"] == "task_done":
                     mark(f"task_done #{m.get('task')}"); state["announce"] = True; state["phase"] = "announce"
                 elif m["type"] == "reply":

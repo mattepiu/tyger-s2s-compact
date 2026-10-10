@@ -20,5 +20,6 @@ first.
    1. Build the image from the Dockerfile that the pip-package work (HANDOFF item P) leaves.
    2. Run it with the mounts from the Dockerfile header.
    3. Run `scripts/stack/smoke.py` against it.
-5. **I-08, I-09, I-10** (low).
+5. **I-09** (low). (I-08 and I-10 were fixed by I-17 on 2026-10-10: the page's playback tags and its `played`
+   report.)
 6. **I-11 (auth and limits).** It is mandatory before anything is exposed beyond an SSH tunnel.

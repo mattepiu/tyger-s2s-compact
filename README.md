@@ -28,7 +28,11 @@ I-11 before exposing it beyond an SSH tunnel).
 1. **EARS** runs the streaming ASR encoder (nemotron) and, on top of its L15 hidden state, a set of per-frame
    heads that decide, every 80 ms: has the user's turn **ended** (take the floor), is the user **barging in**
    over the agent (stop talking), and should the agent emit a **backchannel** ("right", "mm-hm") while still
-   listening. EARS serves the web page and the WebSocket.
+   listening. EARS serves the web page and the WebSocket. To judge a barge-in, the heads hear the agent's own
+   reply next to the mic (the "2nd ear"). The page plays the reply and records the mic on one audio clock and
+   tags every mic block with the reply sample the user was hearing, so the 2nd ear lines up with what the user
+   actually heard, whatever the network and audio latencies. The agent's turn ends when the page reports it has
+   played the whole reply.
 2. **MOUTH** is the orchestrator, and hosts both models in-process (no HTTP hop to either). On an endpoint it
    streams the LLM reply, cuts it into text chunks, and sends each chunk to VoxCPM2 as soon as it closes;
    audio streams back to EARS (and on to the browser) per decode step. Chunks are whole sentences: each chunk is
@@ -128,6 +132,18 @@ Browsers only allow the mic over **HTTPS or localhost**, so either:
 `?debug=1` reveals the live tuning sliders (endpoint τ / debounce, barge, backchannel, silence fallback) and
 the voice picker. Browser DSP (echo cancellation, noise suppression, auto gain) is on.
 
+**The page's WebSocket** (`/ws`; for a client of your own; `app/ears/playback.py` has the details). All binary
+frames are little-endian, with int16 audio:
+- **mic → EARS:** `[int32 reply id][int32 reply sample, or -1][int16 mic samples at 16 kHz]`. The tag is the reply
+  sample (24 kHz) the user was hearing at the block's first mic sample, or -1 when no reply was playing. The page
+  sends 20 ms blocks, captured with an AudioWorklet on the same AudioContext that plays the reply.
+- **audio → page:** `[int32 reply id][int16 samples at 24 kHz]`. Replies and announcements are numbered from 1
+  on each connection, so a client clears its per-reply counts when it connects again. Id 0 is a backchannel,
+  which the page plays but never tags.
+- **text → EARS:** `played:<id>:<samples>` when a reply's queue has drained; `reset`, `voice:<name>`,
+  `set:<threshold>:<value>`.
+- **JSON → page:** `ready`, `state`, `endpoint`, `reply`, `barge`, `turn_done`, `task_done`, and a few more.
+
 ### Tests
 
 ```bash
@@ -143,6 +159,8 @@ for t in tests/test_*.py tests/*/test_*.py; do .venv/bin/python $t; done
 .venv/bin/python tests/mouth/test_chunker.py              # text chunking
 .venv/bin/python tests/ears/test_floor.py                 # EARS floor requests: the Conversation state machine
 .venv/bin/python tests/ears/test_parts.py                 # EARS's AgentPlayback and the web app (busy page, voices)
+.venv/bin/python tests/ears/test_second_ear.py            # the 2nd ear from the page's playback tags; the turn
+                                                          #   ends on the page's report
 .venv/bin/python tests/ears/test_asr_jobs.py              # the ASR thread finishes its jobs, even on failure
 .venv/bin/python tests/ears/test_rules.py                 # nemotron-tyger's turn rules: endpoint, backchannel, barge-in
 .venv/bin/python tests/plugins/test_plugins.py            # base classes, light imports, off-rate TTS, thresholds
@@ -162,16 +180,21 @@ CONFIG=config/fake.yaml ./run.sh                          # the whole stack on t
                                                           #   --tools: tool turns (+ --fresh: empty history each)
 .venv/bin/python scripts/stack/load_ears.py --sessions 4  # N real-time WebSocket conversations; hop lag,
                                                           #   end of speech -> endpoint -> first audio
-                                                          #   (fixed utterance and reply: runs compare)
+                                                          #   (fixed utterance and reply: runs compare);
+                                                          #   --downlink-ms 500: a slow network, turns cut short
 .venv/bin/python scripts/stack/barged_round.py --stack-log LOG   # cut in on the expert's lead-in: the answer
                                                           #   comes at the next pause (calls `smart`: ask first)
 
 # scripts/validate/: GPU parity checks (GPU free: stop run.sh first)
 .venv/bin/python scripts/validate/ears_batched.py         # batched EARS == single-session reference
+                                                          #   (--pcm16: the mic as the page sends it, int16)
 .venv/bin/python scripts/validate/rnnt.py                 # graphed RNN-T == nemotron generate()
 .venv/bin/python scripts/validate/heads.py                # the heads release loads and is consistent
 .venv/bin/python scripts/validate/barge.py                # a barge-in keeps the start of the utterance
-.venv/bin/python scripts/validate/second_ear.py           # the 2nd ear's 24->16 kHz step, old vs new
+.venv/bin/python scripts/validate/second_ear.py           # the 2nd ear's 24->16 kHz step, old vs new;
+                                                          #   --offset-ms 0,100,200,400: false barges, cut-ins
+                                                          #   and "mm-hm"s with the 2nd ear ahead (--pairing tags);
+                                                          #   --echo-db=-30,-120 --barge-thr 0.4,0.6 sweep
 .venv/bin/python scripts/validate/silent_wait.py          # barge-in while the agent waits in silence on a tool
 .venv/bin/python scripts/validate/long_turn.py            # > 20 s turns transcribed whole
 

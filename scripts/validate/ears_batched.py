@@ -6,6 +6,9 @@ Mic input = public LibriSpeech test clips (hf-internal-testing/librispeech_asr_d
 and event kinds only. Needs the GPU free (stop run.sh) and `datasets` (pip install datasets).
 
   .venv/bin/python scripts/validate/ears_batched.py      # expect "events match: True" for every session
+  .venv/bin/python scripts/validate/ears_batched.py --pcm16   # the engine gets the mic as the page sends it (int16,
+                                                              # I-17); the reference keeps float32: diffs should stay
+                                                              # within the float32 run's
 """
 import sys, time, argparse, numpy as np, torch, logging
 from pathlib import Path
@@ -20,6 +23,7 @@ from app.plugins.ears.nemotron_tyger.engine import EarsEngine
 from app.plugins.ears.nemotron_tyger.session import EarsSession
 
 ap = argparse.ArgumentParser(); ap.add_argument("--no-graph", action="store_true")
+ap.add_argument("--pcm16", action="store_true", help="the engine's mic through the page's int16 (I-17)")
 a = ap.parse_args()
 ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
 clip = lambda i: np.asarray(ds[i]["audio"]["array"], np.float32)
@@ -60,6 +64,10 @@ refs = [run_ref(h) for h in scen]
 ref = None; torch.cuda.empty_cache()          # free the reference model before the engine loads
 
 # ---- batched engine ----
+if a.pcm16:                                   # the mic as EARS decodes the page's int16 blocks (app/ears/playback.py)
+    from app.ears.playback import to_pcm16
+    scen = [[(to_pcm16(uh).astype(np.float32) / 32768.0, ah, mode) for uh, ah, mode in h] for h in scen]
+    print("the engine's mic: int16, as the page sends it; the reference's: float32")
 eng = EarsEngine(release, slots=S, cuda_graph=not a.no_graph)
 def run_eng(sessions, hop_lists, offsets):
     """Run sessions together; session k starts at tick offsets[k]. Returns per-session (trace, events), tick ms."""

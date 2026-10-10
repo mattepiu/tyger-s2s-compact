@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 import numpy as np
 from app.wire import send_msg, recv_msg
 from app.config import load_config
+from scripts.stack.page import PageSim
 
 
 def mouth_turn(sock, transcript, label, keep_audio=False):
@@ -168,34 +169,36 @@ def test_ears(cfg, speech16):
             async with sess.ws_connect(url, max_msg_size=0) as ws:
                 endpoint = False; audio = 0; t_first = t_done = None
                 barged = False
-                hop = 1600  # 100 ms of 16k f32
+                page = PageSim(ws)            # a simulated page: tags the mic, plays the reply, reports it played
+                hop = 1600  # 100 ms at 16 kHz
                 async def feed():   # real-time mic: speech, then silence for as long as the test runs
                     i = 0
                     while True:
                         chunk = x[i:i+hop] if i < len(x) else np.zeros(hop, np.float32)
-                        await ws.send_bytes(chunk.tobytes()); i += hop
+                        await page.send_mic(chunk, time.perf_counter() - hop / 16000); i += hop
                         await asyncio.sleep(hop / 16000)
                 ft = asyncio.create_task(feed())
                 t0 = time.time()
                 while time.time() - t0 < 90:
                     msg = await ws.receive()
                     if msg.type == aiohttp.WSMsgType.BINARY:
-                        if endpoint:                      # reply audio only (backchannels play before it)
-                            audio += len(msg.data); t_first = t_first or time.time()
+                        rid, n = page.on_audio(msg.data)
+                        if endpoint and rid:              # reply audio only (backchannels play before it)
+                            audio += n; t_first = t_first or time.time()
                     elif msg.type == aiohttp.WSMsgType.TEXT:
                         m = json.loads(msg.data)
                         if m.get("type") == "endpoint":
-                            endpoint = True
+                            endpoint = True; page.stop()
                         if m.get("type") == "backchannel":
                             print(f"  backchannel during speech: {m.get('text')!r}")
                         if m.get("type") == "barge":
-                            barged = True
+                            barged = True; page.stop()
                         if m.get("type") == "turn_done":
                             t_done = time.time(); break
                     elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                         break
                 ft.cancel()
-                secs = audio // 4 / 24000
+                secs = audio / 24000
                 held = (t_done - t_first) if (t_done and t_first) else -1
                 print(f"  endpoint_fired={endpoint} reply_audio={secs:.2f}s first-audio->turn_done={held:.2f}s "
                       f"barged={barged}")

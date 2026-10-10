@@ -17,7 +17,8 @@ ears:                      # turn-taking: nemotron ASR + the tyger 1.0 heads (ex
                            # encoder (ears.nemotron / nemotron_revision would override it)
   ep_thr: 0.9146           # p_end threshold (sel_dev tau) -- NOT yet retuned live (exp-11 found offline ~2x high)
   ep_deb: 2                # debounce frames (80 ms each)
-  barge_thr: 0.5
+  barge_thr: 0.4           # yield threshold: 0.5 -> 0.4 live with the I-17 2nd ear (user, 2026-10-10: cut-ins over
+                           # long replies barge; an "mm-hm" in a pause barges too, I-18)
   barge_deb: 2
   bc_thr: 0.5
   bc_deb: 2

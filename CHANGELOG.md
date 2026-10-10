@@ -25,13 +25,14 @@ throttled to half memory clock.
 | 2026-10-04 | Gemma 4 E4B FP8 responder | 225 ms | 438 ms | 940 / ~1190 ms | 30.0 GB |
 | 2026-10-06 | Gemma, production config (smart + tasks), new box | 279 ms | — | 904 / 1109 ms | 30.4 GB |
 | 2026-10-06 | after the readability refactor, no `smart`, whole-sentence first chunk | 170–282 ms | 474 / 515 ms (2 runs) | ~880 / ~1090 ms | — |
+| 2026-10-10 | after I-16 and I-17, no `smart`, new box | 174 ms | 397–453 ms (3 runs) | 793 / 992 ms | 30.2 GB |
 
 "End of speech → first audio" is what the user hears as the response gap. About 650–850 ms of it is endpoint
 detection, which live tuning of the endpoint thresholds is meant to cut.
 
 ## [Unreleased]
 
-### 2026-10-10 — A round the user cuts in on goes on as a background task (I-16)
+### 2026-10-10 — A cut-in round goes on as a background task (I-16); the 2nd ear on the page's clock (I-17)
 
 Box: a new RTX 5090 (driver 610.57.04, CUDA 13.3; 32 CPU threads, 60 GB RAM). Under load: P1, SM 2887 MHz, memory
 13 801 MHz, so not throttled.
@@ -59,6 +60,7 @@ Box: a new RTX 5090 (driver 610.57.04, CUDA 13.3; 32 CPU threads, 60 GB RAM). Un
     guards the unchanged case where part of the answer was heard.
   - **Checked live** (new `scripts/stack/barged_round.py`: TTS speech over the WebSocket, the production config; 5
     OpenAI requests over 4 runs, with the user's OK). The final run is in the table below the next item.
+    `1ba80c1`
 - **A barge tells MOUTH what had played when the user started talking**, not when the barge fired (the user's call,
   after the first live runs of I-16).
   - Why: detecting a barge takes the yield head a second or more (here up to 3.6 s). A user who cut in during the
@@ -71,7 +73,7 @@ Box: a new RTX 5090 (driver 610.57.04, CUDA 13.3; 32 CPU threads, 60 GB RAM). Un
     that fired 3.63 s after the user started; at the onset it is 0.26 s. With the barge firing 0.78 s in, it is
     0.30 s.
   - Tests: `test_barge_onset_is_when_the_user_started_talking` (rules) and
-    `test_barge_tells_mouth_what_played_when_the_user_started` (EARS). Both fail on the old code.
+    `test_barge_tells_mouth_what_played_when_the_user_started` (EARS). Both fail on the old code. `1ba80c1`
 
   The final live run, with `barge_thr` 0.4 set by the script for its own conversation (the page's slider command).
   At the default 0.5 this synthetic cut-in barged in 1 of 2 runs (the head peaked at 0.65 for one hop, then held
@@ -92,6 +94,60 @@ Box: a new RTX 5090 (driver 610.57.04, CUDA 13.3; 32 CPU threads, 60 GB RAM). Un
     the user's lines in another clip's voice.
   - With `played_s` taken at the barge, the one cut-in that barged (3.1 s in) left the round in history with nothing
     said later. That is what the onset change above fixes.
+- **The 2nd ear follows what the user heard** (I-17; also closes I-08 and I-10).
+  - **Why.** EARS paired the agent's reply audio with the mic in arrival order. The page plays the reply later,
+    and the mic's audio of that moment arrives later still. So the agent channel the turn-taking heads read ran
+    ahead of what the user heard by the downlink, the page's 40 ms lead-in, the output latency, the uplink, the
+    mic buffering, and the hop quantization. Logged on the fake stack (localhost, no network) it was already
+    219–300 ms ahead; live it was estimated at ~150–700 ms. With residual echo in the mic, that lead makes the
+    agent's own echo look like a barge-in (the table under Measured).
+  - **How.** The page plays the reply and records the mic on one AudioContext. An AudioWorklet replaces the
+    deprecated ScriptProcessor and resamples to 16 kHz continuously across render quanta (the old per-block
+    interpolation dropped a fraction of a sample at every block edge). Every 20 ms mic block is tagged with the
+    reply id and the reply sample the user was hearing at its first sample. The tag is corrected by
+    `baseLatency` + `outputLatency` + the track's input latency (the spec gives the first two consecutive
+    scopes), or is -1 when nothing played. EARS numbers replies and announcements, keeps the current reply at
+    16 kHz, and builds each agent hop from the tags, with silence exactly where nothing played. Backchannel
+    audio (id 0) is played but never tagged.
+  - **The same tags replace two guesses.** A barge's `played_s` is what the tags say the user had heard when they
+    started talking (the plugin's onset). The turn ends when the page reports `played:<id>:<samples>`; before,
+    it ended at the server's guess + 0.25 s. A 2 s timeout past the guess is now only the safety net.
+  - **Bandwidth.** int16 both ways: the mic 512 → 256 kbit/s, the reply 768 → 384 kbit/s.
+  - **Logs.** Each turn logs how far arrival-order pairing would have put the 2nd ear ahead (a timing). A slider
+    change logs the threshold and its new value, so a live tuning session can be read back.
+  - **Found in the live check, and fixed:** the page kept its per-reply sample counts across Stop → Start without
+    a reload, while EARS numbers replies from 1 on each connection.
+    - The new connection's reply 1 was tagged from where the old reply 1 had ended. Its 2nd ear went silent, and
+      its "heard" was overstated. The logged offset went negative, down to −41.6 s, in 16 turns over 4 sessions.
+    - Now the page clears its playback state on Start. EARS also treats a tag past what it has sent as nothing
+      playing, which no correct page can send.
+    - The jsdom check gained Stop → Start: its 3 new checks fail on the old page (124 / 124 now). A new GPU-free
+      test, `test_a_tag_past_what_was_sent_is_nothing_playing`, fails without the guard.
+  - **Every protocol client is updated:** `static/index.html`; `scripts/stack/load_ears.py`, `smoke.py` and
+    `barged_round.py` through a new simulated page (`scripts/stack/page.py`, which plays on the wall clock, tags
+    and reports); the tests' fake page. `load_ears.py --downlink-ms` delays its playback like a slow network and
+    counts turns that ended before the page had played them.
+  - **Tests.** `tests/ears/test_second_ear.py` (11, GPU-free):
+    - On AgentPlayback: the ear from the tags (gaps, a reply-id change, past what has arrived), a tag past what was
+      sent, what was heard by a mic position, the page's report and the logged offset, the wire frames.
+    - On the Conversation: 1000-sample blocks that straddle hops line up with a gap; a barge's `played_s` comes
+      from the tags; the turn ends on the page's report; a 0.5 s slow downlink doesn't end it early; the timeout
+      safety net; backchannel audio stays untagged.
+    - The page's logic in jsdom with fake audio APIs (a one-off check, not in the repo) passes 124 / 124 checks:
+      - the worklet's 16 kHz output (exact at 48 kHz, < 3e-3 at 44.1 kHz) and its block times;
+      - the tags around chunks, the lead-in and a backchannel, the int16 frames;
+      - a report only once the queue drains (after the output latency), none after a stop;
+      - Stop → Start.
+
+#### Changed
+- **`barge_thr` 0.5 → 0.4** (`config/default.yaml`; the user's live check of I-17, which re-checks the yield slider
+  since the heads now see the aligned 2nd ear).
+  - At 0.5, cut-ins over long replies were hard to get through. In the sessions before the switch (21 barges, all
+    at a yield ≥ 0.55), the user had talked a median 1.1 s, and up to 4 s (the onset's cap), before the barge
+    fired.
+  - At 0.4 "everything works smoothly". An "mhm" in a pause now stops the agent (I-18), which the user accepts
+    for now.
+  - Offline, 0.4 barges on 23–24 of 24 cut-ins at every echo level (table under Measured).
 
 #### Measured
 - **Barge-in while the agent waits in silence** (new `scripts/validate/silent_wait.py`: the EARS engine, public
@@ -110,6 +166,106 @@ Box: a new RTX 5090 (driver 610.57.04, CUDA 13.3; 32 CPU threads, 60 GB RAM). Un
   - The missed trials are mostly the same user clips in every case. So the limit is barge recall at the untuned
     `barge_thr` (O-01), not the silent channel.
   - An energy rule would also fire on a short "okay" said during a wait, and send the round to the background.
+    `1ba80c1`
+- **The 2nd ear by arrival order (before) and by the page's tags (after)** (I-17;
+  `scripts/validate/second_ear.py --offset-ms 0,100,200,400 --trials 24 --echo-db E [--pairing tags]`: the EARS
+  engine alone on this box, the config's thresholds, `barge_thr` 0.5).
+  - **Setup.** The reply is three public LibriSpeech sentences with 0.5 s pauses. The mic carries the agent's
+    residual echo at the level given, plus, per case:
+    - nothing: any barge is false;
+    - another clip from 1.5 s into the reply: the user cutting in;
+    - an acknowledgement 0.1 s into each pause ("Mm-hm.", "Yeah.", "Right.": VoxCPM2's zero-shot voice, 1.10, 0.40
+      and 0.28 s long). It counts if a barge follows within 1 s of its end.
+  - **"Ahead"** is how far arrival-order pairing puts the 2nd ear ahead of what the user hears (live ~150–700 ms).
+    With the tags it drops out: every offset gives the same numbers.
+
+  | echo in the mic | 2nd ear | alone: trials with a false barge | cut in: barged, median (p90) | acks that barged |
+  |---|---|---|---|---|
+  | −30 dB | arrival, 0 ms ahead | 0 / 24 | 20 / 24, 1.38 s (3.62 s) | 2 / 48 |
+  | | arrival, 100 ms ahead | 0 / 24 | 19 / 24, 1.70 s (3.62 s) | 2 / 48 |
+  | | arrival, 200 ms ahead | 4 / 24 | 19 / 24, 1.38 s (5.92 s) | 0 / 48 |
+  | | arrival, 400 ms ahead | 17 / 24 | 22 / 24, 1.06 s (3.30 s) | 0 / 48 |
+  | | **tags, any offset** | **0 / 24** | 20 / 24, 1.38 s (3.62 s) | 2 / 48 |
+  | −40 dB | arrival, 0 ms ahead | 0 / 24 | 23 / 24, 1.38 s (3.62 s) | 13 / 48 |
+  | | arrival, 100 ms ahead | 0 / 24 | 21 / 24, 1.38 s (3.62 s) | 6 / 48 |
+  | | arrival, 200 ms ahead | 2 / 24 | 21 / 24, 1.38 s (5.86 s) | 0 / 48 |
+  | | arrival, 400 ms ahead | 18 / 24 | 22 / 24, 1.06 s (3.30 s) | 0 / 48 |
+  | | **tags, any offset** | **0 / 24** | 23 / 24, 1.38 s (3.62 s) | 13 / 48 |
+  | none | arrival, 0 ms ahead | 0 / 24 | 21 / 24, 1.06 s (2.34 s) | 46 / 48 |
+  | | arrival, 100 ms ahead | 0 / 24 | 23 / 24, 1.06 s (3.04 s) | 46 / 48 |
+  | | arrival, 200 ms ahead | 0 / 24 | 22 / 24, 1.06 s (2.02 s) | 41 / 48 |
+  | | arrival, 400 ms ahead | 0 / 24 | 22 / 24, 1.06 s (2.28 s) | 2 / 48 |
+  | | **tags, any offset** | 0 / 24 | 21 / 24, 1.06 s (2.34 s) | **46 / 48** |
+
+  - **The agent's own echo.** A 2nd ear 200 ms or more ahead turns the echo into barges: at 400 ms, 17–18 of 24
+    replies were cut off while the user said nothing. By the tags, none at any offset.
+  - **The cut-in** barges as often with the tags as at 0 ms ahead.
+  - **The acks: a finding.** With a clean mic, an acknowledgement in a pause barges almost every time (46 / 48:
+    Mm-hm 16/16, Yeah 15/16, Right 15/16). The heads hear the user speak in the agent's silence, and yield.
+    - A 2nd ear 400 ms ahead hid this: the agent channel already carried the next sentence, so the heads saw
+      overlap (2 / 48).
+    - Residual echo makes the heads more cautious: 13 / 48 at −40 dB, 2 / 48 at −30 dB.
+    - So live, whether acks barge now depends on how much echo the browser's echo cancellation leaves. The
+      threshold sweep below sizes it.
+- **The barge threshold, re-checked on the aligned 2nd ear** (`second_ear.py --offset-ms 0 --pairing tags
+  --trials 24 --echo-db=-30,-40,-120 --barge-thr 0.4,0.6,0.7,0.8`; the 0.5 row is from the table above). The
+  agent alone never barged at any threshold.
+
+  | `barge_thr` | −30 dB: cut in | −30 dB: acks | −40 dB: cut in | −40 dB: acks | no echo: cut in | no echo: acks |
+  |---|---|---|---|---|---|---|
+  | 0.4 | 24 / 24, 1.38 s | 7 / 48 | 24 / 24, 1.38 s | 22 / 48 | 23 / 24, 1.06 s | 48 / 48 |
+  | **0.5** (default) | 20 / 24, 1.38 s | 2 / 48 | 23 / 24, 1.38 s | 13 / 48 | 21 / 24, 1.06 s | 46 / 48 |
+  | 0.6 | 8 / 24, 3.62 s | 2 / 48 | 9 / 24, 3.62 s | 11 / 48 | 15 / 24, 1.38 s | 46 / 48 |
+  | 0.7 | 5 / 24, 3.62 s | 1 / 48 | 5 / 24, 3.62 s | 8 / 48 | 4 / 24, 2.50 s | 44 / 48 |
+  | 0.8 | 1 / 24, 3.62 s | 1 / 48 | 1 / 24, 3.62 s | 3 / 48 | 3 / 24, 1.06 s | 38 / 48 |
+
+  (Cut-in cells: barged, median time to the barge.)
+  - **Above 0.5, most cut-ins stop barging long before the acks do.** At 0.4, 1–4 more cut-ins of 24 barge, and
+    sooner (p90 2.56 s against 3.62 s at −30 dB), but 2–9 more acks of 48 barge too. The live check chose 0.4
+    (Changed, below).
+  - **With a clean mic the threshold can't separate an ack from a cut-in.** At 0.8, 38 / 48 acks still barge and
+    3 / 24 cut-ins do. That is the new open issue I-18.
+- **No regression at offset 0** (this box):
+  - R-04b's default run is unchanged: the 24 → 16 kHz step at SNR 29.7 dB; alone, 0 false barges; cut in, 28 / 36 at
+    1.70 s.
+  - `scripts/validate/barge.py` matches the record in NOTES.md: 12 / 12, word recall 0.94, first 3 words 0.83, barge
+    at 1.22 s.
+- **int16 on the wire changes the heads no more than noise does** (`scripts/validate/ears_batched.py --pcm16`: the
+  engine gets the mic as int16, as the page now sends it; the reference keeps float32).
+  - Events and transcripts match in every session.
+  - The heads' largest difference per session is 0.0018–0.0089. The float32 run gives 0.0018–0.0059: the batched
+    engine's own noise against the reference.
+- **On the fake stack** (`CONFIG=config/fake.yaml ./run.sh`, `scripts/stack/load_ears.py`: 2 conversations of 4
+  turns, through the simulated page):
+  - the logged arrival-order offset: +219 to +300 ms on localhost, +719 to +799 ms with `--downlink-ms 500`;
+  - turns that ended before the page had played the reply: 0 at both. The old code ended `speaking` at its own
+    guess + 0.25 s, so any downlink over 0.25 s ended it while the page still played.
+- **On the stack** (no `smart`, this box; the scripts through the simulated page):
+  - `scripts/stack/smoke.py` passes. The EARS part's turn ended 7.08 s after its first audio, for 7.04 s of reply.
+  - `load.py --sessions 4 --turns 6`, 3 runs: 0 errors; turn first-audio p50 397 / 453 / 439 ms; GPU peak 30.2 GB.
+    MOUTH's wire is unchanged by I-17.
+  - `load_ears.py`, 4 turns per conversation:
+
+    | conversations | downlink | hop lag p50 / p90 | end of speech → first audio p50 | turns cut short |
+    |---|---|---|---|---|
+    | 1 | 0 | 28 / 30 ms | 793 ms | 0 / 4 |
+    | 4 | 0 | 47 / 124 ms | 992 ms | 0 / 16 |
+    | 4 | 500 ms | 47 / 113 ms | 962 ms | 0 / 16 |
+  - The logged arrival-order offset, what the old pairing would have used: +111 to +419 ms on localhost (median
+    288 ms, 21 turns), and +632 to +918 ms with the 500 ms downlink (median 782 ms, 16 turns).
+- **Live, over the SSH tunnel** (the user's mic and browser, the stack without `smart`; the 52 turns before the
+  Stop → Start bug above showed):
+  - the page's audio latency (base + output + input): 55–60 ms;
+  - the logged arrival-order offset: +316 to +783 ms, median 566 ms (p10 491, p90 725), at the top of the
+    150–700 ms estimate;
+  - the server's own playback guess ran 0.12–0.46 s ahead of what the tags say the user had heard (median 0.30 s,
+    21 barges, taken at the user's onset);
+  - every turn, live and scripted, ended on the page's report: the safety-net timeout never fired.
+  - After the fixes, with `barge_thr` 0.4 (the stack restarted; 42 turns in 2 sessions, each from a fresh page load;
+    audio latency 61 ms):
+    - offsets +324 to +656 ms, median 569 ms, all positive;
+    - 18 barges, the user's onset a median 0.80 s and at most 2.0 s before the barge (1.1 s and 4 s at 0.5);
+    - no timeouts. Stop → Start without a reload wasn't repeated live; the jsdom check covers it.
 
 ### 2026-10-06 — Readability refactor; Gemma-only responders; whole sentences to the TTS
 

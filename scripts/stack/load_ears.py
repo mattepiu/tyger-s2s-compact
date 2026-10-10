@@ -5,9 +5,12 @@ measures:
   * end of speech -> `endpoint` event (detection delay: what live threshold tuning should drive down);
   * end of speech -> first reply audio (the response gap the user feels, minus client playback buffering);
   * endpoint -> first reply audio (onset: the MOUTH + wire part of that gap);
-  * turns completed, and the reply audio per turn.
+  * turns completed, and the reply audio per turn;
+  * turns EARS ended before this page had played the reply (I-17: none, even with --downlink-ms over 250).
 End of speech is the last voiced 20 ms frame of the injected utterance, timed on the simulated mic clock (a sample
-is "captured" one 100 ms chunk before the chunk carrying it is sent, as in a browser).
+is "captured" one 100 ms chunk before the chunk carrying it is sent, as in a browser). Each conversation is a
+simulated page (scripts/stack/page.py): it plays the reply on the wall clock, tags its mic blocks with what was
+playing, and reports when a reply has played out; --downlink-ms delays its playback as a slow network would.
 Deterministic, so runs compare: the utterance is a fixed sentence spoken by MOUTH's TTS (the S message: TTS only,
 no LLM; VoxCPM2 samples at temperature 0 with a fixed seed), held in memory (nothing is written to disk). It asks
 for a reply the LLM can't vary (counting to ten), so every turn gets the same reply text; the test compares the
@@ -22,6 +25,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.wire import send_msg, recv_msg
 from app.config import load_config
+from scripts.stack.page import PageSim
 
 HOP = 5120          # 320 ms @ 16 kHz, the EARS hop
 CHUNK = 1600        # client sends 100 ms at a time, like the page
@@ -75,12 +79,12 @@ def speech_from_mouth(cfg, text, voice=None):
     return np.interp(np.linspace(0, len(a) - 1, int(len(a) * 16000 / 24000)), np.arange(len(a)), a).astype(np.float32)
 
 
-async def conversation(idx, port, speech, turns, start_delay, out):
+async def conversation(idx, port, speech, turns, start_delay, out, downlink_s=0.0):
     import aiohttp
     await asyncio.sleep(start_delay)
     res = {"lag": [], "onset": [], "detect": [], "gap": [], "early": 0, "lost": 0, "by": {}, "turns": 0,
-           "busy": False, "reply_s": [], "replies": set(), "bc": 0}
-    reply_n = None      # reply audio samples since the endpoint (24 kHz float32); None outside a reply
+           "busy": False, "reply_s": [], "replies": set(), "bc": 0, "cut_short": 0}
+    reply_n = None      # reply audio samples since the endpoint (24 kHz); None outside a reply
     reply_txt = ""      # the reply text so far (compared by hash only, never printed)
     v_end = voiced_end(speech)
     async with aiohttp.ClientSession() as sess:
@@ -88,6 +92,7 @@ async def conversation(idx, port, speech, turns, start_delay, out):
             first = await ws.receive()
             if json.loads(first.data).get("type") == "busy":
                 res["busy"] = True; out[idx] = res; return
+            page = PageSim(ws, downlink_s)
             sent = 0; hop_sent_at = []; states = 0
             phase = {"speech_left": turns, "need_silence": False, "t_endpoint": None, "waiting_reply": False,
                      "t_speech_end": None, "t_gap0": None, "utt_end": None, "last_ep": 0.0, "last_audio": 0.0}
@@ -114,7 +119,7 @@ async def conversation(idx, port, speech, turns, start_delay, out):
                         chunk = np.zeros(CHUNK, np.float32)
                     if len(chunk) < CHUNK:
                         chunk = np.pad(chunk, (0, CHUNK - len(chunk)))
-                    await ws.send_bytes(chunk.tobytes())
+                    await page.send_mic(chunk, t0 + (sent - CHUNK) / 16000)   # captured a chunk ago
                     sent += CHUNK
                     while len(hop_sent_at) < sent // HOP:
                         hop_sent_at.append(time.perf_counter())
@@ -134,8 +139,9 @@ async def conversation(idx, port, speech, turns, start_delay, out):
                     continue
                 if msg.type == aiohttp.WSMsgType.BINARY:
                     now = time.perf_counter(); phase["last_audio"] = now
-                    if reply_n is not None:
-                        reply_n += len(msg.data) // 4
+                    rid, n = page.on_audio(msg.data)
+                    if reply_n is not None and rid:
+                        reply_n += n
                     if phase["t_endpoint"] is not None:
                         res["onset"].append(now - phase["t_endpoint"]); phase["t_endpoint"] = None
                     if phase["t_gap0"] is not None:
@@ -146,7 +152,10 @@ async def conversation(idx, port, speech, turns, start_delay, out):
                         if states < len(hop_sent_at):
                             res["lag"].append(time.perf_counter() - hop_sent_at[states])
                         states += 1
+                    elif m["type"] in ("barge",):
+                        page.stop()
                     elif m["type"] == "endpoint":
+                        page.stop()                       # the page never lets a new reply overlap an old one
                         now = time.perf_counter(); phase["t_endpoint"] = phase["last_ep"] = now; reply_n = 0
                         res["by"][m.get("by")] = res["by"].get(m.get("by"), 0) + 1
                         te = phase["t_speech_end"]; phase["t_speech_end"] = None
@@ -159,6 +168,8 @@ async def conversation(idx, port, speech, turns, start_delay, out):
                     elif m["type"] == "reply":
                         reply_txt = m.get("text", "")
                     elif m["type"] == "turn_done":
+                        if page.ends.get(page.last_id, 0.0) > time.perf_counter() + 0.02:   # still playing here
+                            res["cut_short"] += 1
                         res["turns"] += 1; phase["speech_left"] -= 1; phase["waiting_reply"] = False
                         if reply_n is not None:
                             res["reply_s"].append(reply_n / 24000); reply_n = None
@@ -171,7 +182,8 @@ async def conversation(idx, port, speech, turns, start_delay, out):
 
 async def main_async(a, cfg, speech):
     out = {}
-    await asyncio.gather(*[conversation(i, int(cfg["server"]["port"]), speech, a.turns, i * 0.9, out)
+    await asyncio.gather(*[conversation(i, int(cfg["server"]["port"]), speech, a.turns, i * 0.9, out,
+                                        a.downlink_ms / 1000)
                            for i in range(a.sessions)])
     return out
 
@@ -182,6 +194,8 @@ def main():
     ap.add_argument("--turns", type=int, default=4, help="a multiple of 4 covers the hop phases evenly")
     ap.add_argument("--full-speech", action="store_true",
                     help="a three-sentence utterance with inner pauses (counts endpoints fired inside it)")
+    ap.add_argument("--downlink-ms", type=float, default=0.0,
+                    help="the simulated page plays reply audio this much later (a slow network)")
     ap.add_argument("--config", default=None)
     a = ap.parse_args()
     cfg = load_config(a.config)
@@ -210,6 +224,8 @@ def main():
     print(f"  end of speech -> first reply audio:  {ms(gap)}")
     print(f"  endpoints by {by}; fired inside the utterance: {sum(r['early'] for r in out.values())}; "
           f"utterances lost (no endpoint): {sum(r['lost'] for r in out.values())}")
+    print(f"  turns ended before the page had played the reply: {sum(r['cut_short'] for r in out.values())} "
+          f"(downlink {a.downlink_ms:g} ms)")
     replies = set().union(*(r["replies"] for r in out.values()))
     print(f"  distinct reply texts: {len(replies)}; reply audio per turn: "
           + (f"{min(reply_s):.2f}-{max(reply_s):.2f} s (n={len(reply_s)})" if reply_s else "n/a")
