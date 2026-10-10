@@ -140,6 +140,10 @@ Box: a new RTX 5090 (driver 610.57.04, CUDA 13.3; 32 CPU threads, 60 GB RAM). Un
       - a report only once the queue drains (after the output latency), none after a stop;
       - Stop → Start.
 
+    `8b1b83c`, `f1c420f` (the page check)
+- **`SECOND-EAR.md`**: a short memo for the user on how the tags align the 2nd ear per client, what the logged
+  offset means, and the device latency the page corrects for. `24d2d7c`
+
 #### Changed
 - **`barge_thr` 0.5 → 0.4** (`config/default.yaml`; the user's live check of I-17, which re-checks the yield slider
   since the heads now see the aligned 2nd ear).
@@ -148,7 +152,7 @@ Box: a new RTX 5090 (driver 610.57.04, CUDA 13.3; 32 CPU threads, 60 GB RAM). Un
     fired.
   - At 0.4 "everything works smoothly". An "mhm" in a pause now stops the agent (I-18), which the user accepts
     for now.
-  - Offline, 0.4 barges on 23–24 of 24 cut-ins at every echo level (table under Measured).
+  - Offline, 0.4 barges on 23–24 of 24 cut-ins at every echo level (table under Measured). `8b1b83c`
 
 #### Measured
 - **Barge-in while the agent waits in silence** (new `scripts/validate/silent_wait.py`: the EARS engine, public
@@ -267,6 +271,16 @@ Box: a new RTX 5090 (driver 610.57.04, CUDA 13.3; 32 CPU threads, 60 GB RAM). Un
     - offsets +324 to +656 ms, median 569 ms, all positive;
     - 18 barges, the user's onset a median 0.80 s and at most 2.0 s before the barge (1.1 s and 4 s at 0.5);
     - no timeouts. Stop → Start without a reload wasn't repeated live; the jsdom check covers it.
+- **Live on the production config** (`smart` = OpenAI and tasks on; `barge_thr` 0.4; ~10 OpenAI requests, with the
+  user's OK; 5 conversations):
+  - 31 turns, offsets +301 to +628 ms (median 535), all positive. 15 barges, at yields 0.40–0.89, the user's onset
+    a median 0.88 s before the barge. No timeouts and no warnings.
+  - 6 expert rounds:
+    - 1 played to the end;
+    - 4 were cut in on during the lead-in. All 4 went on as tasks (done 2.1–2.9 s later), and 3 were announced
+      after 1.28 s of silence. In the first conversation the user kept talking until Stop, so there was no pause
+      to announce in;
+    - 1 was cut in on just after its answer began, so it stayed a barged turn, as designed (I-16: partly heard).
 
 ### 2026-10-06 — Readability refactor; Gemma-only responders; whole sentences to the TTS
 
