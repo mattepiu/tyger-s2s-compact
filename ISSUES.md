@@ -19,7 +19,7 @@ IDs are stable; refer to them in commits (e.g. "Fix I-01").
 | I-06 | MOUTH | medium | **not reproduced** (real cost elsewhere, fixed) | Voice clip copied as ~480k Python floats on every TTS request |
 | I-07 | MOUTH | low | **fixed** | Backchannel keeps generating after the reply turn starts |
 | I-08 | EARS | low | **fixed** (by I-17) | 2nd-ear agent audio leads what the user actually hears |
-| I-09 | EARS | low | confirmed in code | MOUTH dying leaves the conversation silently dead |
+| I-09 | EARS | low | **fixed** (seemingly by R-01; needs checking) | MOUTH dying leaves the conversation silently dead |
 | I-10 | EARS | low | **fixed** (by I-17) | `play_until` is a server-side guess at client playback |
 | I-11 | security | low (demo) / high (public) | confirmed in code | No auth, no message-size or buffer limits on :7860 |
 | I-12 | MOUTH | high | **fixed** | Tool calls never enter history, so later turns stop calling tools and invent answers |
@@ -204,6 +204,12 @@ user just hears nothing.
 
 **Fix:** on MOUTH disconnect, send `{"type": "error", ...}` to the client and close the WebSocket. Optionally
 try to reconnect.
+
+**Status: fixed (user, 2026-10-10), seemingly by R-01 (`d901503`); needs checking.**
+- On a lost MOUTH, EARS sends the page `{"type": "error", "error": "mouth_lost"}` and closes the WebSocket. The
+  page then says "the agent went away — press Start to reconnect".
+- `tests/ears/test_floor.py::test_lost_mouth_ends_the_conversation` covers this on the fakes. It hasn't been checked
+  on the real stack.
 
 ### I-10 — `play_until` is a server-side guess (low, likely)
 **Where:** `app/server.py:168-169`, plus `PLAYBACK_MARGIN_S = 0.25`.

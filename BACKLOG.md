@@ -20,6 +20,9 @@ first.
    1. Build the image from the Dockerfile that the pip-package work (HANDOFF item P) leaves.
    2. Run it with the mounts from the Dockerfile header.
    3. Run `scripts/stack/smoke.py` against it.
-5. **I-09** (low). (I-08 and I-10 were fixed by I-17 on 2026-10-10: the page's playback tags and its `played`
-   report.)
+5. **I-09 — confirm the fix** (low).
+   - It was marked fixed on 2026-10-10: R-01 (`d901503`) seems to have fixed it, and
+     `test_lost_mouth_ends_the_conversation` passes on the fakes.
+   - To check it on the real stack, restart MOUTH mid-conversation: the page should say the agent went away.
+   - I-08 and I-10 were fixed by I-17 on 2026-10-10, with the page's playback tags and its `played` report.
 6. **I-11 (auth and limits).** It is mandatory before anything is exposed beyond an SSH tunnel.
