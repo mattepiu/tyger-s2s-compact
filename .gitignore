@@ -25,3 +25,6 @@ tests/page/package-lock.json
 
 # The GPU agent's memory snapshot: the user pastes it in by hand, never committed
 agent-memory/
+
+# The user's own memos (e.g. the 2nd ear): kept on the Mac, never committed
+memos/
