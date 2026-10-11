@@ -130,6 +130,35 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
       audio 397–453 against 527–571 ms.
 
   `4eb9ce2`
+- **The responders again, English only** (the user's question: what if the agent spoke only English?).
+  - Setup: `config/prompts_en.yaml`, with every Russian / Spanish few-shot turn translated and "always reply in
+    English" (Added, below). The eval runs on the 71 English cases plus 48 new harder ones (`split: hard`), with
+    `escalation.py --lang en --samples 8` and no per-model prompt override.
+
+  | | Gemma 4 E4B FP8 | Qwen3.6-35B-A3B | Gemma 4 26B-A4B |
+  |---|---|---|---|
+  | with the expert, 119 cases: right; missed; unneeded escalations | 99.4%; 0.0%; 0.0% | 99.4%; 0.7%; 0.3% | 100%; 0%; 0% |
+  | the 48 hard cases only: right; missed escalations | 98.7%; 0% | 99.0%; 1.7% | 100%; 0% |
+  | without the expert: right; tool requests answered locally | 99.8%; 0.5% | 100%; 0% | 99.4%; 1.4% |
+  | answers after a tool that say nothing (with / without the expert) | 0 / 0 | 0 / 0 | **25 / 8** (of ~320 / ~205) |
+
+  - **Without other languages, routing no longer separates the three.** The hard cases didn't change that:
+    - E4B's one steady miss is h35 ("That can't be right. Can you double check that?"), which goes to web search 5
+      of 8 times, arguably a fair way to check a fact;
+    - Qwen3.6 answers h37 ("Actually, I'm diabetic. Is that safe for me to eat?") itself 3 of 8 times.
+  - **Qwen3.6's language problems are gone,** with no reordered examples needed. What's left against it is the
+    ~200 ms on tool turns.
+  - **Gemma 26B often answers a tool result with another tool call** (5–8% of answers after a tool). In the answer
+    step MOUTH offers no tools and speaks only text, so the user hears the lead-in and then silence. A probe of the
+    answer step found:
+    - 15 calls in 320 answers: `ask_expert` 8 (after an inconclusive search), `get_weather` again 4, a made-up
+      `get_exchange_rate` 2, `get_current_time` 1;
+    - E4B and Qwen3.6 never do it.
+    - The 26B would need MOUTH to allow a second tool round, or a fallback line, before a live listen.
+  - **The recommendation stands:** keep E4B. The routing test can't show a bigger model doing better in English;
+    what it would improve is the quality of local answers, which needs its own test. If English-only is the plan,
+    Qwen3.6 becomes the more interesting candidate (once its tool-turn delay is understood), and Gemma 26B needs the
+    second tool round first.
 - **The default stack on the final code** (Gemma E4B, without `smart`): smoke passes (plain / weather / reminder /
   backchannel first audio 215 / 196 / 255 / 152 ms); `load.py --sessions 4 --turns 6 --tools --fresh` p50 377 ms, 0
   errors.
@@ -140,6 +169,19 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
   off, text only, Qwen's sampling). Qwen XML tool calls are a third parsed format again (`qwen_xml`, vLLM's
   `qwen3_coder`), with tests, and `strip_think` takes another tag pair. `llm_weights.py` loads Qwen3.x text-only.
   Numbers under Measured. `4eb9ce2`
+- **An English-only prompt file and harder English routing cases.** `config/prompts_en.yaml` is
+  `config/prompts.yaml` with every Russian / Spanish few-shot turn translated (the same roles, tools and order) and
+  "always reply in English"; use it with `mouth.prompts`. `scripts/bench/escalation_set.yaml` gains 48 harder
+  English cases (`split: hard`):
+  - disguised health, legal, money, maths and code questions;
+  - hard-sounding questions that are local;
+  - lookups with health or money words in them;
+  - research for later against a question that can be answered now;
+  - several turns (a follow-up after an escalation, a topic switch, unhappiness with an earlier answer, the stakes
+    changing);
+  - rambling turns with the question at the end.
+
+  `escalation.py --lang en` evaluates one language.
 - **GPU-free tests for EARS's turn-taking state machine** (`tests/ears/test_conversation.py`, 6 tests). The
   Conversation runs on the `fake` EARS plugin, with a fake page and a fake MOUTH over TCP, and covers what the floor
   and 2nd-ear tests didn't:

@@ -18,6 +18,7 @@ lookups), and scores that answer's speech the same way: English tool output must
 
   .venv/bin/python scripts/bench/escalation.py [--plugin gemma-4-e4b-nvfp4 --opt quantization=null] [--samples 3]
       [--split heldout] [--prompts config/prompts.yaml,/path/candidate.yaml]   several prompt files: one model load
+      [--lang en --prompts config/prompts_en.yaml]   English only (the `hard` split is English)
 """
 import sys, re, json, argparse, logging, collections
 from concurrent.futures import ThreadPoolExecutor
@@ -35,6 +36,7 @@ from app.mouth.messages import reply_prefix, turns_messages, round_messages, wit
 from app.prompts.lang import guess_language, language_text
 
 ROUTES = ("local", "tool", "expert", "background")
+SPLITS = ("tune", "heldout", "fresh", "hard")
 HERE = Path(__file__).resolve().parent
 
 
@@ -183,7 +185,8 @@ def main():
     ap.add_argument("--plugin", default=None, help="override llm.reply.plugin (e.g. gemma-4-e4b-nvfp4)")
     ap.add_argument("--prompts", default=None, help="comma-separated prompt files to compare (default: config's)")
     ap.add_argument("--set", default=str(HERE / "escalation_set.yaml"))
-    ap.add_argument("--split", choices=("all", "tune", "heldout", "fresh"), default="all")
+    ap.add_argument("--split", choices=("all",) + SPLITS, default="all")
+    ap.add_argument("--lang", default=None, help="only the cases in this language (e.g. en)")
     ap.add_argument("--samples", type=int, default=3)
     ap.add_argument("--json", default=None, help="write the rates and per-case routes here")
     ap.add_argument("--no-expert", action="store_true", help="the prompt and tools without a smart model (no "
@@ -203,6 +206,7 @@ def main():
     expert = not a.no_expert
     tasks = expert and not a.no_tasks and bool((cfg["mouth"].get("tasks") or {}).get("enabled"))
     cases = [c for c in load_set(a.set) if (a.split == "all" or c["split"] == a.split)
+             and (a.lang is None or c["lang"] == a.lang)
              and not (not expert and c["route"] == "expert") and not (not tasks and c["route"] == "background")
              and not (not tasks and (c.get("status") or any("call" in t and t["call"]["name"] in (START, CANCEL)
                                                               for t in c.get("history", []))))]
@@ -216,8 +220,10 @@ def main():
         mode = "tasks" if tasks else "expert" if expert else "no expert"
         title = f"{name}, prompts {Path(pf).name} ({mode}), split {a.split}, {len(cases)} cases x {a.samples}"
         out[pf] = report(results, title)
-        for split in ("tune", "heldout", "fresh") if a.split == "all" else ():
-            out[pf][split] = report([r for r in results if r[0]["split"] == split], f"{title}: {split} only")
+        for split in SPLITS if a.split == "all" else ():
+            part = [r for r in results if r[0]["split"] == split]
+            if part:
+                out[pf][split] = report(part, f"{title}: {split} only")
         wrong = collections.defaultdict(list); said = collections.defaultdict(list)
         for c, got, text, pbtext in results:
             for issue in speech_issues(c, pbtext or ""):

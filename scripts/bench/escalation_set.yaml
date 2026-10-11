@@ -314,3 +314,107 @@ cases:
         answer: Sure, I'll look into that and get back to you.
     status: '[Background tasks you started for the user: #1 "Compare noise-cancelling headphones under 300 dollars": still working on it, 40 seconds so far]'
     user: Also, could you research good budget microphones for podcasting and get back to me on that too?
+  # ---- hard, English only (2026-10-11): the boundaries the cases above no longer separate (E4B and Gemma 4 26B were
+  # both at ~100% on the English cases). Held out like `fresh`: never used to tune a prompt.
+  # disguised expert questions: short, casual, with real consequences or several steps
+  - {id: h01, route: expert, lang: en, split: hard, user: "Quick one, can I take ibuprofen if I'm already on blood pressure meds?"}
+  - {id: h02, route: expert, lang: en, split: hard, user: "My landlord is keeping my whole deposit for normal wear and tear. Is that even legal?"}
+  - {id: h03, route: expert, lang: en, split: hard, user: "Is it smarter to pay off my car loan early or put the money into my retirement account?"}
+  - {id: h04, route: expert, lang: en, split: hard, user: "If I drive three hundred forty miles at twenty eight miles per gallon and gas is three seventy nine a gallon, what does the trip cost?"}
+  - {id: h05, route: expert, lang: en, split: hard, user: "My eight month old has a fever of thirty nine and a half. Should I take her to the ER?"}
+  - {id: h06, route: expert, lang: en, split: hard, user: "Can you write a SQL query that finds customers who ordered in January but not in February?"}
+  - {id: h07, route: expert, lang: en, split: hard, user: "What's the difference between a Roth and a traditional IRA for someone in a high tax bracket?"}
+  - {id: h08, route: expert, lang: en, split: hard, user: "My boss wants me to sign a non-compete. What should I watch out for?"}
+  - {id: h09, route: expert, lang: en, split: hard, user: "What's the monthly payment on a thirty thousand dollar student loan at six percent over ten years?"}
+  - {id: h10, route: expert, lang: en, split: hard, user: "Explain why the sky is blue, but properly, with the actual physics."}
+  # hard-sounding, but a simple fact, a short how-to or chit-chat: answered locally
+  - {id: h11, route: local, lang: en, split: hard, user: "What's the square root of a hundred forty four?"}
+  - {id: h12, route: local, lang: en, split: hard, user: "What does DNA stand for?"}
+  - {id: h13, route: local, lang: en, split: hard, user: "In one sentence, what is photosynthesis?"}
+  - {id: h14, route: local, lang: en, split: hard, user: "Who was the first person to walk on the moon?"}
+  - {id: h15, route: local, lang: en, split: hard, user: "What's the boiling point of water in Fahrenheit?"}
+  - {id: h16, route: local, lang: en, split: hard, user: "What's a good trick for remembering people's names?"}
+  - {id: h17, route: local, lang: en, split: hard, user: "Is a tomato a fruit or a vegetable?"}
+  - {id: h18, route: local, lang: en, split: hard, user: "What's heavier, a kilo of feathers or a kilo of steel?"}
+  - {id: h19, route: local, lang: en, split: hard, user: "How do you spell necessary?"}
+  - {id: h20, route: local, lang: en, split: hard, user: "Say something nice to cheer me up, I had a rough day."}
+  # lookups with health / money words in them: a tool, not the expert
+  - {id: h21, route: tool, lang: en, split: hard, user: "What's the weather in Chicago tomorrow, and do I need an umbrella?"}
+  - {id: h22, route: tool, also: [expert], lang: en, split: hard, user: "What are mortgage rates right now, and is it a good time to refinance?"}
+  - {id: h23, route: tool, lang: en, split: hard, user: "How did the Lakers do last night?"}
+  - {id: h24, route: tool, lang: en, split: hard, user: "What's the euro to dollar exchange rate right now?"}
+  - {id: h25, route: tool, lang: en, split: hard, user: "Remind me to take my medication at eight tonight."}
+  - {id: h26, route: tool, lang: en, split: hard, user: "Message my sister that the doctor's appointment moved to Thursday."}
+  - {id: h27, route: tool, lang: en, split: hard, user: "Is the stock market up or down today?"}
+  # research for later against a question that can be answered now
+  - {id: h28, route: background, lang: en, split: hard, user: "Dig into the best beginner road bikes under a thousand dollars and get back to me."}
+  - {id: h29, route: background, lang: en, split: hard, user: "When you have a minute, put together a comparison of the main meal kit services and let me know."}
+  - {id: h30, route: background, also: [expert], lang: en, split: hard, user: "Draft a full wedding toast for my brother, I'd like to hear it when it's ready."}
+  - {id: h31, route: expert, lang: en, split: hard, user: "Compare the iPhone and the Pixel cameras for me."}
+  # several turns
+  - id: h32
+    route: expert                # follow-up on an escalated topic
+    lang: en
+    split: hard
+    history:
+      - user: How do capital gains taxes work when you sell a house?
+        expert: How do capital gains taxes work when someone sells their home?
+        answer: If it was your main home and you lived there at least two of the last five years, a big part of the gain is usually tax free; above that it's taxed as a capital gain.
+    user: And does that change if I only lived there for one year?
+  - id: h33
+    route: local                 # a new, easy topic after an escalated one
+    lang: en
+    split: hard
+    history:
+      - user: Should I refinance my mortgage if rates drop by one percent?
+        expert: Is refinancing worth it if mortgage rates drop by one percentage point?
+        answer: Often yes, if you'll stay long enough for the monthly savings to cover the closing costs, usually a few years.
+    user: Anyway, what's your favorite season?
+  - id: h34
+    route: tool                  # a follow-up lookup
+    lang: en
+    split: hard
+    history:
+      - user: What's the weather in Paris today?
+        call: {name: get_weather, arguments: {location: Paris}}
+        result: {location: Paris, unit: celsius, answer: "Cloudy, 16 C."}
+        answer: It's cloudy in Paris, about sixteen degrees.
+    user: And what about Rome?
+  - id: h35
+    route: expert                # unhappy with a local answer
+    lang: en
+    split: hard
+    history:
+      - user: How far away is the moon?
+        reply: About a thousand kilometers.
+    user: That can't be right. Can you double check that?
+  - id: h36
+    route: local                 # small talk after a local answer
+    lang: en
+    split: hard
+    history:
+      - user: Do you ever get bored?
+        reply: Not really, every conversation is a little different, which keeps things interesting.
+    user: Haha, fair enough. Thanks for chatting.
+  - id: h37
+    route: expert                # the stakes change mid-conversation
+    lang: en
+    split: hard
+    history:
+      - user: What's an easy dessert I can make tonight?
+        reply: A quick fruit crumble, with oats, butter and brown sugar over some sliced apples, is hard to get wrong.
+    user: Actually, I'm diabetic. Is that safe for me to eat?
+  # long, rambling turns with the real question at the end
+  - {id: h38, route: expert, lang: en, split: hard, user: "So I was talking to my neighbor yesterday about her garden and her tomatoes, anyway, the real question is, I've had chest tightness on and off for a week when I climb stairs. Should I be worried?"}
+  - {id: h39, route: local, lang: en, split: hard, user: "Ugh, long day, the traffic was terrible, I spilled my coffee, and now I just want to know, how many ounces are in a cup?"}
+  - {id: h40, route: tool, lang: en, split: hard, user: "I'm heading out soon and my friend says it might storm, she's usually wrong, but can you check the weather in Denver for this afternoon?"}
+  # reasoning, checking a claim, code
+  - {id: h41, route: expert, lang: en, split: hard, user: "Take your time on this one. If three cats catch three mice in three minutes, how long do a hundred cats need for a hundred mice?"}
+  - {id: h42, route: expert, lang: en, split: hard, user: "Can you check my reasoning? At five percent a year my money doubles in about fourteen years, right?"}
+  - {id: h43, route: expert, lang: en, split: hard, user: "What happens if you stop taking antidepressants suddenly?"}
+  - {id: h44, route: expert, lang: en, split: hard, user: "Write a Python script that renames all the photos in a folder by the date they were taken."}
+  # more local ones
+  - {id: h45, route: local, lang: en, split: hard, user: "What's the opposite of generous?"}
+  - {id: h46, route: local, lang: en, split: hard, user: "Tell me a joke about computers."}
+  - {id: h47, route: local, lang: en, split: hard, user: "Recommend a good movie for a rainy night."}
+  - {id: h48, route: local, lang: en, split: hard, user: "What's the plural of cactus?"}
