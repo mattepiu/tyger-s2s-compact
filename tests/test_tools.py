@@ -28,24 +28,24 @@ def call(name, **arguments):
 
 
 def test_registry_order_and_groups():
-    assert tools.names() == ["get_weather", "web_search", "get_current_time", "set_reminder", "send_message",
+    assert tools.names() == ["get_current_time", "set_reminder", "send_message",
                              "ask_expert", "start_task", "cancel_task", "finish_task"]
-    assert tools.names("base") == tools.names()[:5] and tools.names("tasks") == ["start_task", "cancel_task"]
+    assert tools.names("base") == tools.names()[:3] and tools.names("tasks") == ["start_task", "cancel_task"]
     offered = [t["function"]["name"] for t in tools.build_tools(PROMPTS, expert=True)]
     assert offered == tools.names("base", "expert")
 
 
 def test_flagged_call_never_runs():
     with stub_tools(lambda n, a: (_ for _ in ()).throw(AssertionError("ran"))):
-        assert run_call({**call("get_weather", unit="kelvin"), "error": "bad unit"}, ToolContext()) == {"error": "bad unit"}
+        assert run_call({**call("get_current_time", timezone=5), "error": "bad tz"}, ToolContext()) == {"error": "bad tz"}
 
 
 def test_lookups_run_for_real():
     ran = []
-    with stub_tools(lambda n, a: ran.append((n, a)) or {"answer": "sunny"}):
-        assert run_round([call("get_weather", location="Oslo"), call("web_search", query="q")], ToolContext()) == \
-            [{"answer": "sunny"}] * 2
-    assert sorted(ran) == [("get_weather", {"location": "Oslo"}), ("web_search", {"query": "q"})]
+    with stub_tools(lambda n, a: ran.append((n, a)) or {"ok": True}):
+        assert run_round([call("get_current_time", timezone="Europe/Oslo"), call("set_reminder", text="x", time="9")],
+                         ToolContext()) == [{"ok": True}] * 2
+    assert sorted(ran) == [("get_current_time", {"timezone": "Europe/Oslo"}), ("set_reminder", {"text": "x", "time": "9"})]
 
 
 def test_expert_only_where_escalation_is_on():

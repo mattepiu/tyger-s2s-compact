@@ -5,10 +5,10 @@
 reply_shots:
   - user: Do you like rainy days?
     reply: I do, honestly. There's something cozy about rain on the window and a warm drink.
-  - user: Какая сейчас погода в Сочи?
-    call: {name: get_weather, arguments: {location: Сочи}}
-    result: {location: Сочи, unit: celsius, answer: "Sunny, 24 C, light sea breeze."}
-    answer: В Сочи сейчас солнечно, около двадцати четырёх градусов и лёгкий ветер с моря.
+  - user: Который час сейчас в Новосибирске?
+    call: {name: get_current_time, arguments: {timezone: Asia/Novosibirsk}}
+    result: {timezone: Asia/Novosibirsk, time: "21:50", date: "Saturday, 03 October 2026", tz_abbrev: "+07"}
+    answer: В Новосибирске сейчас без десяти десять вечера.
   - user: Сколько планет в Солнечной системе?
     reply: Восемь, от Меркурия до Нептуна.
   - user: ¿Qué hora es ahora en Lima?

@@ -1,7 +1,7 @@
 # tyger v1 — a deployable full-duplex voice agent on one GPU
 
-Real-time spoken conversation in the browser: your mic → live turn-taking → a reasoning LLM with web tools
-→ a cloned voice, all on a single GPU. The agent knows when you've finished a turn, when you're interrupting
+Real-time spoken conversation in the browser: your mic → live turn-taking → a reasoning LLM with tools and a
+hosted expert that searches the web → a cloned voice, all on a single GPU. The agent knows when you've finished a turn, when you're interrupting
 it, and when to drop in a quick "mm-hm" — then answers in a voice cloned from a reference clip you provide.
 
 This repo is the **inference / serving** project. The turn-taking model itself (the endpoint head and the
@@ -40,7 +40,7 @@ I-11 before exposing it beyond an SSH tunnel).
    (`mouth.first_chunk: clause` lets the first chunk end at a comma instead: audio ~30–95 ms sooner, but the
    intonation restarts mid-sentence.) No chunk is cut below 40 characters, so short replies go to the TTS
    whole. On a tool call
-   it speaks a short contextual filler ("Checking the current weather in Oslo.") the moment the call starts
+   it speaks a short contextual filler ("Checking the time in Tokyo.") the moment the call starts
    decoding, runs the tool as soon as the call parses, adds a "still looking" line if the tool is slow, then
    speaks the result. On a barge it stops within one audio chunk, aborts the live LLM/TTS requests, and keeps
    what the user heard of the reply in the conversation history.
@@ -67,8 +67,9 @@ uv pip install --python .venv/bin/python -r requirements.txt --torch-backend=aut
 
 Copy `.env.example` to `.env` (gitignored) and fill in:
 
-- **`TAVILY_API_KEY`** — powers `web_search` and `get_weather`. Without it those tools return an error and the
-  model says it couldn't look it up; it never invents a value.
+- **`OPENAI_API_KEY`** — the `smart` model (`llm.smart` in `config/default.yaml`): escalations, background tasks,
+  and live facts (weather, news, prices) through OpenAI's web search. There is no local web search or weather tool.
+  Without the key, comment out `llm.smart`: the agent then says it can't check live facts.
 - **`HF_TOKEN`** — pulls the **private** turn-taking heads release (`ears.heads` in `config/default.yaml`). If a token
   already exists at `$HF_HOME/token`, leave this blank.
 
@@ -225,6 +226,7 @@ design is in `PLUGINS.md`). Each block names its `plugin:`; the rest of the bloc
 | LLM | `qwen3.6-35b-a3b-nvfp4` | local, vLLM in MOUTH | trial for a 48 GB card: NVIDIA's Qwen3.6-35B-A3B (Qwen XML tool calls, Qwen's sampling, `config/prompts/` override); no `quantization` |
 | LLM | `qwen3.5-35b-a3b-gptq` | local, vLLM in MOUTH | trial, failed the routing gate (25% missed escalations); no `quantization` |
 | LLM | `openai` | **hosted** | any OpenAI-compatible chat endpoint (`base_url`: OpenAI, Groq, Cerebras, a vLLM server) |
+| LLM | `openai-responses` | **hosted** | OpenAI's Responses API with OpenAI's web search: the `smart` role (escalations, live facts, tasks) |
 | LLM | `anthropic` | **hosted** | the Claude Messages API; default `claude-opus-5-5`, `effort: low`, server-side refusal fallback |
 | TTS | `voxcpm2` | local, vLLM-Omni in MOUTH | cloned voices from `voices/` |
 | EARS | `nemotron-tyger-1.0` | local, in EARS | nemotron ASR + the tyger 1.0 turn-taking heads |
@@ -343,7 +345,9 @@ With an `llm.smart` block, the local `reply` model can hand work to a bigger hos
 calling a tool, so easy turns pay nothing extra:
 
 - **`ask_expert`** for a question that needs care now: maths, code, health / money / legal advice, comparisons,
-  planning, long explanations, or "think carefully". The lead-in fits ("let me think about that"), the smart
+  planning, long explanations, or "think carefully"; and for live facts (weather, news, prices, scores), which the
+  smart model looks up with OpenAI's web search (`openai-responses`, `web_search: true`). The lead-in fits ("let me
+  think about that", "let me pull up the Lisbon forecast"), the smart
   request starts the moment the call is read, and its answer streams straight to the voice (live: answer audio at
   ~1.0–1.3 s, under the lead-in). Follow-ups on the same topic go to it too.
 - **`start_task`** for work that takes minutes: research, comparing many options, a multi-day plan, a long draft.
@@ -358,7 +362,7 @@ calling a tool, so easy turns pay nothing extra:
 
 ```yaml
 llm:
-  smart: {plugin: openai, model: gpt-5.4-mini, max_tokens: 1024, extra_body: {reasoning_effort: none},
+  smart: {plugin: openai-responses, model: gpt-5.4-mini, max_tokens: 1024, web_search: true, reasoning_effort: low,
           api_key_env: OPENAI_API_KEY}
 mouth:
   escalation: {context_turns: 4, max_steps: 3}
@@ -370,7 +374,8 @@ Routing is measured by `scripts/bench/escalation.py` (local model only, no cost)
 synthetic EN / RU / ES cases × 8 samples go the right way, 0.4% of hard questions are answered locally, no easy
 one is escalated (`NOTES.md` → steps 11 and 14). Cost on ordinary turns: the longer prompt adds ~30 ms (expert) and
 ~90 ms (expert + tasks) to first audio. Without `llm.smart` neither tool is offered and the prompt is the plain one.
-Tasks need a web-search key (`TAVILY_API_KEY`) to find anything current; without it their searches fail.
+Tasks and live facts need the smart model's web search (`openai-responses`); each search is billed on top of the
+tokens. Without `llm.smart` the agent answers what it knows and says plainly that it can't check live facts.
 
 ## Models & licences
 
@@ -380,7 +385,7 @@ Tasks need a web-search key (`TAVILY_API_KEY`) to find anything current; without
 | turn-taking heads | `nineninesix/TYGER-S2S-endpointer` v0.1.0-rc1 (private; Qwen3-0.6B decoder with its LoRA merged + the heads) | Apache-2.0 (modified Qwen3-0.6B: see its NOTICE) |
 | responder | `google/gemma-4-E4B-it`, FP8 at load (was `Qwen/Qwen3.5-4B`, before that `Qwen/Qwen3-4B-Instruct-2507`) | Apache-2.0 |
 | TTS | `openbmb/VoxCPM2` | Apache-2.0 |
-| web tools | Tavily API | commercial API (your key) |
+| expert, background tasks, web search | OpenAI `gpt-5.4-mini` with OpenAI's web search (`llm.smart`) | commercial API (your key) |
 
 ## Privacy
 

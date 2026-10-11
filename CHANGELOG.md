@@ -33,7 +33,7 @@ detection, which live tuning of the endpoint thresholds is meant to cut.
 
 ## [Unreleased]
 
-### 2026-10-11 — A new card, the RTX PRO 5000 (48 GB); the silence fallback removed
+### 2026-10-11 — A new card, the RTX PRO 5000 (48 GB); the silence fallback and the weather / web-search tools removed
 
 Box: an **RTX PRO 5000 Blackwell** (48 935 MiB, sm_120 like the 5090; driver 595.84, CUDA 13.2; ECC off; 32 CPU
 threads, 62 GB RAM, 100 GB disk). Under load: P1, SM ~2540 MHz (max 3090), memory 13 365 MHz, at most 234 W of its
@@ -159,6 +159,8 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
     what it would improve is the quality of local answers, which needs its own test. If English-only is the plan,
     Qwen3.6 becomes the more interesting candidate (once its tool-turn delay is understood), and Gemma 26B needs the
     second tool round first.
+
+  `0ab7d95`
 - **The default stack on the final code** (Gemma E4B, without `smart`): smoke passes (plain / weather / reminder /
   backchannel first audio 215 / 196 / 255 / 152 ms); `load.py --sessions 4 --turns 6 --tools --fresh` p50 377 ms, 0
   errors.
@@ -181,7 +183,22 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
     changing);
   - rambling turns with the question at the end.
 
-  `escalation.py --lang en` evaluates one language.
+  `escalation.py --lang en` evaluates one language. `0ab7d95`
+- **`openai-responses`, an LLM plugin for OpenAI's Responses API with its built-in web search**
+  (`app/plugins/llm/openai_responses.py`). It is now the `smart` role in `config/default.yaml` (`gpt-5.4-mini`,
+  `web_search: true`, `reasoning_effort: low`), so the expert can look up the live facts the removed tools used to
+  (Removed, below).
+  - It sends `store: false`, offers the function tools MOUTH gives the expert next to `{"type": "web_search"}`, and
+    maps the neutral history to Responses items (`function_call` /
+    `function_call_output`).
+  - The stream parser speaks the text deltas, names a function call as soon as it starts, and runs no call cut off by
+    `max_output_tokens`. A refusal becomes a `refusal` event and a failed response an `LLMError`. Searches are only
+    counted, never logged.
+  - Tests: `tests/plugins/test_hosted_openai_responses.py` (no network, no key): history and tool conversion, the
+    parser on synthetic event streams, and the plugin on a stub client (what it sends, stop closes the stream and
+    frees the slot, HTTP 500 → `LLMError`).
+  - **Not checked live yet** (paid calls need the user's OK). Also open: whether web search accepts
+    `reasoning_effort: none` (`low` is set until that is checked).
 - **GPU-free tests for EARS's turn-taking state machine** (`tests/ears/test_conversation.py`, 6 tests). The
   Conversation runs on the `fake` EARS plugin, with a fake page and a fake MOUTH over TCP, and covers what the floor
   and 2nd-ear tests didn't:
@@ -260,6 +277,52 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
     The GPU-free tests and the page check (124 / 124) pass.
 
   `2a8174d`
+- **The weather and web-search tools (`get_weather`, `web_search`, Tavily)** (the user's call: "remove weather and
+  web search tools completely. For those cases call hosted model"). Weather, prices, news, scores and opening hours
+  now go to the hosted expert (`ask_expert`), which searches the web with OpenAI's built-in search (the new
+  `openai-responses` plugin, Added above). The reply model keeps `get_current_time`, `set_reminder` and
+  `send_message`.
+  - Code: `app/tools/lookups.py` keeps only `get_current_time`; `TAVILY_API_KEY` is gone from `.env.example`,
+    `run.sh`, `app/config.py`, MOUTH's start-up check and README (which now asks for `OPENAI_API_KEY`).
+  - Prompts (`config/prompts.yaml`, `config/prompts_en.yaml`, the Qwen3.6 override):
+    - with the expert, the reply and task prompts send live facts to `ask_expert`, with three new hand-off examples
+      (Lisbon weather in English, a Zenit score in Russian, the petrol price in Spain in Spanish);
+    - without it, the reply prompt says the model can't check live facts and must never guess one;
+    - the Russian weather example became a time question, the lookup lead-ins are about time, reminders and
+      messages, and the expert lead-ins gained the live-fact ones;
+    - the `smart` prompt tells the expert to search the web.
+  - `scripts/bench/escalation_set.yaml`: the 25 live-fact cases are now `expert` (17 English, 8 Russian /
+    Spanish), so the set has 60 local, 15 tool, 91 expert and 22 background cases. `smoke.py` and `load.py --tools`
+    ask for the time instead of the weather.
+  - Before → after, routing on this box (`escalation.py --samples 8`, English prompts, `--lang en`, 119 cases; no
+    hosted calls):
+
+    | | Gemma 4 E4B FP8 | Qwen3.6-35B-A3B | Gemma 4 26B-A4B |
+    |---|---|---|---|
+    | with the expert: right; missed escalations | 99.4 → 99.9%; 0.0 → 0.2% | 99.4 → 99.7%; 0.7 → 0.5% | 100 → 99.5%; 0 → 0.9% |
+    | the 17 live-fact cases to the expert (after) | 136 / 136 | 136 / 136 | 136 / 136 |
+    | without the expert: right (cases) | 99.8% (62) → 100% (44) | 100% → 100% | 99.4% → **96.6%** |
+    | without the expert: action requests answered without the call | 1 / 208 → 0 / 64 | 0 → 0 | 3 / 208 → **12 / 64** |
+    | answers after a tool that say nothing, with / without the expert | 0 / 0 → 0 / 0 | 0 / 0 → 0 / 0 | **25 / 8 → 0 / 0** |
+
+    - Every live-fact question goes to the expert in all three models, with no example needed: the prompt sentence
+      alone does it (an A/B without the three new examples routed 200 / 200 too, with a little more wrong-language
+      speech, 11 against 7, so they stay).
+    - **Gemma 26B's silent answers are gone.** All of them were a second tool call after a search or weather result.
+    - New against Gemma 26B: without the expert it answers "Messaging isn't connected yet" for f05 and h26 without
+      calling `send_message` (12 of 64 samples), copying the example's answer; and with the expert it promises to
+      research b24 without starting the task (5 of 8).
+  - Gemma E4B on the default (multilingual) prompts, with tasks, all 188 cases: 98.2% and 99.0% right in two runs of
+    the same prompts (missed escalations 1.7 / 0.3%; all 200 live-fact samples to the expert). On the 140 older cases
+    that is 98.3 / 98.8%, against 99.1% at `79fbfa5`. The runs differ mostly in noise (h10 6 / 8 then 1 / 8), but one
+    shift held in all three runs: b15 (Spanish "compare the online banks… and let me know what you find") goes to the
+    expert 3–4 of 8 times again, against 0 / 8 after `79fbfa5`. That's a fair answer now that the expert can search,
+    but not the background task the case asks for.
+  - **Open: without the expert, E4B answers Russian and Spanish live-fact questions in English.** A probe of the 22
+    live-fact questions without history (3 samples each, default prompts, no `smart`): 66 / 66 say plainly they
+    can't check, none guesses a value, but all 24 Russian / Spanish samples were in English ("I'm sorry, I can't
+    check the weather right now."). It copies the English wording of the no-expert prompt; the routing eval doesn't
+    see it, since it skips expert cases when there is no expert. A rewording is drafted, not tested yet.
 
 ### 2026-10-10 — A cut-in round goes on as a background task (I-16); the 2nd ear on the page's clock (I-17)
 

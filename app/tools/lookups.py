@@ -1,8 +1,10 @@
-"""The lookup tools, run for real: web_search and get_weather via Tavily (env TAVILY_API_KEY, the key never
-logged), get_current_time locally (zoneinfo). Schemas from exp-10's live-mic toolcall_eval. Pure stdlib (urllib).
-Each returns a small JSON-able dict; on failure {"error": ...}, so the model can tell the user.
+"""The lookup tool, run for real: get_current_time, locally (zoneinfo). Pure stdlib. It returns a small JSON-able
+dict; on failure {"error": ...}, so the model can tell the user.
+
+There is no web search or weather tool here (removed 2026-10-11, the user's call): live facts (weather, news,
+prices, scores) go to the expert or a background task, and the `smart` model looks them up with its own web search
+(the `openai-responses` plugin).
 """
-import os, json, urllib.request, urllib.error
 from datetime import datetime
 try:
     from zoneinfo import ZoneInfo
@@ -10,41 +12,6 @@ except Exception:
     ZoneInfo = None
 
 from app.tools.registry import tool
-
-# ---- Tavily (web_search + get_weather) ---------------------------------------------------------
-_TAVILY_URL = "https://api.tavily.com/search"
-def _tavily(query, max_results=5):
-    key = os.environ.get("TAVILY_API_KEY")
-    if not key:
-        return {"error": "TAVILY_API_KEY is not set on the server"}
-    body = json.dumps({"api_key": key, "query": query, "search_depth": "basic",
-                       "include_answer": True, "max_results": max_results}).encode()
-    req = urllib.request.Request(_TAVILY_URL, data=body,
-                                 headers={"Content-Type": "application/json",
-                                          "Authorization": f"Bearer {key}"})
-    try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            d = json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        return {"error": f"tavily http {e.code}"}
-    except Exception as e:
-        return {"error": f"tavily {type(e).__name__}"}
-    results = [{"title": x.get("title"), "content": (x.get("content") or "")[:500], "url": x.get("url")}
-               for x in d.get("results", [])[:max_results]]
-    return {"answer": d.get("answer"), "results": results}
-
-@tool("get_weather", {"type": "object", "properties": {"location": {"type": "string"},
-      "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}}, "required": ["location"]})
-def get_weather(location, unit="celsius"):
-    r = _tavily(f"current weather right now in {location} in degrees {unit}", max_results=3)
-    if "error" in r:
-        return r
-    return {"location": location, "unit": unit, "answer": r.get("answer"), "sources": r.get("results")}
-
-
-@tool("web_search", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})
-def web_search(query):
-    return _tavily(query)
 
 
 # ---- local time ---------------------------------------------------------------------------------

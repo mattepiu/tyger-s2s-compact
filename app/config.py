@@ -1,4 +1,4 @@
-"""Load config/default.yaml + v1/.env and check its plugin shape. Secrets (TAVILY_API_KEY, HF_TOKEN) come from the env /
+"""Load config/default.yaml + v1/.env and check its plugin shape. Secrets (HF_TOKEN, OPENAI_API_KEY) come from the env /
 .env and are never written to logs."""
 from __future__ import annotations
 import os

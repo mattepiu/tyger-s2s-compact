@@ -1,5 +1,5 @@
 # tyger v1 config. Plugins, model options, thresholds, voices, flags. Secrets are NOT here — they live in
-# .env (TAVILY_API_KEY, HF_TOKEN). Thresholds are frozen into this file at milestone V2 (live tuning).
+# .env (HF_TOKEN, OPENAI_API_KEY). Thresholds are frozen into this file at milestone V2 (live tuning).
 # Relative paths are relative to the repo root. The LLM, TTS and EARS models are plugins (app/plugins,
 # PLUGINS.md): each block names its plugin, and the rest of the block is that plugin's options.
 
@@ -38,12 +38,14 @@ llm:                       # MOUTH's LLM roles; each block is one plugin instanc
     max_num_seqs: 8                # 4 sessions x (turn + backchannel) batched together
     temperature: 0.7
   filler: reply            # backchannels, tool lead-ins, still-looking lines: the same instance
-  smart:                   # optional: answers turns the reply model escalates (ask_expert). HOSTED: escalated
-    plugin: openai         # turns and their mouth.escalation.context_turns of transcript go to OpenAI
-    model: gpt-5.4-mini    # step 11 probe: first text p50 ~0.5 s, total ~1.1 s (gpt-5.5: ~1.0 s / 2.7 s)
-    max_tokens: 1024       # sent as max_completion_tokens (gpt-5*)
-    extra_body: {reasoning_effort: none}   # on Chat Completions gpt-5.x takes function tools only without reasoning
+  smart:                   # optional: answers turns the reply model escalates (ask_expert), live facts included,
+    plugin: openai-responses   # and runs background tasks. HOSTED: escalated turns and their
+    model: gpt-5.4-mini    # mouth.escalation.context_turns of transcript go to OpenAI; it searches the web there
+    max_tokens: 1024       # max_output_tokens
+    web_search: true       # OpenAI's web search: weather, news, prices (no local web search or weather tool)
+    reasoning_effort: low  # not yet checked live whether web search takes `none` (the Chat Completions setting)
     api_key_env: OPENAI_API_KEY
+  # smart: {plugin: openai, model: gpt-5.4-mini, max_tokens: 1024, extra_body: {reasoning_effort: none}}   # no search
   # smart: {plugin: anthropic, model: claude-opus-5-5, effort: low, max_tokens: 2048}   # once there's a key
 
 tts:                       # VoxCPM2, in-process vLLM-Omni AsyncOmni inside the MOUTH

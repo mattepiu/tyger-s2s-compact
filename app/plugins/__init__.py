@@ -10,6 +10,7 @@ REGISTRY = {
             "qwen3.6-35b-a3b-nvfp4": "app.plugins.llm.qwen_moe:Qwen36MoE_NVFP4",   # trial (48 GB card)
             "qwen3.5-35b-a3b-gptq": "app.plugins.llm.qwen_moe:Qwen35MoE_GPTQ",     # trial (48 GB card)
             "openai": "app.plugins.llm.openai_compat:OpenAICompatLLM",     # hosted: transcripts leave the box
+            "openai-responses": "app.plugins.llm.openai_responses:OpenAIResponsesLLM",   # hosted, OpenAI web search
             "anthropic": "app.plugins.llm.anthropic:AnthropicLLM",         # hosted: transcripts leave the box
             "fake": "app.plugins.llm.fake:FakeLLM"},
     "tts": {"voxcpm2": "app.plugins.tts.voxcpm2:VoxCPM2",

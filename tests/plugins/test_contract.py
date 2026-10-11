@@ -73,7 +73,7 @@ def check_llm_events(evs):
 def llm_suite(llm, plain=True, tool_turn=True):
     msgs = [{"role": "system", "content": P.text("system", "voice_tools")},
             {"role": "user", "content": "Can you tell me a short joke?"}]     # nothing to look up: routing is
-    # scripts/bench/escalation.py's job (a trivia question went to web_search 8 / 8 on gemma-4-e4b-nvfp4, NOTES.md)
+    # scripts/bench/escalation.py's job (a trivia question went to a lookup 8 / 8 on gemma-4-e4b-nvfp4, NOTES.md)
     text = check_llm_events(list(llm.stream(msgs, tools=TOOLS, max_new=64)))
     assert text.strip() or not plain, "no text for a plain question"
     n = 0                                                    # stop after the first item: at most one more
@@ -83,26 +83,26 @@ def llm_suite(llm, plain=True, tool_turn=True):
     if tool_turn:
         ids = set()
         for city in ("Oslo", "Lima"):
-            q = msgs[:1] + [{"role": "user", "content": f"What's the weather in {city} right now?"}]
+            q = msgs[:1] + [{"role": "user", "content": f"What time is it in {city} right now?"}]
             evs = list(llm.stream(q, tools=TOOLS, max_new=96))
             check_llm_events(evs)
             calls = evs[-1][1] if evs and evs[-1][0] == "tool_calls" else []
-            assert calls and calls[0]["name"] == "get_weather", f"no weather call for {city}"
-            assert evs[[e[0] for e in evs].index("tool_start")][1]["name"] in (None, "get_weather")
+            assert calls and calls[0]["name"] == "get_current_time", f"no time call for {city}"
+            assert evs[[e[0] for e in evs].index("tool_start")][1]["name"] in (None, "get_current_time")
             ids |= {c["id"] for c in calls}
         assert len(ids) == 2, "tool-call IDs repeat across requests"
         q = [{"role": "system", "content": P.text("system", "voice_tools")},     # ask_expert offered: named
-             {"role": "user", "content": "What's the weather in Oslo right now?"}]
+             {"role": "user", "content": "What time is it in Oslo right now?"}]
         evs = list(llm.stream(q, tools=TOOLS_EXPERT, max_new=96))
         check_llm_events(evs)
-        assert ("tool_start", {"name": "get_weather"}) in evs, "tool_start unnamed with ask_expert offered"
+        assert ("tool_start", {"name": "get_current_time"}) in evs, "tool_start unnamed with ask_expert offered"
 
 
 def test_llm_fake():
     from app.plugins.llm.fake import FakeLLM
     llm = FakeLLM()
     llm_suite(llm, tool_turn=False)
-    tool = FakeLLM(reply='<tool_call>\n{"name": "get_weather", "arguments": {"location": "Oslo"}}\n</tool_call>')
+    tool = FakeLLM(reply='<tool_call>\n{"name": "get_current_time", "arguments": {"timezone": "Europe/Oslo"}}\n</tool_call>')
     llm_suite(tool, plain=False, tool_turn=True)
 
 

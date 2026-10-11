@@ -3,7 +3,7 @@ turns and fires a backchannel in the middle of a turn (separate engine requests,
 Reports per-turn first-audio, backchannel first-audio (backchannel audio arrives as K frames, apart from
 reply audio A), the longest dead air inside a turn (a gap in the client's playback queue: audio arriving after
 the previous audio would have finished playing) and peak GPU memory. Test prompts only; no audio is written.
---tools uses weather questions, so every turn is a tool turn (lead-in filler, Tavily, phase B).
+--tools uses time questions, so every turn is a tool turn (lead-in filler, get_current_time, phase B).
 
   .venv/bin/python scripts/stack/load.py --sessions 4 [--turns 3] [--tools]
 """
@@ -16,9 +16,9 @@ from app.config import load_config
 PROMPTS = ["Tell me something interesting about octopuses.", "How do I keep basil alive indoors?",
            "Can you explain what a black hole is?", "What's a good way to start learning to cook?",
            "Give me a tip for sleeping better.", "Why is the sky blue?"]
-TOOL_PROMPTS = ["What's the weather in Paris right now?", "How's the weather in Tokyo today?",
-                "What's the weather like in Berlin at the moment?", "Is it raining in London right now?",
-                "What's the temperature in Madrid right now?", "What's the weather in Toronto today?"]
+TOOL_PROMPTS = ["What time is it in Paris right now?", "What's the time in Tokyo at the moment?",
+                "What time is it in Berlin right now?", "Can you tell me the time in London?",
+                "What time is it in Madrid right now?", "What's the current time in Toronto?"]
 PARTIALS = ["so yesterday I finally got the job offer I was hoping for",
             "and then my dog got really sick and we had to rush him to the vet",
             "я вот думаю, может, в выходные съездить на море"]
@@ -84,7 +84,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sessions", type=int, default=4)
     ap.add_argument("--turns", type=int, default=3)
-    ap.add_argument("--tools", action="store_true", help="weather questions: every turn calls a tool")
+    ap.add_argument("--tools", action="store_true", help="time questions: every turn calls a tool")
     ap.add_argument("--bc-first", action="store_true",
                     help="send the backchannel 50 ms before each turn instead of mid-reply (I-07)")
     ap.add_argument("--fresh", action="store_true", help="new MOUTH session (empty history) for every turn")

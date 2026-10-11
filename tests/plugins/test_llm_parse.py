@@ -255,16 +255,18 @@ def test_check_arguments():
     from app.prompts import default_prompts
     from app.tools import build_tools
     tools = build_tools(default_prompts())
-    assert check_arguments("get_weather", {"location": "Oslo"}, tools) is None
-    assert "missing location" in check_arguments("get_weather", {"unit": "celsius"}, tools)
-    assert "not one of" in check_arguments("get_weather", {"location": "Oslo", "unit": "kelvin"}, tools)
-    assert "not a string" in check_arguments("web_search", {"query": 5}, tools)
-    assert check_arguments("web_search", "btc", tools) == "arguments are not an object"
+    assert check_arguments("set_reminder", {"text": "call mom", "time": "18:00"}, tools) is None
+    assert "missing time" in check_arguments("set_reminder", {"text": "call mom"}, tools)
+    assert "not a string" in check_arguments("get_current_time", {"timezone": 5}, tools)
+    assert check_arguments("get_current_time", "Oslo", tools) == "arguments are not an object"
     assert check_arguments("fly", {}, tools) == "unknown tool"
-    ok = {"id": "call_1", "name": "web_search", "arguments": {"query": "btc"}}
+    unit = [{"type": "function", "function": {"name": "convert", "parameters": {"type": "object", "properties": {
+        "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}}, "required": ["unit"]}}}]
+    assert "not one of" in check_arguments("convert", {"unit": "kelvin"}, unit)
+    ok = {"id": "call_1", "name": "get_current_time", "arguments": {"timezone": "Asia/Tokyo"}}
     assert flag_invalid(ok, tools) == ok
-    bad = flag_invalid({"id": "call_2", "name": "web_search", "arguments": ["btc"]}, tools)
-    assert bad["arguments"] == {} and bad["error"].startswith("invalid arguments for 'web_search'")
+    bad = flag_invalid({"id": "call_2", "name": "get_current_time", "arguments": ["Tokyo"]}, tools)
+    assert bad["arguments"] == {} and bad["error"].startswith("invalid arguments for 'get_current_time'")
 
 
 def test_template_messages_are_the_old_nested_shape():

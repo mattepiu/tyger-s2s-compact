@@ -1,7 +1,7 @@
 """v1 smoke test (no browser). Two parts:
 
-  --mouth   : connect to the MOUTH over TCP and run three turns -- a plain reply, a Tavily tool turn
-              (weather), and a placeholder tool turn (reminder) -- asserting audio comes back and the
+  --mouth   : connect to the MOUTH over TCP and run three turns -- a plain reply, a lookup tool turn
+              (the time), and a placeholder tool turn (reminder) -- asserting audio comes back and the
               placeholder reply admits it isn't connected. Deterministic (text in).
   --ears    : connect to the running EARS web app over WebSocket, stream speech as the mic, and assert an
               endpoint fires and reply audio returns (speech -> endpoint -> audio out). The speech is one fixed
@@ -93,7 +93,7 @@ def test_barge(cfg):
     remembered = "octopus" in follow.lower()
     print(f"  follow-up remembers the barged turn: {remembered}")
     assert remembered, "the barged turn's topic is missing from the follow-up reply"
-    dt, barged = mouth_barge(s, "What's the weather in Rome right now?", "tool")
+    dt, barged = mouth_barge(s, "What time is it in Rome right now?", "tool")
     assert barged and dt < 0.3, f"tool-turn barge took {dt*1e3:.0f} ms"
     s.close()
     print("  MOUTH barge: PASS")
@@ -111,7 +111,7 @@ def test_mouth(cfg):
     s = mouth_session(cfg)
     print("== MOUTH smoke ==")
     n1, _, speech = mouth_turn(s, "Hi there, how are you today?", "plain", keep_audio=True)
-    n2, t2, _ = mouth_turn(s, "What's the weather in Paris right now?", "tavily-weather")
+    n2, t2, _ = mouth_turn(s, "What time is it in Paris right now?", "time-lookup")
     n3, t3, _ = mouth_turn(s, "Please set a reminder to call mom at six pm tomorrow.", "placeholder-reminder")
     bc_text, bc_audio = mouth_backchannel(s, "so yesterday I finally got the job offer I was hoping for and")
     s.close()

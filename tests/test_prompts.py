@@ -36,8 +36,8 @@ def test_fill_needs_exact_values():
 def test_shots_and_tools_checked():
     d = copy.deepcopy(P.d); d["backchannel"]["shots"] = [["only one"]]
     expect_error(d, "backchannel.shots")
-    d = copy.deepcopy(P.d); d["tools"]["get_weather"]["params"]["city"] = "x"
-    expect_error(d, "tools.get_weather.params.city")
+    d = copy.deepcopy(P.d); d["tools"]["get_current_time"]["params"]["city"] = "x"
+    expect_error(d, "tools.get_current_time.params.city")
     d = copy.deepcopy(P.d); d["tools"]["fly"] = {"description": "x"}
     expect_error(d, "tools.fly")
 

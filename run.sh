@@ -14,7 +14,7 @@ cd "$(dirname "$0")"
 
 export HF_HOME="${HF_HOME:-/workspace/.hf_home}"
 export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
-# secrets + overrides from .env (TAVILY_API_KEY, HF_TOKEN); never printed
+# secrets + overrides from .env (HF_TOKEN, OPENAI_API_KEY); never printed
 [ -f .env ] && { set -a; . ./.env; set +a; }
 [ -z "${HF_TOKEN:-}" ] && [ -f "$HF_HOME/token" ] && export HF_TOKEN="$(cat "$HF_HOME/token")"
 

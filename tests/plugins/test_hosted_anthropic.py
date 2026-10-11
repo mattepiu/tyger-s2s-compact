@@ -8,11 +8,16 @@ sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (
 from app.plugins.base import LLMError, PluginContext  # noqa: E402
 from app.plugins.llm.anthropic import (AnthropicLLM, ClaudeStreamParser, FALLBACK_BETA,  # noqa: E402
                                        to_claude, to_claude_tools)
-from app.prompts import default_prompts  # noqa: E402
-from app.tools import build_tools  # noqa: E402
 from app.runtime.event_loop import EngineLoop  # noqa: E402
 
-TOOLS = build_tools(default_prompts())
+# fixture tools for the parsers' schema check, not the registry's (which has no weather or web search tool since
+# 2026-10-11): a required string, an enum, a second tool
+TOOLS = [{"type": "function", "function": {"name": "get_weather", "description": "Weather for a city.", "parameters": {
+             "type": "object", "properties": {"location": {"type": "string"},
+                                              "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}},
+             "required": ["location"]}}},
+         {"type": "function", "function": {"name": "web_search", "description": "Search the web.", "parameters": {
+             "type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}]
 THINK = {"type": "thinking", "thinking": "", "signature": "sig-abc"}
 
 

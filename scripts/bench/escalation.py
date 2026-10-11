@@ -13,8 +13,8 @@ the set is synthetic, so misrouted cases are listed with their text.
 Also scores what the model would say aloud (its text before a call, or its whole local reply): replies of 4+
 words in a language other than the case's (script + stopword guess), and narration: words about tools / the
 expert, or call markup leaking into speech. For tool-route samples it also runs the answer after the tool
-result (phase B), with fixed English stub results (the real reminder / message stubs; a canned answer for
-lookups), and scores that answer's speech the same way: English tool output must not pull the reply language.
+result (phase B), with fixed English stub results (the real reminder / message stubs; the time tool runs for
+real), and scores that answer's speech the same way: English tool output must not pull the reply language.
 
   .venv/bin/python scripts/bench/escalation.py [--plugin gemma-4-e4b-nvfp4 --opt quantization=null] [--samples 3]
       [--split heldout] [--prompts config/prompts.yaml,/path/candidate.yaml]   several prompt files: one model load
@@ -55,9 +55,6 @@ def load_set(path):
 STUB = {"set_reminder": {"demo": True, "note": "Reminders aren't connected yet."},
         "send_message": {"demo": True, "note": "Messaging isn't connected yet."},
         START: {"task_id": 1, "status": "started"}, CANCEL: {"task_id": 1, "status": "cancelled"}}
-LOOKUP = {"get_weather": {"answer": "Partly cloudy, 14 degrees Celsius, light wind from the north-west; no rain "
-                                    "expected today."},
-          "web_search": {"answer": "Recent sources give no single clear answer; reports differ."}}   # fits any query
 
 
 def collect(events):
@@ -127,7 +124,7 @@ def evaluate(llm, p, cases, samples, max_new, workers, expert=True, tasks=False)
         phase_b = None
         if route in ("tool", "background"):       # the answer after the (stub) tool result, as MOUTH asks for it
             calls = next(e[1] for e in evs if e[0] == "tool_calls")
-            results = [STUB.get(x["name"]) or LOOKUP.get(x["name"]) or execute_tool(x["name"], x.get("arguments", {}))
+            results = [STUB.get(x["name"]) or execute_tool(x["name"], x.get("arguments", {}))
                        for x in calls]                         # get_current_time runs locally
             phase_b, _ = collect(llm.stream(msgs + round_messages(text, calls, None, results,
                                                                   note=p.result_note(lang)), max_new=max_new))

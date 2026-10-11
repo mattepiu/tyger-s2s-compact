@@ -1,9 +1,11 @@
 # Escalation routing test set (PLUGINS.md step 11), read by scripts/bench/escalation.py. Synthetic prompts only,
 # never user data. Each case is one user turn with the route the `reply` model should take:
 #   local  - chit-chat, simple facts, opinions, short how-tos: answered by the local model
-#   tool   - weather, time, prices, news, reminders, messages: a lookup / action tool (not ask_expert)
+#   tool   - the time, reminders, messages: a lookup / action tool (not ask_expert)
 #   expert - maths, code, health / money / legal advice, comparisons, planning, long explanations, "think
-#            carefully", unhappiness with an earlier answer, follow-ups on an escalated topic: ask_expert
+#            carefully", unhappiness with an earlier answer, follow-ups on an escalated topic: ask_expert; and since
+#            2026-10-11 live facts too (weather, news, prices, scores, opening hours: the local web search and
+#            weather tools are gone, the expert searches the web itself). Those cases were `tool` before.
 #   background - research, compare many options, plan a multi-day trip, draft something long: start_task (only
 #            evaluated with tasks on); a status question answers locally from the note, "drop it" is a tool
 # `also`: routes that count as right too (planning can be answered now or researched). `history` holds earlier
@@ -44,23 +46,23 @@ cases:
   - {id: l27, route: local, lang: es, user: "¿Qué prefieres, la playa o la montaña?"}
   - {id: l28, route: local, lang: es, user: "¿Cómo se prepara un café con leche?"}
   # ---- tool ----
-  - {id: t01, route: tool, lang: en, user: "What's the weather like in Berlin right now?"}
+  - {id: t01, route: expert, lang: en, user: "What's the weather like in Berlin right now?"}
   - {id: t02, route: tool, lang: en, user: "What time is it in Sydney?"}
-  - {id: t03, route: tool, lang: en, user: "What's the price of bitcoin today?"}
-  - {id: t04, route: tool, lang: en, user: "Who won the Champions League match last night?"}
-  - {id: t05, route: tool, lang: en, user: "Any big news today?"}
+  - {id: t03, route: expert, lang: en, user: "What's the price of bitcoin today?"}
+  - {id: t04, route: expert, lang: en, user: "Who won the Champions League match last night?"}
+  - {id: t05, route: expert, lang: en, user: "Any big news today?"}
   - {id: t06, route: tool, lang: en, user: "Remind me to call my mom at six pm."}
   - {id: t07, route: tool, lang: en, user: "Send a message to Alex saying I'm running late."}
-  - {id: t08, route: tool, lang: en, user: "Is it going to rain in Seattle today?"}
-  - {id: t09, route: tool, lang: en, user: "What's the current exchange rate from euros to dollars?"}
-  - {id: t10, route: tool, lang: en, user: "What's the score in the Lakers game right now?"}
-  - {id: t11, route: tool, lang: ru, user: "Какая сейчас погода в Новосибирске?"}
+  - {id: t08, route: expert, lang: en, user: "Is it going to rain in Seattle today?"}
+  - {id: t09, route: expert, lang: en, user: "What's the current exchange rate from euros to dollars?"}
+  - {id: t10, route: expert, lang: en, user: "What's the score in the Lakers game right now?"}
+  - {id: t11, route: expert, lang: ru, user: "Какая сейчас погода в Новосибирске?"}
   - {id: t12, route: tool, lang: ru, user: "Который час сейчас в Нью-Йорке?"}
-  - {id: t13, route: tool, lang: ru, user: "Какой сейчас курс доллара к рублю?"}
+  - {id: t13, route: expert, lang: ru, user: "Какой сейчас курс доллара к рублю?"}
   - {id: t14, route: tool, lang: ru, user: "Напомни мне завтра в девять утра про встречу."}
-  - {id: t15, route: tool, lang: es, user: "¿Qué tiempo hace ahora en Sevilla?"}
+  - {id: t15, route: expert, lang: es, user: "¿Qué tiempo hace ahora en Sevilla?"}
   - {id: t16, route: tool, lang: es, user: "¿Qué hora es en Ciudad de México?"}
-  - {id: t17, route: tool, lang: es, user: "¿Cuáles son las noticias más importantes de hoy?"}
+  - {id: t17, route: expert, lang: es, user: "¿Cuáles son las noticias más importantes de hoy?"}
   - {id: t18, route: tool, lang: es, user: "Mándale un mensaje a Lucía diciendo que llego en diez minutos."}
   # ---- expert ----
   - {id: e01, route: expert, lang: en, user: "If I take out a thirty year mortgage of four hundred thousand at six and a half percent, what's my monthly payment?"}
@@ -142,7 +144,7 @@ cases:
         answer: Spend day one in Alfama and Baixa, day two on a trip out to Sintra, and day three in Belém with its tower and the famous custard tarts.
     user: By the way, do you have a name?
   - id: m07
-    route: tool
+    route: expert                # a live fact, after small talk
     lang: en
     history:
       - user: Hi there!
@@ -172,25 +174,24 @@ cases:
         answer: Group the users by email and keep the groups having a count above one, then select those emails.
     user: Now how would I delete the duplicates but keep one of each?
   # ---- fresh (added 2026-10-04 after the held-out split had been looked at; never used for tuning) ----
-  - {id: f01, route: tool, lang: en, split: fresh, user: "Can you check the weather in Toronto for tomorrow morning?"}
+  - {id: f01, route: expert, lang: en, split: fresh, user: "Can you check the weather in Toronto for tomorrow morning?"}
   - {id: f02, route: tool, lang: en, split: fresh, user: "What time is it in London right now?"}
-  - {id: f03, route: tool, lang: en, split: fresh, user: "Search the web for the Louvre's opening hours today."}
+  - {id: f03, route: expert, lang: en, split: fresh, user: "Search the web for the Louvre's opening hours today."}
   - {id: f04, route: tool, lang: en, split: fresh, user: "Set a reminder to water the plants on Sunday at ten."}
   - {id: f05, route: tool, lang: en, split: fresh, user: "Text Maria that dinner is at eight."}
-  - {id: f06, route: tool, lang: ru, split: fresh, user: "Сколько сейчас стоит биткоин?"}
-  - {id: f07, route: tool, lang: ru, split: fresh, user: "Какие главные новости сегодня?"}
+  - {id: f06, route: expert, lang: ru, split: fresh, user: "Сколько сейчас стоит биткоин?"}
+  - {id: f07, route: expert, lang: ru, split: fresh, user: "Какие главные новости сегодня?"}
   - {id: f08, route: tool, lang: ru, split: fresh, user: "Отправь сообщение Олегу, что я опоздаю на пятнадцать минут."}
-  - {id: f09, route: tool, lang: es, split: fresh, user: "¿Va a llover mañana en Barcelona?"}
+  - {id: f09, route: expert, lang: es, split: fresh, user: "¿Va a llover mañana en Barcelona?"}
   - {id: f10, route: tool, lang: es, split: fresh, user: "Recuérdame comprar pan a las siete de la tarde."}
-  - {id: f11, route: tool, lang: es, split: fresh, user: "¿A cuánto está el euro frente al dólar hoy?"}
+  - {id: f11, route: expert, lang: es, split: fresh, user: "¿A cuánto está el euro frente al dólar hoy?"}
   - id: f12
-    route: tool                  # a lookup follow-up must look up again, not answer from the earlier result (I-12)
+    route: expert                # a live-fact follow-up must look up again, not answer from the earlier answer (I-12)
     lang: en
     split: fresh
     history:
       - user: What's the weather in Paris?
-        call: {name: get_weather, arguments: {location: Paris}}
-        result: {location: Paris, answer: "Sunny, 22 C"}
+        expert: What's the weather in Paris right now?
         answer: It's sunny and about twenty two degrees in Paris.
     user: And in Rome?
   - {id: f13, route: local, lang: en, split: fresh, user: "What's the opposite of hot?"}
@@ -206,8 +207,7 @@ cases:
     split: fresh
     history:
       - user: Какая погода в Казани?
-        call: {name: get_weather, arguments: {location: Казань}}
-        result: {location: Казань, answer: "Облачно, 5 C"}
+        expert: Какая сейчас погода в Казани?
         answer: В Казани облачно, около пяти градусов.
     user: Спасибо!
   - {id: f21, route: expert, lang: en, split: fresh, user: "Is it better to lease or buy a car if I drive fifteen thousand miles a year?"}
@@ -338,14 +338,14 @@ cases:
   - {id: h18, route: local, lang: en, split: hard, user: "What's heavier, a kilo of feathers or a kilo of steel?"}
   - {id: h19, route: local, lang: en, split: hard, user: "How do you spell necessary?"}
   - {id: h20, route: local, lang: en, split: hard, user: "Say something nice to cheer me up, I had a rough day."}
-  # lookups with health / money words in them: a tool, not the expert
-  - {id: h21, route: tool, lang: en, split: hard, user: "What's the weather in Chicago tomorrow, and do I need an umbrella?"}
-  - {id: h22, route: tool, also: [expert], lang: en, split: hard, user: "What are mortgage rates right now, and is it a good time to refinance?"}
-  - {id: h23, route: tool, lang: en, split: hard, user: "How did the Lakers do last night?"}
-  - {id: h24, route: tool, lang: en, split: hard, user: "What's the euro to dollar exchange rate right now?"}
+  # actions with health words in them: a tool, not the expert; live facts with money words: the expert
+  - {id: h21, route: expert, lang: en, split: hard, user: "What's the weather in Chicago tomorrow, and do I need an umbrella?"}
+  - {id: h22, route: expert, lang: en, split: hard, user: "What are mortgage rates right now, and is it a good time to refinance?"}
+  - {id: h23, route: expert, lang: en, split: hard, user: "How did the Lakers do last night?"}
+  - {id: h24, route: expert, lang: en, split: hard, user: "What's the euro to dollar exchange rate right now?"}
   - {id: h25, route: tool, lang: en, split: hard, user: "Remind me to take my medication at eight tonight."}
   - {id: h26, route: tool, lang: en, split: hard, user: "Message my sister that the doctor's appointment moved to Thursday."}
-  - {id: h27, route: tool, lang: en, split: hard, user: "Is the stock market up or down today?"}
+  - {id: h27, route: expert, lang: en, split: hard, user: "Is the stock market up or down today?"}
   # research for later against a question that can be answered now
   - {id: h28, route: background, lang: en, split: hard, user: "Dig into the best beginner road bikes under a thousand dollars and get back to me."}
   - {id: h29, route: background, lang: en, split: hard, user: "When you have a minute, put together a comparison of the main meal kit services and let me know."}
@@ -371,13 +371,12 @@ cases:
         answer: Often yes, if you'll stay long enough for the monthly savings to cover the closing costs, usually a few years.
     user: Anyway, what's your favorite season?
   - id: h34
-    route: tool                  # a follow-up lookup
+    route: expert                # a follow-up on a live fact
     lang: en
     split: hard
     history:
       - user: What's the weather in Paris today?
-        call: {name: get_weather, arguments: {location: Paris}}
-        result: {location: Paris, unit: celsius, answer: "Cloudy, 16 C."}
+        expert: What's the weather in Paris today?
         answer: It's cloudy in Paris, about sixteen degrees.
     user: And what about Rome?
   - id: h35
@@ -407,7 +406,7 @@ cases:
   # long, rambling turns with the real question at the end
   - {id: h38, route: expert, lang: en, split: hard, user: "So I was talking to my neighbor yesterday about her garden and her tomatoes, anyway, the real question is, I've had chest tightness on and off for a week when I climb stairs. Should I be worried?"}
   - {id: h39, route: local, lang: en, split: hard, user: "Ugh, long day, the traffic was terrible, I spilled my coffee, and now I just want to know, how many ounces are in a cup?"}
-  - {id: h40, route: tool, lang: en, split: hard, user: "I'm heading out soon and my friend says it might storm, she's usually wrong, but can you check the weather in Denver for this afternoon?"}
+  - {id: h40, route: expert, lang: en, split: hard, user: "I'm heading out soon and my friend says it might storm, she's usually wrong, but can you check the weather in Denver for this afternoon?"}
   # reasoning, checking a claim, code
   - {id: h41, route: expert, lang: en, split: hard, user: "Take your time on this one. If three cats catch three mice in three minutes, how long do a hundred cats need for a hundred mice?"}
   - {id: h42, route: expert, lang: en, split: hard, user: "Can you check my reasoning? At five percent a year my money doubles in about fourteen years, right?"}
