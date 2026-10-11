@@ -164,6 +164,36 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
 - **The default stack on the final code** (Gemma E4B, without `smart`): smoke passes (plain / weather / reminder /
   backchannel first audio 215 / 196 / 255 / 152 ms); `load.py --sessions 4 --turns 6 --tools --fresh` p50 377 ms, 0
   errors.
+- **The live check of `openai-responses`** (the user's OK for paid calls; `gpt-5.4-mini`, web search on, synthetic
+  questions; no code changed).
+  - **The plugin works against the API:** streaming, OpenAI's web search (one search per live-fact question), function
+    calls and their results sent back, Russian answered in Russian, the time from `get_current_time` without a
+    search. Plugin-level probes sent MOUTH's own escalated-turn request (`smart_messages` + the smart tools).
+  - **Reasoning effort:** web search accepts `none`; `minimal` is refused (HTTP 400); `low` (set) and `medium` work.
+    Time to first text, warm, median of 4, `none` / `low`:
+
+    | | weather EN | price EN | weather RU | savings maths |
+    |---|---|---|---|---|
+    | first text | **0.96** / 1.67 s | **1.07** / 1.67 s | 1.91 / 1.46 s | 1.84 / 1.58 s |
+    | `get_current_time` called first (an extra round) | 0 / 4 | 0 / 4 | 3 / 2 of 4 | 2 / 1 of 4 |
+
+    `none` is faster on live facts mostly because `low` checks the time first. But the maths got worse: of 3
+    savings answers read, `none` gave one wrong total (111 000 instead of ~82 200); `low` gave 2 right and one
+    **empty answer** (four `get_current_time` rounds in a row, then nothing). Once, `low` called `set_reminder`
+    with the text "Dummy" for the same maths question. `low` stays until those are fixed.
+  - **End to end on the stack** (default config, smart on, 3 runs of 6 transcript turns through MOUTH): E4B escalated
+    every live-fact and maths turn and kept the time and thanks turns. The lead-in played at 255–439 ms; the smart
+    model's first event came 0.48–1.31 s after its request (weather, maths), 3.5–4.2 s for the Formula One news.
+  - **Found on the stack:**
+    - an English question right after a Russian turn ("Who won the last Formula One race?") was answered in
+      **Russian in 2 of 3 runs**. A plugin-level replay with a shorter context answered in English 4 / 4, and the
+      real request isn't logged (privacy). Likely fix: name the reply language in the smart request, as MOUTH
+      already does after tool results (`result_note`);
+    - weather answers wrote "19°C, or 66°F" (4 of 6) though the smart prompt asks for spoken words only;
+    - 7 of 12 escalated turns had `get_current_time` rounds first, one of them 3.
+  - A probable cause of the repeated calls (untested): with `store: false` the plugin doesn't send the reasoning
+    items back with the tool results. OpenAI's docs ask for them in stateless function calling with reasoning
+    (`include: ["reasoning.encrypted_content"]`), or the model loses why it made the call.
 
 #### Added
 - **Responder trial plugins for a 48 GB card** (none is the default): `gemma-4-26b-a4b-nvfp4` (with the
@@ -197,8 +227,8 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
   - Tests: `tests/plugins/test_hosted_openai_responses.py` (no network, no key): history and tool conversion, the
     parser on synthetic event streams, and the plugin on a stub client (what it sends, stop closes the stream and
     frees the slot, HTTP 500 → `LLMError`).
-  - **Not checked live yet** (paid calls need the user's OK). Also open: whether web search accepts
-    `reasoning_effort: none` (`low` is set until that is checked).
+  - Checked live later the same day (Measured, above): it works; `none` is accepted with web search; the open
+    issues are listed there.
 
   `b28f889`
 - **GPU-free tests for EARS's turn-taking state machine** (`tests/ears/test_conversation.py`, 6 tests). The
