@@ -22,3 +22,6 @@ bench_runs/
 # The page check's npm install (tests/page)
 node_modules/
 tests/page/package-lock.json
+
+# The GPU agent's memory snapshot: the user pastes it in by hand, never committed
+agent-memory/
