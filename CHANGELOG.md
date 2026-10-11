@@ -199,6 +199,8 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
     frees the slot, HTTP 500 → `LLMError`).
   - **Not checked live yet** (paid calls need the user's OK). Also open: whether web search accepts
     `reasoning_effort: none` (`low` is set until that is checked).
+
+  `b28f889`
 - **GPU-free tests for EARS's turn-taking state machine** (`tests/ears/test_conversation.py`, 6 tests). The
   Conversation runs on the `fake` EARS plugin, with a fake page and a fake MOUTH over TCP, and covers what the floor
   and 2nd-ear tests didn't:
@@ -215,6 +217,40 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
   Each test fails on a matching break of `app/ears/conversation.py`: a second reset on the barged D, no hold while
   halting, a backchannel while halting, a barge after D that waits for a D that never comes, and a D after the
   page's report that waits for the timeout. `724271a`
+
+#### Changed
+- **The Gemma 4 26B-A4B trial plugin loads unsloth's NVFP4 checkpoint instead of NVIDIA's** (the user's request;
+  `gemma-4-26b-a4b-nvfp4` now defaults to `unsloth/gemma-4-26B-A4B-it-NVFP4`). It is an llm-compressor checkpoint:
+  FP8 attention projections, NVFP4 experts and dense MLPs, the vision and audio towers left out at load. NVIDIA's
+  (`nvidia/Gemma-4-26B-A4B-NVFP4`, ModelOpt) was deleted from the box to make room, after its multilingual runs on
+  the current prompts.
+  - Measured on this box, same prompts (after the tool removal below), `escalation.py --samples 8`, no hosted calls;
+    `llm_weights.py`:
+
+    | | NVIDIA's (gone) | **unsloth's** | Gemma E4B FP8, for reference |
+    |---|---|---|---|
+    | weights on the GPU; single-stream decode | 16.8 GiB; 151 tok/s | **15.1 GiB; 189 tok/s** | 10.4 GiB; 154 tok/s |
+    | multilingual, tasks, 188 cases: right; missed escalations | 98.6%; 1.4% | 98.5, 98.2% (2 runs); 1.7, 2.1% | 98.2, 99.0%; 1.7, 0.3% |
+    | multilingual, no expert, 70 cases: right; action requests without the call | 98.4%; 9 / 112 | 99.3, 98.6%; 4, 8 / 112 | 99.6%; 2 / 112 |
+    | English, tasks, 119 cases: right; missed escalations | 99.5%; 0.9% | 99.7%; 0.5% | 99.9%; 0.2% |
+    | English, no expert, 44 cases: right; action requests without the call | 96.6%; 12 / 64 | 96.3%; 13 / 64 | 100%; 0 / 64 |
+    | multilingual speech in the wrong language: tasks; no expert (~490 / ~455 spoken) | 0; 0 | 0, 3; **13, 9** | 7, 6; 0 |
+    | multilingual, tasks: answers after a tool or task that say nothing | 0 / 321 | **4 / 328, 3 / 325** | 0 / 317 |
+
+  - **Routing is the same.** Both checkpoints miss the same cases (m04 and m05 follow-ups answered locally, b10 to
+    the expert), and without the expert both answer "messaging isn't connected yet" without calling `send_message`
+    (f05, f08, h26).
+  - **unsloth's is smaller and faster:** 1.7 GiB less and 25% faster decode, faster than E4B on this card too.
+  - **But it copies the examples' language more.** With the multilingual prompts and no expert, it answers English
+    questions in Russian or Spanish (l09, l14, h14, h17, h20: 13 and 9 samples in two runs, against 0 for NVIDIA's
+    and E4B). With the expert it happens rarely (0 and 3). A per-instance prompt override with the examples
+    reordered, as Qwen3.6 has, would be the first thing to try. In English-only use it doesn't arise.
+  - **Its silent answers are a different kind from the ones removed with the search tools:** 3–4 per run, all an
+    empty answer (no text, no call) to a `start_task` result with the Spanish note. The task starts, but the user
+    hears only the lead-in.
+  - Not run: the stack (`stack.sh`, `load.py`) with it; its GPU peak at 4 sessions is untested.
+  - First load: FlashInfer JIT compiles again for this checkpoint (RAM peak 26.7 GiB with `MAX_JOBS=4`), plus 142 s
+    to download.
 
 #### Fixed
 - **"Research this and tell me later" in Russian and Spanish went to the expert instead of a background task.**
@@ -323,6 +359,8 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
     can't check, none guesses a value, but all 24 Russian / Spanish samples were in English ("I'm sorry, I can't
     check the weather right now."). It copies the English wording of the no-expert prompt; the routing eval doesn't
     see it, since it skips expert cases when there is no expert. A rewording is drafted, not tested yet.
+
+  `b28f889`
 
 ### 2026-10-10 — A cut-in round goes on as a background task (I-16); the 2nd ear on the page's clock (I-17)
 

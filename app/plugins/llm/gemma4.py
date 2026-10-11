@@ -40,9 +40,11 @@ class Gemma4E4B_NVFP4(Gemma4E4B):
 
 
 class Gemma4_26B_A4B(Gemma4E4B):
-    """gemma-4-26b-a4b-nvfp4: NVIDIA's NVFP4 (ModelOpt) checkpoint of the 26B mixture-of-experts Gemma 4 (~4B active),
-    a responder trial for a 48 GB card (~17 GiB of weights: it didn't fit a 32 GB one next to VoxCPM2 + EARS). The
-    quantization comes from the checkpoint: leave `quantization` unset.
+    """gemma-4-26b-a4b-nvfp4: unsloth's llm-compressor checkpoint of the 26B mixture-of-experts Gemma 4 (~4B active):
+    FP8 attention, NVFP4 experts and MLPs. A responder trial for a 48 GB card (15.1 GiB of weights). The quantization
+    comes from the checkpoint: leave `quantization` unset. It replaced NVIDIA's ModelOpt checkpoint
+    (nvidia/Gemma-4-26B-A4B-NVFP4) on 2026-10-11: the same routing, 1.7 GiB less and 189 against 151 tok/s, but with
+    the multilingual prompts and no `smart` it sometimes answers English in the last example's language (CHANGELOG).
 
     Despite enable_thinking=False it opens Gemma's thought channel after a tool result, mostly empty
     (`<|channel>thought\n<channel|>`, then the answer): the channel is stripped before anything is spoken or
@@ -50,7 +52,7 @@ class Gemma4_26B_A4B(Gemma4E4B):
     writes the answer inside it, after its thought as a JSON object or after a stray closing token such as
     `<tool_response|>`: when the whole text ends up held back as thinking, the answer after that object or token is
     kept, at the end of the stream."""
-    default_model = "nvidia/Gemma-4-26B-A4B-NVFP4"
+    default_model = "unsloth/gemma-4-26B-A4B-it-NVFP4"
 
     def filter_text(self, raw, final=False):
         out = strip_think(raw, final, GEMMA_THOUGHT)
