@@ -12,7 +12,7 @@ app/
   runtime/
     event_loop.py          #   EngineLoop: one asyncio loop for MOUTH's engines and API clients
     audio.py               #   StreamingAudioResampler: chunk-invariant resampling (the 24 kHz wire, the 2nd ear)
-  prompts/                 # the config/prompts.yaml loader and its checks; lang.py guesses the user's language
+  prompts/                 # the config/prompts.yaml loader and its checks
   mouth/                   # the MOUTH process (python -m app.mouth)
     __main__.py            #   accepts EARS connections, one Session thread each; signal handling
     service.py             #   Mouth: the loaded plugins, prompts and tool lists, shared by every session
@@ -112,7 +112,7 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Run & rea
 | `S` | test tools → MOUTH | speak this text, TTS only, never remembered (EARS never sends it) |
 | `A` | MOUTH → EARS | reply audio |
 | `K` | MOUTH → EARS | backchannel audio, kept apart from `A` |
-| `X` | MOUTH → EARS | the reply's text so far, for the page |
+| `X` | MOUTH → EARS | the text of the reply, or of a backchannel (`bc`), for the page |
 | `D` | MOUTH → EARS | done: a turn (`barged`), a backchannel (`bc`) or an announcement (`proactive`) |
 | `F` | MOUTH → EARS | a finished task asks for the floor |
 
@@ -214,8 +214,7 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Run & rea
   (`TaskRunner.continue_round`). The task gets the expert's question, or the user's words with what the round had
   looked up, and it's announced at the next pause. Where no task can start, history keeps the round's results.
 - **Backchannels** are contextual.
-  - `filler` reacts to the ASR partial in the user's language. When the partial is shorter than `bc_min_words`, it
-    hums instead.
+  - `filler` reacts to the ASR partial. When the partial is shorter than `bc_min_words`, it hums instead.
   - Its recent acks are passed along as "don't repeat those".
   - The ack is one TTS request. Its audio goes out as `K`, and never into history or the 2nd ear.
   - A backchannel still being made when the turn starts is aborted.
@@ -303,8 +302,7 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Run & rea
   MOUTH after editing.
 - **Few-shot turns, not quoted examples.** Small models copy a quoted example word for word. Qwen3-4B said "Sure,
   let me check that for you." on every tool turn, and the first backchannel prompt's 'mm-hm' nearly every time.
-- **The user's language is named next to tool results** (`result_note`). Without it, 29% of Russian and Spanish
-  answers after a tool came out in English.
+- **English only.** Every prompt asks for English, and every few-shot turn is in English.
 - **Examples stay synthetic:** the file is committed.
 
 ### GPU memory
@@ -439,8 +437,9 @@ own web search.
   leave copies of `.env` around, e.g. in a scratch git worktree.
 - **Hosted runs.** A live run against a hosted model (`smart`, or any remote role) needs the user's OK each time.
 - **The heads release is private.** This is a serving project only: no training code.
-- **Prompts and tool parsing.** Every prompt must keep `enable_thinking: false` working. Tool parsing keeps Gemma 4's
-  format, and Hermes JSON for the `fake` LLM.
+- **Prompts and tool parsing.** The agent speaks English only: prompts, few-shot turns and test cases are in English.
+  Every prompt must keep `enable_thinking: false` working. Tool parsing keeps Gemma 4's format, and Hermes JSON for
+  the `fake` LLM.
 - **The GPU budget** is in "GPU memory" above: measure before adding anything.
 - **`CHANGELOG.md` is for users** (Keep a Changelog). A user-visible change gets one short, plain line under
   Unreleased → Added / Changed / Fixed / Removed, with a key number only where it helps. Describe it in words, not
@@ -495,11 +494,12 @@ own web search.
     - `second_ear.py --pairing tags`: false barges, cut-ins and "mm-hm"s, with echo levels and thresholds to sweep;
     - `silent_wait.py`: a barge while the agent waits in silence on a tool.
 - **The stack.** Use a copy of the config without `smart`, so the load test's prompts never escalate to OpenAI.
-  1. Make the copy:
-     `.venv/bin/python -c "import yaml; d=yaml.safe_load(open('config/default.yaml')); d['llm'].pop('smart');
-     d['mouth'].pop('tasks'); yaml.safe_dump(d, open('/tmp/nosmart.yaml','w'), sort_keys=False)"`.
+  1. Make the copy, again after any config change (a key the code no longer reads stops startup):
+     ```
+     .venv/bin/python -c "import yaml; d = yaml.safe_load(open('config/default.yaml')); d['llm'].pop('smart'); d['mouth'].pop('tasks'); yaml.safe_dump(d, open('/tmp/nosmart.yaml', 'w'), sort_keys=False)"
+     ```
   2. Start it: `CONFIG=/tmp/nosmart.yaml setsid ./run.sh > /tmp/stack.log 2>&1 &`, and wait for `EARS ready`.
-  3. Run, from `scripts/stack/`:
+  3. Run, each as `.venv/bin/python scripts/stack/<script>`:
      - `smoke.py`: MOUTH tool turns, barge-in, EARS speech → audio;
      - `load.py --sessions 4 --turns 6`, 3 times (`--tools --fresh` for tool turns);
      - `load_ears.py --sessions 1` and `--sessions 4`: hop lag, and end of speech → endpoint → first audio.
@@ -511,11 +511,10 @@ own web search.
 - **Comparing two stacks:** `scripts/bench/stack.sh TAG CONFIG STACK_LOG` runs the same sequence each time, and
   `scripts/bench/summary.py TAG [TAG...]` lines the runs up. `llm_weights.py` gives the LLM's GPU memory per module
   and its decode speed; `tts_voice.py` the cloned voice's first audio per request.
-- **Routing** (stack stopped, no hosted calls: every tool is stubbed):
-  `scripts/bench/escalation.py --samples 8`, with and without `--no-expert`. It covers local, tool, expert and
-  background routes on 188 synthetic EN / RU / ES cases, plus the reply language and spoken markup. The gate for
-  any prompt or model change: at most 10% missed escalations, and no regression in reply language, tool calls or
-  spoken markup.
+- **Routing** (stack stopped, no hosted calls: only the reply model runs, and the reminder and message tools are
+  stubbed): `.venv/bin/python scripts/bench/escalation.py --samples 8`, with and without `--no-expert`. It covers
+  local, tool, expert and background routes on 119 synthetic English cases, plus spoken markup. The gate for any
+  prompt or model change: at most 10% missed escalations, and no regression in tool calls or spoken markup.
 - **The expert, live:** `scripts/stack/barged_round.py` (cut in on the expert's lead-in) calls OpenAI, so it needs the
   user's OK each run. For escalation without OpenAI, give a config copy an `llm.smart` block with `plugin: fake`.
 - **A fake stack next to the real one:** copy `config/fake.yaml` with ports 7861 / 8771, start it with
@@ -540,6 +539,8 @@ only within one box and config.
 | 2026-10-06 | after the readability refactor, no `smart`, whole-sentence first chunk | 170–282 ms | 474 / 515 ms (2 runs) | ~880 / ~1090 ms | — |
 | 2026-10-10 | after I-16 and I-17, no `smart`, new box | 174 ms | 397–453 ms (3 runs) | 793 / 992 ms | 30.2 GB |
 | 2026-10-11 | no silence fallback, no `smart`, RTX PRO 5000 | 212 ms | 527–571 ms (3 runs) | 832 / 1093 ms | 29.9 GB |
+| 2026-10-11 | `1b8e6ff`, no `smart`, a new RTX 5090 (the cleanup round's baseline) | 233 ms | 449–518 ms (3 runs) | 964 / 1105 ms | 30.2 GB |
+| 2026-10-11 | after the cleanup (English only), no `smart`, same box | 204 ms | 473–517 ms (3 runs) | 935–959 / 1057–1096 ms (2 / 3 runs) | 30.1 GB |
 
 "End of speech → first audio" is what the user hears as the response gap. About 600–850 ms of it is endpoint
 detection, which live tuning of the endpoint thresholds is meant to cut (O-01).
@@ -554,8 +555,9 @@ decode runs near the bandwidth ratio, and EARS has less compute on the PRO 5000.
 | EARS hop lag p50 / p90, 4 conversations | 47 / 124 ms | 68 / 181 ms |
 | GPU peak at 4 sessions | 30.2 GB | 29.9 GB |
 
-**Routing** (`scripts/bench/escalation.py --samples 8`, Gemma E4B, the default prompts, `smart` and tasks on, 188
-cases; 2026-10-11): 98.2–99.0% right, 0.3–1.7% missed escalations, and all 200 live-fact samples to the expert.
+**Routing** (`scripts/bench/escalation.py --samples 8`, Gemma E4B, the default English prompts, the RTX 5090 of
+2026-10-11): with `smart` and tasks on, 119 cases, 100.0% right and 0.0% missed escalations, every live-fact sample
+to the expert; without the expert, 44 cases, 100.0% right.
 
 **Responders measured against Gemma 4 E4B** (the gate: at most 10% of hard questions answered locally):
 
@@ -564,13 +566,13 @@ cases; 2026-10-11): 98.2–99.0% right, 0.3–1.7% missed escalations, and all 2
 | Gemma 4 E4B, FP8 at load | 10.4 GiB | 0.2–0.6% | **the responder** |
 | Gemma 4 E4B NVFP4 (unsloth) | 7.1 GiB | 0.2% | passed; sends trivia to lookups; was the backup until 2026-10-12 |
 | Gemma 4 26B-A4B NVFP4 | 15.1–17.1 GiB | 1.5–1.9% | passed; ~7 GB more, doesn't fit a 5090; skips some tool calls; thought-channel leaks |
-| Qwen3.6-35B-A3B NVFP4 | 19.5 GiB | 1.3% | passed; copies the examples' language; tool turns ~200 ms slower |
+| Qwen3.6-35B-A3B NVFP4 | 19.5 GiB | 1.3% | passed; tool turns ~200 ms slower |
 | Qwen3-4B-2507, Qwen3.5-4B | 8 GiB | ~15.6% | failed: lean local |
 | Qwen3-8B / 14B NVFP4 | 6.0 / 10.0 GiB | 13.8 / 18.5% | failed: lean local |
 | Qwen3.5-35B-A3B GPTQ int4 | 20.3 GiB | 25.2% | failed |
-| Nemotron Nano 9B v2 NVFP4 | 7.4 GiB | 20.4% | failed; narrates tools, no Russian |
+| Nemotron Nano 9B v2 NVFP4 | 7.4 GiB | 20.4% | failed; narrates tools |
 | Gemma 4 12B NVFP4 (unsloth) | 9.1 GiB | 14.8% | failed; leaks its thought channel |
-| Gemma 4 E2B FP8 | 7.1 GiB | 42.9% | failed; wrong-language answers |
+| Gemma 4 E2B FP8 | 7.1 GiB | 42.9% | failed; leaks its thought channel |
 | MiniCPM5-2B (English only) | 4.7 GiB | 17.0% | failed |
 
 The full measurements behind these tables are in git history: CHANGELOG.md and NOTES.md at `4d4c2e3`.

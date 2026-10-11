@@ -1,8 +1,9 @@
 # tyger v1 — a deployable full-duplex voice agent on one GPU
 
-Real-time spoken conversation in the browser: your mic → live turn-taking → a reasoning LLM with tools and a
-hosted expert that searches the web → a cloned voice, all on a single GPU. The agent knows when you've finished a turn, when you're interrupting
-it, and when to drop in a quick "mm-hm" — then answers in a voice cloned from a reference clip you provide.
+Real-time spoken conversation in English, in the browser: your mic → live turn-taking → a reasoning LLM with tools
+and a hosted expert that searches the web → a cloned voice, all on a single GPU. The agent knows when you've finished
+a turn, when you're interrupting it, and when to drop in a quick "mm-hm" — then answers in a voice cloned from a
+reference clip you provide.
 
 This repo is the **inference / serving** project. The turn-taking model itself (the endpoint head and the
 chain it sits on) is trained elsewhere; v1 only *runs* it.
@@ -212,9 +213,9 @@ mouth:
           announce_after_silence_ms: 1200}
 ```
 
-Routing is measured by `scripts/bench/escalation.py` (local model only, no cost): with Gemma 4 E4B, 98–99% of 188
-synthetic EN / RU / ES cases × 8 samples go the right way, and every live-fact question goes to the expert
-(DEVELOPING.md → "Benchmarks"). Cost on ordinary turns: the longer prompt adds ~30 ms (expert) and ~90 ms
+Routing is measured by `scripts/bench/escalation.py` (local model only, no cost): with Gemma 4 E4B, all 119
+synthetic cases × 8 samples go the right way, and every live-fact question goes to the expert (DEVELOPING.md →
+"Benchmarks"). Cost on ordinary turns: the longer prompt adds ~30 ms (expert) and ~90 ms
 (expert + tasks) to first audio. Without `llm.smart` neither tool is offered and the prompt is the plain one.
 Tasks and live facts need the smart model's web search (`openai-responses`); each search is billed on top of the
 tokens. Without `llm.smart` the agent answers what it knows and says plainly that it can't check live facts.
@@ -247,12 +248,13 @@ for that data.
 ## Known limits (v1)
 
 - **Up to 4 conversations** per GPU (`server.max_sessions`); more visitors get a busy page. On a healthy 5090, 4
-  conversations keep EARS real time (hop lag p50 47 / p90 124 ms).
+  conversations keep EARS real time (hop lag p50 47–87 / p90 124–170 ms on two boxes).
+- **English only:** every prompt asks for English, so the agent answers in English whatever language it hears.
 - `set_reminder` / `send_message` are **placeholders** — the model says they aren't connected yet.
-- The user waits **~0.8 s** from the end of their speech to the first reply audio at 1 conversation and **~1.0 s**
-  at 4 (RTX 5090, `scripts/stack/load_ears.py`), and ~600–700 ms of that is endpoint detection. Live threshold
-  tuning should cut it (ISSUES.md, O-01). MOUTH's part is small: first audio ~175–210 ms after the endpoint on a
-  plain turn (smoke test, cloned voice), 400–450 ms p50 with 4 busy sessions.
+- The user waits **~0.8–1.0 s** from the end of their speech to the first reply audio at 1 conversation and
+  **~1.0–1.1 s** at 4 (two RTX 5090 boxes, `scripts/stack/load_ears.py`), and ~600–770 ms of that is endpoint
+  detection. Live threshold tuning should cut it (ISSUES.md, O-01). MOUTH's part is small: first audio ~175–235 ms
+  after the endpoint on a plain turn (smoke test, cloned voice), 400–520 ms p50 with 4 busy sessions.
 - Endpoint thresholds are not yet live-tuned (see Configure).
 - The `Dockerfile` has not yet been built and run end to end (the box used so far is itself a container, with no
   Docker daemon). The non-Docker fresh-box path above has been run end to end on a clean box.

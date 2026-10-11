@@ -1,19 +1,17 @@
 # tyger — open issues and planned work
 
-What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-19").
+What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-20").
 - When an issue is fixed, it leaves this file. Its fix gets a short line in `CHANGELOG.md`, and its commit message
   has the detail and the numbers.
-- The write-ups of fixed issues (I-01 to I-17, L-03, L-04, O-04) are in git history: this file at `4d4c2e3`.
+- The write-ups of fixed issues (I-01 to I-17, L-03, L-04, O-04) are in git history: this file at `4d4c2e3`. I-19,
+  I-22 and I-23 left when the agent became English only: this file at `1b8e6ff`.
 - Each issue says how sure it is: **confirmed** (in code or on the box), **likely**, or **hypothesis** (measure
   before fixing).
 
 | ID | Area | Severity | Status | One line |
 |---|---|---|---|---|
-| I-19 | smart | medium | open | After a language switch, the expert answers in the previous turn's language |
 | I-20 | smart | medium | open | The expert calls `get_current_time` before most answers; once an empty answer, once a "Dummy" reminder |
 | I-21 | smart | low | open | The expert writes unit symbols ("19°C") into speech |
-| I-22 | prompts | medium | open | Without an expert, E4B answers Russian and Spanish live-fact questions in English |
-| I-23 | routing set | low | needs the user | b10's label; b15 drifts to the expert |
 | I-18 | EARS | medium | accepted for now | With a clean mic, an "mm-hm" in the agent's pause barges |
 | I-24 | tests | low | open | `test_barged_round.py` is timing-based and failed once under CPU load |
 | I-09 | EARS | low | check on the stack | A lost MOUTH ends the conversation on the fakes; not checked on the real stack |
@@ -24,7 +22,7 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-1
 | L-02 | latency | lever | open | Decisions land on 320 ms hops |
 | O-01 | ops | — | needs the user | The endpoint thresholds were never tuned live |
 | O-02 | ops | — | blocked | The Dockerfile was never built |
-| O-03 | ops | — | needs the user | `main` is 128 commits behind `plugins` |
+| O-03 | ops | — | needs the user | `main` is over 130 commits behind `plugins` |
 | O-05 | ops | — | partly done | No CI |
 | O-06 | ops | — | needs the user | A first model load can run the box out of RAM |
 | P | packaging | — | planned (parked) | The pip package `tyger-s2s` |
@@ -33,21 +31,8 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-1
 
 ## The expert (`smart`)
 
-All three were found by the live check of `openai-responses` on 2026-10-11 (`gpt-5.4-mini`, web search on,
-synthetic questions). A live run against OpenAI needs the user's OK each time.
-
-### I-19 — After a language switch, the expert answers in the previous turn's language (medium, confirmed)
-**What happens:** on the stack (the default config, 3 runs of 6 turns), an English question right after a Russian
-turn ("Who won the last Formula One race?") was answered in Russian in 2 of 3 runs. A plugin-level replay with a
-shorter context answered in English 4 / 4. The real request isn't logged (privacy).
-
-**Where:** the smart request (`app/mouth/messages.py`) and the `smart` prompts in `config/prompts.yaml`.
-
-**Fix:** name the reply language in the smart request, as MOUTH already does after tool results (`result_note`,
-with `app/prompts/lang.py`).
-
-**Verify:** a GPU-free test that the smart request names the user's language; then the stack run that found it,
-with the user's OK.
+Both were found by the live check of `openai-responses` on 2026-10-11 (`gpt-5.4-mini`, web search on, synthetic
+questions). A live run against OpenAI needs the user's OK each time.
 
 ### I-20 — The expert calls `get_current_time` before most answers (medium, confirmed)
 **What happens** (`gpt-5.4-mini`, `reasoning_effort: low`):
@@ -77,32 +62,6 @@ answers, no action calls.
 **Fix:** spell units out in the smart prompt, with an example ("nineteen degrees Celsius").
 
 **Verify:** the weather questions of the live check, with the user's OK.
-
----
-
-## Routing and prompts
-
-### I-22 — Without an expert, E4B answers Russian and Spanish live-fact questions in English (medium, confirmed)
-**What happens:** with no `llm.smart`, E4B says plainly it can't check live facts (66 / 66, no guessed values). But
-all 24 Russian and Spanish samples were in English ("I'm sorry, I can't check the weather right now."). It copies
-the English wording of `system.voice_tools`. The routing eval doesn't see this: it skips expert cases when there is
-no expert.
-
-**Fix:** reword the sentence. Two drafts, untested:
-- "say plainly, in the language of the user's latest message, that you can't check that right now";
-- "You have no way to look up anything else that is live, such as weather, prices, news or sports scores: when the
-  user asks for one, tell them so honestly, and never guess a current value or tell the user to check a website."
-
-**Verify:** the probe of 2026-10-11 (the 22 live-fact questions without history, 3 samples each, default prompts, no
-`smart`), and `scripts/bench/escalation.py --no-expert` unchanged.
-
-### I-23 — The routing set: b10's label, and b15's drift (low)
-- **b10** ("Сравни тарифы… и скажи, какой выгоднее": compare… and tell me which is cheaper) has no "later", and
-  goes to the expert 8 / 8 on every prompt tried. An expert answer is a fair reading of it. **Needs the user:**
-  label it `also: [expert]`? (Recommended: yes.)
-- **b15** (Spanish "compare the online banks… and let me know what you find") goes to the expert 3–4 of 8 since
-  `b28f889`, against 0 / 8 after `79fbfa5`. That's a fair answer now that the expert can search, but not the
-  background task the case asks for. Watch it on the next prompt change.
 
 ---
 
@@ -204,7 +163,7 @@ best done after P, from the Dockerfile P leaves:
 2. Run it with the mounts from the Dockerfile header.
 3. Run `scripts/stack/smoke.py` against it.
 
-### O-03 — `main` is 128 commits behind `plugins` (needs the user)
+### O-03 — `main` is over 130 commits behind `plugins` (needs the user)
 All work since 2026-10-02 is on `plugins`. `main` is an ancestor of it (a fast-forward), and `voxcpm2` and
 `origin/setup/new-box` are already merged into it. Fast-forward `main` and delete the two old branches when the
 user says so. The user pushes.

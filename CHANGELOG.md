@@ -24,17 +24,18 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **Config checks:** a typo in the config stops startup and names the key.
 - **Tuning sliders** under `?debug=1`, built from the turn-taking plugin's thresholds.
 - **Tests that need no GPU,** and a check of the web page in jsdom.
-- **A routing test** (`scripts/bench/escalation.py`): 188 synthetic English, Russian and Spanish cases, no API cost.
+- **A routing test** (`scripts/bench/escalation.py`): 119 synthetic cases, no API cost.
 - **Measurement scripts:** smoke and load tests on the running stack, GPU parity checks, stack comparisons.
 
 ### Changed
+- **English only:** the agent answers in English, whatever language it hears.
 - **Responder: Gemma 4 E4B,** FP8 at load, replaces Qwen3-4B, for reliable tool calls.
 - **TTS: VoxCPM2** replaces MOSS-TTS-Realtime: first audio per request ~480 → ~80 ms.
 - **Two processes in one venv,** instead of three in three. Both of MOUTH's models run in-process on vLLM.
 - **Replies reach the TTS in whole sentences,** so the intonation doesn't restart mid-sentence.
 - **Tool lead-ins start sooner and fit the request** ("Checking the time in Tokyo."), and "still looking" lines
   cover slow tools.
-- **Backchannels react to what you're saying,** in your language, instead of a canned "mm-hm".
+- **Backchannels react to what you're saying,** instead of a canned "mm-hm".
 - **Barge-in follows what you actually heard:** the page tags the mic with what it was playing.
 - **A turn ends when the page has played the whole reply,** not when generation ends.
 - **Cut-ins get through sooner:** the barge-in threshold went from 0.5 to 0.4.
