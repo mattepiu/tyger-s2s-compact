@@ -628,3 +628,7 @@ tool-turn first audio p50 640 → 408 ms, worst dead air 2584 → 1265 ms; with 
   - **Status (2026-10-03):** `tests/fakes.py` + `tests/mouth/test_session.py` cover the MOUTH session (barge
     history, tool barge, fillers, backchannel cancel, tool history), no GPU. The EARS server state machine is
     still only covered by GPU scripts (`scripts/validate/barge.py`, `scripts/stack/smoke.py`). No CI.
+  - **Status (2026-10-11):** the EARS state machine is covered GPU-free on the fake EARS plugin:
+    `tests/ears/test_floor.py` (the floor), `test_second_ear.py` (the 2nd ear, the turn's end) and
+    `test_conversation.py` (halting, the held endpoint, the reset after a barge, MOUTH's D before / after playback).
+    Still no CI.

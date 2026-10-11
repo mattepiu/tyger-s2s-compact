@@ -129,12 +129,17 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
     - With E4B, the 5090 is the faster card for this stack: decode 186 against 154 tok/s, and 4-session turn first
       audio 397–453 against 527–571 ms.
 
+  `4eb9ce2`
+- **The default stack on the final code** (Gemma E4B, without `smart`): smoke passes (plain / weather / reminder /
+  backchannel first audio 215 / 196 / 255 / 152 ms); `load.py --sessions 4 --turns 6 --tools --fresh` p50 377 ms, 0
+  errors.
+
 #### Added
 - **Responder trial plugins for a 48 GB card** (none is the default): `gemma-4-26b-a4b-nvfp4` (with the
   thought-channel filter), `qwen3.6-35b-a3b-nvfp4` and `qwen3.5-35b-a3b-gptq` (`app/plugins/llm/qwen_moe.py`: thinking
   off, text only, Qwen's sampling). Qwen XML tool calls are a third parsed format again (`qwen_xml`, vLLM's
   `qwen3_coder`), with tests, and `strip_think` takes another tag pair. `llm_weights.py` loads Qwen3.x text-only.
-  Numbers under Measured.
+  Numbers under Measured. `4eb9ce2`
 - **GPU-free tests for EARS's turn-taking state machine** (`tests/ears/test_conversation.py`, 6 tests). The
   Conversation runs on the `fake` EARS plugin, with a fake page and a fake MOUTH over TCP, and covers what the floor
   and 2nd-ear tests didn't:
@@ -150,7 +155,7 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
 
   Each test fails on a matching break of `app/ears/conversation.py`: a second reset on the barged D, no hold while
   halting, a backchannel while halting, a barge after D that waits for a D that never comes, and a D after the
-  page's report that waits for the timeout.
+  page's report that waits for the timeout. `724271a`
 
 #### Fixed
 - **"Research this and tell me later" in Russian and Spanish went to the expert instead of a background task.**
@@ -173,6 +178,8 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
   - b10 ("Сравни тарифы… и скажи, какой выгоднее": compare… and tell me which is cheaper) still goes to the expert
     8 / 8. It has no "later", and an expert answer is a fair reading of it. No example was shaped to match it.
   - Cost: ~190 tokens on the tasks prompt's fixed start, which vLLM's prefix cache covers after the first request.
+
+  `79fbfa5`
 
 #### Removed
 - **The silence fallback** (the user's call: "remove it completely"; in every live session of 2026-10-10 they had
@@ -209,6 +216,8 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
     - `silent_wait.py` and `second_ear.py --pairing tags`: no false barges.
 
     The GPU-free tests and the page check (124 / 124) pass.
+
+  `2a8174d`
 
 ### 2026-10-10 — A cut-in round goes on as a background task (I-16); the 2nd ear on the page's clock (I-17)
 
