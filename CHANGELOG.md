@@ -242,6 +242,8 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
   - Its calls, task starts and speech are clean, and it's small and fast. But the prompts were tuned on Gemma, and
     no per-model prompt was tried. The checkpoint is deleted again (it downloads in 40 s).
 
+  `09b87e8`
+
 #### Changed
 - **The Gemma 4 26B-A4B trial plugin loads unsloth's NVFP4 checkpoint instead of NVIDIA's** (the user's request;
   `gemma-4-26b-a4b-nvfp4` now defaults to `unsloth/gemma-4-26B-A4B-it-NVFP4`). It is an llm-compressor checkpoint:
