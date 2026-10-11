@@ -68,6 +68,24 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
   - All 57 endpoints of the run came from the head and none from the silence fallback (the stack log's
     `endpoint by=`).
 
+#### Added
+- **GPU-free tests for EARS's turn-taking state machine** (`tests/ears/test_conversation.py`, 6 tests). The
+  Conversation runs on the `fake` EARS plugin, with a fake page and a fake MOUTH over TCP, and covers what the floor
+  and 2nd-ear tests didn't:
+  - **Halting** (after a barge, until MOUTH's D): no backchannel and no floor grant, then both once D arrives.
+  - **An endpoint during a halt** is held and sent as the next turn the moment D arrives.
+  - **The reset after a barge** comes exactly once, before the hop after the BARGE one, which is where the plugin
+    seeds the new turn with the user's start (`test_rules.py`). There is none when MOUTH's barged D arrives, so the
+    user's speech between the barge and D still makes a turn (I-02).
+  - **A reply that plays out** resets the session before the next turn.
+  - **MOUTH's D after the page has played everything** ends the turn at once, with no timeout left running.
+  - **A D before the end, then a barge in the tail,** closes the turn on the spot. No B goes out, since MOUTH has
+    nothing left to stop, and the user's next turn goes straight out instead of being held.
+
+  Each test fails on a matching break of `app/ears/conversation.py`: a second reset on the barged D, no hold while
+  halting, a backchannel while halting, a barge after D that waits for a D that never comes, and a D after the
+  page's report that waits for the timeout.
+
 #### Removed
 - **The silence fallback** (the user's call: "remove it completely"; in every live session of 2026-10-10 they had
   switched it off). A turn ended after 1.2 s of silence even when the endpoint head hadn't fired. Now only the head
