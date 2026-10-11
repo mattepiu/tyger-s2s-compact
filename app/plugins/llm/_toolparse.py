@@ -1,19 +1,13 @@
-"""Text-level helpers for models that write tool calls (and possibly thinking) into their text: splitting the
-speakable part off at a call's opening tag, parsing the call formats in use, and a <think> guard.
+"""Text-level helpers for models that write tool calls into their text: splitting the speakable part off at a call's
+opening tag, and parsing the two call formats in use.
 
-  * Gemma 4 (the local gemma plugins): <|tool_call>call:NAME{key:<|"|>text<|"|>,n:3}<tool_call|> (special tokens:
-    decode them). Gemma sometimes drops the markers; gemma_normalize puts them back for the offered tools.
-  * Hermes JSON (the fake LLM, and the openai plugin's fallback when a server returns calls as text):
-    <tool_call>{"name": ..., "arguments": {...}}</tool_call>
-  * Qwen XML (vLLM's `qwen3_coder`; the Qwen3.5 / 3.6 MoE trial plugins, qwen_moe.py):
-    <tool_call><function=NAME><parameter=P>value</parameter>...</function></tool_call>
-  * MiniCPM5 XML (the minicpm5-2b trial plugin): <function name="NAME"><param name="P">value</param>...</function>,
-    a value with <, & or a newline in <![CDATA[...]]>; <function and <param are special tokens (decode them)
+  * Gemma 4 (gemma-4-e4b): <|tool_call>call:NAME{key:<|"|>text<|"|>,n:3}<tool_call|> (special tokens: decode them).
+    Gemma sometimes drops the markers; gemma_normalize puts them back for the offered tools.
+  * Hermes JSON (the fake LLM): <tool_call>{"name": ..., "arguments": {...}}</tool_call>
 
-Each format's calls open with their own tag (TAGS), passed to the splitting / naming helpers. strip_think is the
-openai plugin's guard against a <think> block in the text (`strip_think: true`), and the Qwen plugins'; with Gemma's
-channel tags (GEMMA_THOUGHT) it keeps Gemma 4 26B's thought channel out of speech. check_arguments / flag_invalid:
-the one check of a call's arguments against the offered tool's schema (the hosted plugins run it on every call).
+Each format's calls open with their own tag (TAGS), passed to the splitting / naming helpers. check_arguments /
+flag_invalid: the one check of a call's arguments against the offered tool's schema (the hosted plugins run it on
+every call).
 """
 from __future__ import annotations
 import json, logging, re, uuid
@@ -21,18 +15,9 @@ import json, logging, re, uuid
 log = logging.getLogger("llm")
 TAG = "<tool_call>"
 GEMMA_TAG, GEMMA_Q = "<|tool_call>", '<|"|>'
-MINICPM_TAG = "<function"
-TAGS = {"hermes_json": TAG, "gemma4": GEMMA_TAG, "qwen_xml": TAG,      # the tag a format's calls open with
-        "minicpm5": MINICPM_TAG}
+TAGS = {"hermes_json": TAG, "gemma4": GEMMA_TAG}      # the tag a format's calls open with
 GCALL = re.compile(r"<\|tool_call>call:([\w.-]+)\{(.*?)\}(?:<tool_call\|>|<turn\|>|$)", re.S)
 TCALL = re.compile(r"<tool_call>(.*?)</tool_call>", re.S)
-TFUNC = re.compile(r"<function=([^>\s]+)>(.*?)(?:</function>|$)", re.S)
-TPARAM = re.compile(r"<parameter=([^>\s]+)>\n?(.*?)\n?</parameter>", re.S)
-MCALL = re.compile(r'<function\s+name="([^"]+)"\s*>(.*?)</function>', re.S)
-MPARAM = re.compile(r'<param\s+name="([^"]+)"\s*>(.*?)</param>', re.S)
-CDATA = re.compile(r"\s*<!\[CDATA\[(.*)\]\]>\s*", re.S)
-THINK_OPEN, THINK_CLOSE = "<think>", "</think>"
-GEMMA_THOUGHT = ("<|channel>", "<channel|>")         # Gemma 4's thought channel: <|channel>thought\n...<channel|>
 
 
 def _hold_back(text: str, tags) -> int:
@@ -53,58 +38,12 @@ def split_speakable(raw: str, tag: str = TAG):
     return (raw[:-k] if k else raw), False
 
 
-def strip_think(raw: str, final: bool = False, tags=(THINK_OPEN, THINK_CLOSE)) -> str:
-    """raw without thinking: complete <think>...</think> blocks (or another open / close `tags` pair) and stray tags
-    removed, everything after an unclosed open tag dropped, a trailing partial tag held back unless `final` (the
-    text is complete). Stable as raw grows: what it returned for a prefix is a prefix of what it returns later, so it
-    can sit in front of a streaming speaker."""
-    opener, closer = tags
-    out = []; pos = 0
-    while True:
-        i = raw.find(opener, pos); j = raw.find(closer, pos)
-        if j >= 0 and (i < 0 or j < i):              # a stray close tag (thinking opened in the prompt)
-            out.append(raw[pos:j]); pos = j + len(closer); continue
-        if i < 0:
-            break
-        out.append(raw[pos:i])
-        j = raw.find(closer, i + len(opener))
-        if j < 0:
-            return "".join(out)                      # still thinking: nothing after the tag is speech
-        pos = j + len(closer)
-    tail = raw[pos:]
-    k = 0 if final else _hold_back(tail, tags)
-    return "".join(out) + (tail[:-k] if k else tail)
-
-
 def _hermes(body):
     try:
         c = json.loads(body)
     except Exception:
         return None
     return c if isinstance(c, dict) else None
-
-
-def _xml_value(v: str):
-    """A Qwen XML parameter value: JSON if it parses as a number / bool / list / object, else the raw string."""
-    try:
-        x = json.loads(v)
-        return v if isinstance(x, str) else x
-    except Exception:
-        return v
-
-
-def _xml(body):
-    f = TFUNC.search(body)
-    if not f:
-        return None
-    return {"name": f.group(1), "arguments": {k: _xml_value(v) for k, v in TPARAM.findall(f.group(2))}}
-
-
-def _minicpm_value(v: str):
-    """A MiniCPM5 param value: the CDATA content as is, else JSON if it parses as a number / bool / list / object,
-    else the stripped string."""
-    m = CDATA.fullmatch(v)
-    return m.group(1) if m else _xml_value(v.strip())
 
 
 def _gemma_value(v: str):
@@ -159,22 +98,15 @@ def gemma_normalize(raw: str, names, final: bool = False) -> str:
 
 
 def parse_calls(raw: str, fmt: str):
-    """[{"name", "arguments"}] for each call block in raw, read in `fmt` (a TAGS key); a Hermes, Qwen XML or
-    MiniCPM5 block that doesn't parse (or never closes: cut off) is dropped (logged by kind only, never its text)."""
+    """[{"name", "arguments"}] for each call block in raw, read in `fmt` (a TAGS key); a Hermes block that doesn't
+    parse (or never closes: cut off) is dropped (logged by kind only, never its text)."""
     if fmt == "gemma4":
         return [{"name": m.group(1), "arguments": _gemma_args(m.group(2))} for m in GCALL.finditer(raw)]
-    if fmt == "minicpm5":
-        out = [{"name": m.group(1), "arguments": {k: _minicpm_value(v) for k, v in MPARAM.findall(m.group(2))}}
-               for m in MCALL.finditer(raw)]
-        if len(out) < raw.count(MINICPM_TAG):
-            log.warning("unparseable tool call dropped")
-        return out
-    if fmt not in ("hermes_json", "qwen_xml"):
+    if fmt != "hermes_json":
         raise ValueError(f"unknown tool-call format {fmt!r}")
-    read = _xml if fmt == "qwen_xml" else _hermes
     out = []
     for m in TCALL.finditer(raw):
-        c = read(m.group(1).strip())
+        c = _hermes(m.group(1).strip())
         if c is None or not c.get("name"):
             log.warning("unparseable tool call dropped")
             continue
@@ -182,10 +114,8 @@ def parse_calls(raw: str, fmt: str):
     return out
 
 
-# the first call's name, complete: Hermes {"name": "x" (closing quote seen), Gemma call:x{, Qwen XML <function=x>
-# or MiniCPM5 <function name="x" (after its tag)
-_NAME = (re.compile(r'\s*\{\s*"name"\s*:\s*"([^"\\]+)"'), re.compile(r"\s*call:([\w.-]+)\{"),
-         re.compile(r"\s*<function=([^>\s]+)>"), re.compile(r'\s+name="([^"]+)"'))
+# the first call's name, complete: Hermes {"name": "x" (closing quote seen) or Gemma call:x{ (after its tag)
+_NAME = (re.compile(r'\s*\{\s*"name"\s*:\s*"([^"\\]+)"'), re.compile(r"\s*call:([\w.-]+)\{"))
 NAME_WAIT = 64          # characters after the tag; a call that hasn't named its tool by then starts unnamed
 
 

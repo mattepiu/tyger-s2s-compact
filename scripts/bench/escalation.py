@@ -16,7 +16,7 @@ expert, or call markup leaking into speech. For tool-route samples it also runs 
 result (phase B), with fixed English stub results (the real reminder / message stubs; the time tool runs for
 real), and scores that answer's speech the same way: English tool output must not pull the reply language.
 
-  .venv/bin/python scripts/bench/escalation.py [--plugin gemma-4-e4b-nvfp4 --opt quantization=null] [--samples 3]
+  .venv/bin/python scripts/bench/escalation.py [--samples 8] [--no-expert] [--opt temperature=0.5] [--plugin NAME]
       [--split heldout] [--prompts config/prompts.yaml,/path/candidate.yaml]   several prompt files: one model load
       [--lang en --prompts config/prompts_en.yaml]   English only (the `hard` split is English)
 """
@@ -179,7 +179,7 @@ def report(results, title):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
-    ap.add_argument("--plugin", default=None, help="override llm.reply.plugin (e.g. gemma-4-e4b-nvfp4)")
+    ap.add_argument("--plugin", default=None, help="override llm.reply.plugin")
     ap.add_argument("--prompts", default=None, help="comma-separated prompt files to compare (default: config's)")
     ap.add_argument("--set", default=str(HERE / "escalation_set.yaml"))
     ap.add_argument("--split", choices=("all",) + SPLITS, default="all")

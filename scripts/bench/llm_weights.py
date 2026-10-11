@@ -1,8 +1,8 @@
-"""GPU memory per module of a loaded LLM (the tyger plugins' engine args: 3 GiB KV, 8192 tokens, 8 seqs), and
-single-stream decode tok/s. Shows which towers / tables are on the GPU (e.g. Gemma's per-layer embeddings, NVFP4
-packed weights). Run with the stack stopped: .venv/bin/python scripts/bench/llm_weights.py <hf repo>
-Google checkpoints get on-the-fly FP8 like config/default.yaml; pre-quantized ones (NVFP4) keep their own. Prompts are
-synthetic; no text is printed."""
+"""GPU memory per module of the responder (the tyger plugins' engine args: 3 GiB KV, 8192 tokens, 8 seqs), and its
+single-stream decode tok/s: part of a new card's baseline. Shows which towers / tables are on the GPU (e.g. Gemma's
+per-layer embeddings). Run with the stack stopped: .venv/bin/python scripts/bench/llm_weights.py [hf repo]
+The model (default google/gemma-4-E4B-it) loads as gemma-4-e4b does in config/default.yaml: FP8 at load, text only.
+Prompts are synthetic; no text is printed."""
 import os, sys, time, collections
 os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
 
@@ -29,8 +29,6 @@ def sizes(model):
                 g = "PLE input buffer (CUDA-graph)"
             elif t.dtype == torch.float8_e4m3fn:
                 g = "decoder linears (fp8)"
-            elif t.dtype == torch.uint8:
-                g = "NVFP4 packed weights (uint8)"
             else:
                 g = f"other text ({kind}, {t.dtype})"
             groups[g] += b
@@ -40,14 +38,9 @@ def sizes(model):
 
 def main():
     from vllm import LLM, SamplingParams
-    model = sys.argv[1]
-    kw = {}
-    if "google/" in model:
-        kw["quantization"] = "fp8"                     # on-the-fly FP8 (the NVFP4 checkpoints carry their own)
-    if "gemma" in model.lower() or "qwen3." in model.lower():          # multimodal checkpoints: text only, as the plugins
-        kw["language_model_only"] = True
+    model = sys.argv[1] if len(sys.argv) > 1 else "google/gemma-4-E4B-it"
     llm = LLM(model=model, gpu_memory_utilization=0.5, kv_cache_memory_bytes=3 * 2**30, max_model_len=8192,
-              max_num_seqs=8, **kw)
+              max_num_seqs=8, quantization="fp8", language_model_only=True)      # as gemma-4-e4b
     groups, towers = llm.apply_model(sizes)[0]
     GiB = 2**30
     print(f"\n== {model}: modules on the GPU")

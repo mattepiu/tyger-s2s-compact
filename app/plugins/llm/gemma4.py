@@ -8,9 +8,7 @@
     and writes a bare `set_reminder{...}`: for the offered tools that counts as a call too (never spoken).
 """
 from app.plugins.llm.vllm_base import VLLMChatPlugin
-import json, re
-
-from app.plugins.llm._toolparse import gemma_normalize, strip_think, GEMMA_THOUGHT
+from app.plugins.llm._toolparse import gemma_normalize
 
 
 class Gemma4E4B(VLLMChatPlugin):
@@ -30,53 +28,3 @@ class Gemma4E4B(VLLMChatPlugin):
 
     def normalize_calls(self, text, names, final=False):
         return gemma_normalize(text, names, final)
-
-
-class Gemma4E4B_NVFP4(Gemma4E4B):
-    """gemma-4-e4b-nvfp4, the responder's backup: unsloth's llm-compressor checkpoint of E4B: FP8 attention (and 11
-    layers' MLPs), NVFP4 for the other MLPs, and the per-layer embedding table in int8 (3.6 GB less GPU, same routing
-    and latency, NOTES.md). The quantization comes from the checkpoint: leave `quantization` unset."""
-    default_model = "unsloth/gemma-4-E4B-it-NVFP4"
-
-
-class Gemma4_26B_A4B(Gemma4E4B):
-    """gemma-4-26b-a4b-nvfp4: unsloth's llm-compressor checkpoint of the 26B mixture-of-experts Gemma 4 (~4B active):
-    FP8 attention, NVFP4 experts and MLPs. A responder trial for a 48 GB card (15.1 GiB of weights). The quantization
-    comes from the checkpoint: leave `quantization` unset. It replaced NVIDIA's ModelOpt checkpoint
-    (nvidia/Gemma-4-26B-A4B-NVFP4) on 2026-10-11: the same routing, 1.7 GiB less and 189 against 151 tok/s, but with
-    the multilingual prompts and no `smart` it sometimes answers English in the last example's language (CHANGELOG).
-
-    Despite enable_thinking=False it opens Gemma's thought channel after a tool result, mostly empty
-    (`<|channel>thought\n<channel|>`, then the answer): the channel is stripped before anything is spoken or
-    parsed. Now and then (~0.5% of answers after a tool, routing eval 2026-10-11) it never closes the channel and
-    writes the answer inside it, after its thought as a JSON object or after a stray closing token such as
-    `<tool_response|>`: when the whole text ends up held back as thinking, the answer after that object or token is
-    kept, at the end of the stream."""
-    default_model = "unsloth/gemma-4-26B-A4B-it-NVFP4"
-
-    def filter_text(self, raw, final=False):
-        out = strip_think(raw, final, GEMMA_THOUGHT)
-        if final and not out.strip():
-            out = answer_after_open_thought(raw)
-        return out
-
-
-def answer_after_open_thought(raw: str) -> str:
-    """The text after an unclosed `<|channel>thought` that opens with one JSON object or a stray closing token
-    (`<name|>`), or "" (thinking only)."""
-    i = raw.rfind(GEMMA_THOUGHT[0])
-    if i < 0 or GEMMA_THOUGHT[1] in raw[i:]:
-        return ""
-    body = raw[i + len(GEMMA_THOUGHT[0]):]
-    body = body[len("thought"):] if body.startswith("thought") else body
-    body = body.lstrip()
-    stray = re.match(r"<\w+\|>", body)
-    if stray:
-        return body[stray.end():].lstrip()
-    if not body.startswith("{"):
-        return ""
-    try:
-        _, end = json.JSONDecoder().raw_decode(body)
-    except ValueError:
-        return ""
-    return body[end:].lstrip()

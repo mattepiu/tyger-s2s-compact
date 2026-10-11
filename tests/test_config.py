@@ -49,7 +49,7 @@ def test_filler_defaults_to_reply_instance():
 
 def test_separate_filler_block_and_name():
     cfg = copy.deepcopy(BASE)
-    cfg["llm"]["filler"] = {"plugin": "gemma-4-e4b-nvfp4", "name": "small", "kv_cache_gib": 1.0}
+    cfg["llm"]["filler"] = {"plugin": "gemma-4-e4b", "name": "small", "kv_cache_gib": 1.0}   # a 2nd instance
     roles = llm_roles(validate_config(cfg))
     assert roles["filler"][0] == "small" and roles["filler"] is not roles["reply"]
 
@@ -85,7 +85,7 @@ def test_plugin_options_checked_at_load():
     rejects(cfg, "`ears`", "`ring_frame`", "`ring_frames`")
     cfg = copy.deepcopy(BASE); cfg["tts"]["allow_zero_shot"] = "yes"
     rejects(cfg, "`tts`", "`allow_zero_shot` must be a bool")
-    cfg = copy.deepcopy(BASE); cfg["llm"]["smart"] = {"plugin": "openai", "max_tokens": 512}
+    cfg = copy.deepcopy(BASE); cfg["llm"]["smart"] = {"plugin": "openai-responses", "max_tokens": 512}
     rejects(cfg, "`llm.smart`", "`model` is not set")
     cfg = copy.deepcopy(BASE); del cfg["ears"]["ep_thr"]           # a threshold without a default
     rejects(cfg, "`ears`", "`ep_thr` is not set")

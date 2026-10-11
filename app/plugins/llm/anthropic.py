@@ -12,7 +12,8 @@ plugin; the startup log says which roles are remote. Bodies are never logged; AN
     config per role, not from MOUTH's max_new. No temperature / top_p / top_k (rejected); tool_choice stays auto.
   * Tools: {name, description, input_schema, eager_input_streaming: true}, in the fixed order of app/tools/.
     With eager streaming the server doesn't validate inputs, so every input is checked against its schema here
-    (_toolparse.check_arguments, as in openai); a bad one comes back with "error" set and MOUTH never runs it.
+    (_toolparse.check_arguments, as in openai-responses); a bad one comes back with "error" set and MOUTH never
+    runs it.
     stop_reason max_tokens: no call is run.
   * Thinking blocks in history (preserved thinking): inside one tool round, phase B sends back the response's own
     content unchanged (the `native` of the tool_calls event). Completed turns are converted from the neutral
@@ -23,7 +24,7 @@ plugin; the startup log says which roles are remote. Bodies are never logged; AN
     there, and the native content keeps just the text before it (thinking / tool_use there must not be echoed).
   * Refusal that survives the fallback: ("refusal", stop_details.category); MOUTH speaks a neutral line.
   * Prompt caching: top-level cache_control (tools + system are a stable prefix).
-  * Key, timeouts, concurrency, errors -> LLMError, shutdown: HostedLLM (hosted.py), as for openai.
+  * Key, timeouts, concurrency, errors -> LLMError, shutdown: HostedLLM (hosted.py), as for openai-responses.
   * Abort: leaving the stream (stop_flag) closes the HTTP connection; tokens generated so far are billed.
 """
 from __future__ import annotations

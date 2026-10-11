@@ -1,7 +1,7 @@
 """Plugin contract (PLUGINS.md -> Tests): one suite per kind, run against every plugin that can run here.
 
   * the `fake` plugins always run (no GPU);
-  * the local model plugins (gemma-4-e4b, gemma-4-e4b-nvfp4, voxcpm2, nemotron-tyger-1.0) run with
+  * the local model plugins (gemma-4-e4b, voxcpm2, nemotron-tyger-1.0) run with
     TYGER_CONTRACT_LOCAL=1, on the GPU box with the GPU free (stop run.sh first): they load the real models, one at
     a time.
 
@@ -26,7 +26,8 @@ CFG = load_config()
 P = default_prompts()
 TOOLS = build_tools(P)
 TOOLS_EXPERT = build_tools(P, expert=True)
-MARKUP = ("<tool_call>", "</tool_call>", "<function=", "<think>", "</think>")
+# never in spoken text: the Hermes JSON and Gemma 4 call tags, and Gemma's thought channel
+MARKUP = ("<tool_call>", "</tool_call>", "<|tool_call>", "<tool_call|>", "<|channel>", "<channel|>")
 
 
 class Skip(Exception):
@@ -73,7 +74,7 @@ def check_llm_events(evs):
 def llm_suite(llm, plain=True, tool_turn=True):
     msgs = [{"role": "system", "content": P.text("system", "voice_tools")},
             {"role": "user", "content": "Can you tell me a short joke?"}]     # nothing to look up: routing is
-    # scripts/bench/escalation.py's job (a trivia question went to a lookup 8 / 8 on gemma-4-e4b-nvfp4, NOTES.md)
+    # scripts/bench/escalation.py's job
     text = check_llm_events(list(llm.stream(msgs, tools=TOOLS, max_new=64)))
     assert text.strip() or not plain, "no text for a plain question"
     n = 0                                                    # stop after the first item: at most one more
@@ -108,15 +109,13 @@ def test_llm_fake():
 
 def test_llm_local():
     if not LOCAL:
-        raise Skip("TYGER_CONTRACT_LOCAL=1 to run the Gemma plugins")
-    base = dict(CFG["llm"]["reply"])
-    # the backup's checkpoint is pre-quantized: no `quantization` at load (config/default.yaml's backup comment)
-    for name, over in (("gemma-4-e4b", {}), ("gemma-4-e4b-nvfp4", {"quantization": None})):
-        llm = plugin_class("llm", name)({**base, **over, "plugin": name}, ctx(name, eloop()))
-        try:
-            llm.warmup(); llm_suite(llm)
-        finally:
-            llm.shutdown(); del llm; gc.collect()
+        raise Skip("TYGER_CONTRACT_LOCAL=1 to run gemma-4-e4b")
+    name = "gemma-4-e4b"
+    llm = plugin_class("llm", name)({**CFG["llm"]["reply"], "plugin": name}, ctx(name, eloop()))
+    try:
+        llm.warmup(); llm_suite(llm)
+    finally:
+        llm.shutdown(); del llm; gc.collect()
 
 
 # ---- TTS ------------------------------------------------------------------------------------------------

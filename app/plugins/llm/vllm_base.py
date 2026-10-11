@@ -1,5 +1,5 @@
-"""In-process chat LLM on a vLLM AsyncLLM engine (no server, no HTTP), on MOUTH's EngineLoop. Shared by the local
-plugins (the Gemma 4 ones, gemma4.py), which override only the hooks: default_model, tool_format, engine_kwargs,
+"""In-process chat LLM on a vLLM AsyncLLM engine (no server, no HTTP), on MOUTH's EngineLoop. The base of the local
+plugins (gemma-4-e4b, gemma4.py), which override only the hooks: default_model, tool_format, engine_kwargs,
 template_kwargs, sampling, normalize_calls.
 
 stream(messages, tools=...) yields ("text", delta) for speakable text as it decodes; ("tool_start", {"name": ...})
@@ -48,7 +48,7 @@ class VLLMChatPlugin(LLMPlugin):
         max_num_seqs: int = 8
         temperature: float = 0.7
         max_tokens: int | None = None          # if set, every request gets it instead of MOUTH's max_new
-        # (backchannel / filler limits included): meant for a block that serves only `smart`, as in openai_compat
+        # (backchannel / filler limits included): meant for a block that serves only `smart`, like openai-responses'
 
     def __init__(self, conf: dict, ctx):
         from vllm import AsyncEngineArgs
@@ -72,8 +72,8 @@ class VLLMChatPlugin(LLMPlugin):
         self._tok_lock = threading.Lock()
 
     # ---- hooks ----
-    # The plugin API. prepare_messages and filter_text have no override now (the plugins that used them are gone);
-    # a new model may need them: a think filter, a template that reads a switch from the system prompt.
+    # The plugin API. prepare_messages has no override now; a new model may need it (a template that reads a switch
+    # from the system prompt).
     def engine_kwargs(self) -> dict:
         return {}
 
@@ -91,13 +91,10 @@ class VLLMChatPlugin(LLMPlugin):
                               temperature=self.temperature)
 
     def normalize_calls(self, text: str, names, final: bool = False) -> str:
-        """Text with the model's malformed calls rewritten into its tagged format (`names`: the offered tools)."""
+        """Text with the model's malformed calls rewritten into its tagged format (`names`: the offered tools).
+        Mid-stream it may hold back a trailing word that could still start a call; final=True (the stream ended)
+        holds nothing back."""
         return text
-
-    def filter_text(self, raw: str, final: bool = False) -> str:
-        """The model's raw text -> the part that may be spoken or parsed (e.g. without thinking). Mid-stream it
-        may hold back a trailing partial tag; final=True (the stream ended) holds nothing back."""
-        return raw
 
     # ---- LLMPlugin ----
     def stream(self, messages, tools=None, max_new=192, stop_flag=None):
@@ -117,7 +114,7 @@ class VLLMChatPlugin(LLMPlugin):
         raw, said, saw_tool, started = "", 0, False, None
         names = [t["function"]["name"] for t in tools or []]
         wait_name = names_tool(tools)
-        visible_now = lambda final=False: self.normalize_calls(self.filter_text(raw, final), names, final)  # noqa: E731
+        visible_now = lambda final=False: self.normalize_calls(raw, names, final)  # noqa: E731
         for d in self.eloop.iterate(deltas, abort=lambda: self.engine.abort(rid), stop_flag=stop_flag):
             raw += d
             if started:
@@ -133,8 +130,8 @@ class VLLMChatPlugin(LLMPlugin):
         if stop_flag and stop_flag():
             return
         visible = visible_now(final=True)
-        if not saw_tool:              # flush a held-back "<..." that wasn't a tag; a call that only shows up now
-            speak, saw_tool = split_speakable(visible, TAGS[self.tool_format])   # (a filter's final pass) is a call
+        if not saw_tool:              # flush a held-back "<..." that wasn't a tag; a call that shows up only in
+            speak, saw_tool = split_speakable(visible, TAGS[self.tool_format])   # this final pass is still a call
             if len(speak) > said:
                 yield ("text", speak[said:])
         if saw_tool:

@@ -1,5 +1,5 @@
-"""HostedLLM: what the hosted LLM plugins (openai, anthropic) share. Each subclass names its SDK and writes its
-request and stream parsing; this base does the rest the same way for both:
+"""HostedLLM: what the hosted LLM plugins (openai-responses, anthropic) share. Each subclass names its SDK and writes
+its request and stream parsing; this base does the rest the same way for both:
 
   * the API key from the env var `api_key_env` (.env); missing -> the plugin refuses to start, naming the var;
   * the SDK's debug logging (`<SDK>_LOG=debug`) prints request bodies, i.e. transcripts: the plugin refuses to start;

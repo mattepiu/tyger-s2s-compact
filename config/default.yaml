@@ -31,7 +31,7 @@ ears:                      # turn-taking: nemotron ASR + the tyger 1.0 heads (ex
 llm:                       # MOUTH's LLM roles; each block is one plugin instance
   reply:                   # ordinary turns and the tool phase-B answer
     plugin: gemma-4-e4b    # in-process vLLM, text only, thinking off (step 11: routes and calls tools reliably, NOTES).
-    quantization: fp8      # Backup: plugin: gemma-4-e4b-nvfp4 and drop this line (pre-quantized, 3.6 GB less GPU)
+    quantization: fp8      # at load: bf16 weights wouldn't fit next to VoxCPM2 and EARS
     gpu_memory_utilization: 0.5    # vLLM start-up free-memory check only; actual KV is pinned below
     kv_cache_gib: 3.0              # fixed KV budget (4 sessions x turn + backchannel)
     max_model_len: 8192
@@ -45,7 +45,6 @@ llm:                       # MOUTH's LLM roles; each block is one plugin instanc
     web_search: true       # OpenAI's web search: weather, news, prices (no local web search or weather tool)
     reasoning_effort: low  # live 2026-10-11: `none` works with search, faster, but maths worse
     api_key_env: OPENAI_API_KEY
-  # smart: {plugin: openai, model: gpt-5.4-mini, max_tokens: 1024, extra_body: {reasoning_effort: none}}   # no search
   # smart: {plugin: anthropic, model: claude-opus-5-5, effort: low, max_tokens: 2048}   # once there's a key
 
 tts:                       # VoxCPM2, in-process vLLM-Omni AsyncOmni inside the MOUTH

@@ -1,28 +1,28 @@
 """Text-level LLM helpers (no GPU): speakable splitting at a call tag, the tool-call formats (Gemma 4, Hermes
-JSON, Qwen XML, MiniCPM5 XML), the <think> guard, and the neutral -> chat-template history conversion.
+JSON), and the neutral -> chat-template history conversion.
 Run: .venv/bin/python tests/plugins/test_llm_parse.py"""
 import os, sys
 
 TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
-from app.plugins.llm._toolparse import split_speakable, parse_calls, strip_think, new_call_id, tool_start, \
+from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id, tool_start, \
     NAME_WAIT, TAG, GEMMA_TAG, gemma_normalize, names_tool, check_arguments, flag_invalid  # noqa: E402
 from app.plugins.llm.vllm_base import to_template_messages  # noqa: E402
 
 
-def stream_speakable(raw, step=2, filt=lambda r, final=False: r):
+def stream_speakable(raw, step=2):
     """What VLLMChatPlugin.stream would speak, feeding raw text in small deltas."""
     said, buf, saw = "", "", False
     for i in range(0, len(raw), step):
         buf += raw[i:i + step]
         if saw:
             continue
-        speak, saw = split_speakable(filt(buf))
+        speak, saw = split_speakable(buf)
         assert speak.startswith(said), (speak, said)               # never takes back what was spoken
         if len(speak) > len(said):
             said = speak
     if not saw:
-        said = filt(buf, True)
+        said = buf
     return said, saw
 
 
@@ -36,7 +36,7 @@ def test_partial_tag_held_back():
     assert split_speakable("Okay <b") == ("Okay <b", False)
 
 
-# ---- Hermes JSON (the fake LLM; the openai plugin's fallback for calls returned as text) -------------------
+# ---- Hermes JSON (the fake LLM) ----------------------------------------------------------------------------
 HERMES = '<tool_call>\n{"name": "get_weather", "arguments": {"location": "Paris"}}\n</tool_call>'
 
 
@@ -109,109 +109,6 @@ def test_gemma_normalize_leaves_speech_alone():
     assert gemma_normalize("set_reminder{x}", []) == "set_reminder{x}"  # no tools offered: plain text
 
 
-# ---- <think> guard (the openai plugin's strip_think: true) -------------------------------------------------
-def test_think_never_spoken():
-    raw = "<think>\nthe user wants a joke\n</think>\n\nWhy did the chicken cross the road? To get across."
-    for step in (1, 2, 5):
-        said, saw = stream_speakable(raw, step, strip_think)
-        assert said.strip() == "Why did the chicken cross the road? To get across." and not saw
-
-
-def test_think_unclosed_and_stray():
-    assert strip_think("Hi. <think>planning more") == "Hi. "
-    assert strip_think("</think>\n\nHello there.") == "\n\nHello there."      # thinking opened in the prompt
-    assert strip_think("Hello <thi") == "Hello " and strip_think("Hello <thi", final=True) == "Hello <thi"
-    assert strip_think("5 < 7, fine.") == "5 < 7, fine."
-
-
-def test_think_then_tool_call():
-    raw = "<think>need weather</think>" + HERMES
-    assert stream_speakable(raw, 3, strip_think) == ("", True)
-    assert parse_calls(strip_think(raw, True), "hermes_json")[0]["name"] == "get_weather"
-
-
-QWEN = ("Let me check.<tool_call>\n<function=get_weather>\n<parameter=location>\nParis, France\n</parameter>\n"
-        "<parameter=days>\n3\n</parameter>\n</function>\n</tool_call>")
-
-
-def test_qwen_xml_parsed_named_never_spoken():
-    assert stream_speakable(QWEN, 3, strip_think) == ("Let me check.", True)
-    assert parse_calls(QWEN, "qwen_xml") == [{"name": "get_weather",
-                                              "arguments": {"location": "Paris, France", "days": 3}}]
-    got, at = first_start(QWEN)
-    assert got == {"name": "get_weather"} and QWEN[:at].endswith("<function=get_weather>")
-    two = QWEN + "<tool_call>\n<function=web_search>\n<parameter=query>\n1, 2: \"x\"\n</parameter>\n</function>\n" \
-                 "</tool_call>"
-    assert [c["name"] for c in parse_calls(two, "qwen_xml")] == ["get_weather", "web_search"]
-    assert parse_calls(two, "qwen_xml")[1]["arguments"] == {"query": '1, 2: "x"'}
-
-
-def test_qwen_xml_after_an_empty_think_block():
-    raw = "<think>\n\n</think>\n\n" + QWEN
-    assert stream_speakable(raw, 2, strip_think)[0].strip() == "Let me check."
-    assert parse_calls(strip_think(raw, True), "qwen_xml")[0]["name"] == "get_weather"
-
-
-def test_qwen_xml_unparseable_dropped():
-    assert parse_calls("<tool_call>\n{\"name\": \"x\"}\n</tool_call>", "qwen_xml") == []
-
-
-MINICPM = ('One moment.<function name="set_reminder"><param name="text">call mom</param>'
-           '<param name="time">18:00</param></function>')
-
-
-def test_minicpm5_parsed_named_never_spoken():
-    from app.plugins.llm._toolparse import MINICPM_TAG
-    for step in (1, 3):
-        said = ""
-        for i in range(step, len(MINICPM) + step, step):
-            speak, saw = split_speakable(MINICPM[:i], MINICPM_TAG)
-            assert speak.startswith(said) and "<" not in speak; said = speak
-        assert said == "One moment." and saw
-    assert parse_calls(MINICPM, "minicpm5") == [{"name": "set_reminder",
-                                                 "arguments": {"text": "call mom", "time": "18:00"}}]
-    got, at = first_start(MINICPM, MINICPM_TAG)
-    assert got == {"name": "set_reminder"} and MINICPM[:at].endswith('name="set_reminder"')
-    assert tool_start(MINICPM, TAG) is None                          # Hermes's tag is not MiniCPM5's
-
-
-def test_minicpm5_values_cdata_multiple_and_cut_off():
-    raw = ('<function name="ask_expert"><param name="question"><![CDATA[Is 5 < 7 & why?\nThink.]]></param>'
-           '</function>\n<function name="x"><param name="n">3</param><param name="ok">true</param></function>')
-    assert parse_calls(raw, "minicpm5") == [{"name": "ask_expert", "arguments": {"question": "Is 5 < 7 & why?\nThink."}},
-                                            {"name": "x", "arguments": {"n": 3, "ok": True}}]
-    assert parse_calls('<function name="set_reminder"><param name="text">call m', "minicpm5") == []   # cut off
-    assert parse_calls("<function name='bad'></function>", "minicpm5") == []
-
-
-def test_minicpm5_plugin_stream():
-    """The plugin's stream: speech before the call, then the named call; a stray think block never spoken."""
-    from app.plugins.llm.minicpm5 import MiniCPM5_2B
-    got = scripted_stream(MiniCPM5_2B, MINICPM)
-    assert "".join(e[1] for e in got if e[0] == "text") == "One moment."
-    assert [k for k, *_ in got if k != "text"] == ["tool_start", "tool_calls"]
-    assert got[-1][1][0]["arguments"] == {"text": "call mom", "time": "18:00"}
-    got = scripted_stream(MiniCPM5_2B, "<think>\nhm\n</think>\n\nIt's ten past nine.")
-    assert "".join(e[1] for e in got if e[0] == "text").strip() == "It's ten past nine." and got[-1][0] == "text"
-
-
-def test_gemma_thought_channel_never_spoken():
-    from app.plugins.llm._toolparse import GEMMA_THOUGHT
-    filt = lambda r, final=False: strip_think(r, final, GEMMA_THOUGHT)          # noqa: E731
-    split = lambda r: split_speakable(r, GEMMA_TAG)                              # noqa: E731
-    for raw, want in (("<|channel>thought\n<channel|>It's 14 degrees in Oslo.", "It's 14 degrees in Oslo."),
-                      ("<|channel>thought\nThe user wants the weather.<channel|>Sunny today.", "Sunny today."),
-                      ("<|channel>thought\nStill thinking about it", "")):
-        said = ""
-        for i in range(1, len(raw) + 1):                       # streamed one character at a time
-            speak, _ = split(filt(raw[:i]))
-            assert speak.startswith(said), (speak, said)       # never takes back what was spoken
-            said = speak
-        assert filt(raw, True) == want and "channel" not in said, (raw, said)
-    raw = "<|channel>thought\n<channel|>" + GEMMA
-    assert parse_calls(filt(raw, True), "gemma4")[0]["name"] == "get_weather"
-
-
 def scripted_stream(plugin_cls, raw, tools=None, step=3):
     """VLLMChatPlugin.stream on a plugin without an engine: the model's raw text arrives in `step`-character deltas."""
     import threading
@@ -225,22 +122,19 @@ def scripted_stream(plugin_cls, raw, tools=None, step=3):
     return list(p.stream([{"role": "user", "content": "x"}], tools=tools))
 
 
-def test_gemma_26b_answer_after_an_unclosed_json_thought():
-    """Seen on the box: the thought as a JSON object, then the answer, the channel never closed. The answer is spoken
-    (at the end of the stream), the thought never; a call after such a thought is a call, not speech."""
-    from app.plugins.llm.gemma4 import Gemma4_26B_A4B
-    raw = '<|channel>thought\n{\n  "thought": "No clear answer, {sorry}."\n}Извините, мне не удалось это найти.'
-    assert scripted_stream(Gemma4_26B_A4B, raw) == [("text", "Извините, мне не удалось это найти.")]
-    raw = '<|channel>thought\n<channel|>It is sunny.'                     # the usual empty channel: streamed
-    got = scripted_stream(Gemma4_26B_A4B, raw)
-    assert "".join(t for k, t in got if k == "text") == "It is sunny." and len(got) > 1
-    raw = '<|channel>thought\n{"thought": "check"}' + GEMMA
-    got = scripted_stream(Gemma4_26B_A4B, raw)
-    assert got[0] == ("text", "Sure.") and [k for k, *_ in got[1:]] == ["tool_start", "tool_calls"], got
-    assert got[2][1][0]["name"] == "get_weather" and "tool_call" not in got[0][1]
-    raw = "<|channel>thought\n<tool_response|>Курс сейчас около девяноста двух рублей."     # a stray closing token
-    assert scripted_stream(Gemma4_26B_A4B, raw) == [("text", "Курс сейчас около девяноста двух рублей.")]
-    assert scripted_stream(Gemma4_26B_A4B, "<|channel>thought\nStill thinking about it") == []   # thinking only
+def test_gemma_plugin_stream_bare_call_at_the_end():
+    """gemma-4-e4b's stream: speech, then a bare `set_reminder{...}` as the very last text, in any deltas (one
+    character at a time, or the whole call in the final one): a call, never spoken."""
+    from app.plugins.llm.gemma4 import Gemma4E4B
+    from app.prompts import default_prompts
+    from app.tools import build_tools
+    raw = 'Okay. set_reminder{text:<|"|>call my mom<|"|>,time:<|"|>6 pm<|"|>}'
+    for step in (1, 3, len(raw)):
+        got = scripted_stream(Gemma4E4B, raw, tools=build_tools(default_prompts()), step=step)
+        assert "".join(e[1] for e in got if e[0] == "text").strip() == "Okay.", (step, got)
+        assert [e[0] for e in got if e[0] != "text"] == ["tool_start", "tool_calls"], (step, got)
+        assert got[-1][1] and got[-1][1][0]["name"] == "set_reminder" and \
+            got[-1][1][0]["arguments"] == {"text": "call my mom", "time": "6 pm"}, (step, got)
 
 
 def test_unknown_format_rejected():
