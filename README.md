@@ -221,6 +221,9 @@ design is in `PLUGINS.md`). Each block names its `plugin:`; the rest of the bloc
 |---|---|---|---|
 | LLM | `gemma-4-e4b` | local, vLLM in MOUTH | the default responder (`quantization: fp8`): thinking off, text only, Gemma tool-call tokens |
 | LLM | `gemma-4-e4b-nvfp4` | local, vLLM in MOUTH | the backup: unsloth NVFP4 E4B (int8 per-layer embeddings), routes like E4B FP8, 3.6 GB less GPU, same latency; no `quantization` |
+| LLM | `gemma-4-26b-a4b-nvfp4` | local, vLLM in MOUTH | trial for a 48 GB card (CHANGELOG 2026-10-11): NVIDIA's NVFP4 Gemma 4 26B-A4B mixture of experts, its thought channel kept out of speech; no `quantization` |
+| LLM | `qwen3.6-35b-a3b-nvfp4` | local, vLLM in MOUTH | trial for a 48 GB card: NVIDIA's Qwen3.6-35B-A3B (Qwen XML tool calls, Qwen's sampling, `config/prompts/` override); no `quantization` |
+| LLM | `qwen3.5-35b-a3b-gptq` | local, vLLM in MOUTH | trial, failed the routing gate (25% missed escalations); no `quantization` |
 | LLM | `openai` | **hosted** | any OpenAI-compatible chat endpoint (`base_url`: OpenAI, Groq, Cerebras, a vLLM server) |
 | LLM | `anthropic` | **hosted** | the Claude Messages API; default `claude-opus-5-5`, `effort: low`, server-side refusal fallback |
 | TTS | `voxcpm2` | local, vLLM-Omni in MOUTH | cloned voices from `voices/` |

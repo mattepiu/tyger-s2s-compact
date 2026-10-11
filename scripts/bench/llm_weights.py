@@ -44,7 +44,7 @@ def main():
     kw = {}
     if "google/" in model:
         kw["quantization"] = "fp8"                     # on-the-fly FP8 (the NVFP4 checkpoints carry their own)
-    if "gemma" in model.lower():
+    if "gemma" in model.lower() or "qwen3." in model.lower():          # multimodal checkpoints: text only, as the plugins
         kw["language_model_only"] = True
     llm = LLM(model=model, gpu_memory_utilization=0.5, kv_cache_memory_bytes=3 * 2**30, max_model_len=8192,
               max_num_seqs=8, **kw)

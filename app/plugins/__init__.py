@@ -6,6 +6,9 @@ import importlib
 REGISTRY = {
     "llm": {"gemma-4-e4b": "app.plugins.llm.gemma4:Gemma4E4B",                # the responder (FP8 at load)
             "gemma-4-e4b-nvfp4": "app.plugins.llm.gemma4:Gemma4E4B_NVFP4",    # its backup: 3.6 GB less GPU
+            "gemma-4-26b-a4b-nvfp4": "app.plugins.llm.gemma4:Gemma4_26B_A4B",      # trial (48 GB card)
+            "qwen3.6-35b-a3b-nvfp4": "app.plugins.llm.qwen_moe:Qwen36MoE_NVFP4",   # trial (48 GB card)
+            "qwen3.5-35b-a3b-gptq": "app.plugins.llm.qwen_moe:Qwen35MoE_GPTQ",     # trial (48 GB card)
             "openai": "app.plugins.llm.openai_compat:OpenAICompatLLM",     # hosted: transcripts leave the box
             "anthropic": "app.plugins.llm.anthropic:AnthropicLLM",         # hosted: transcripts leave the box
             "fake": "app.plugins.llm.fake:FakeLLM"},

@@ -67,8 +67,74 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
   - An LLM engine could have ~19 GB more than E4B's ~15 GB here: ≤ ~28 GiB of weights with the same 3 GiB of KV.
   - All 57 endpoints of the run came from the head and none from the silence fallback (the stack log's
     `endpoint by=`).
+- **Bigger responders on the 48 GB card: three 4-bit mixtures of experts against Gemma E4B** (the user's list).
+  - Routing: `scripts/bench/escalation.py --samples 8`, with `smart` + tasks (140 cases) and without (70 cases), on
+    the prompts after the routing fix below (Qwen3.5 on the prompts before it).
+  - Memory and speed: `scripts/bench/llm_weights.py`.
+  - The stack: `scripts/bench/stack.sh` + `load.py --sessions 1` ×3, on the stack without `smart`.
+
+  | | Gemma 4 E4B FP8 (current) | Qwen3.6-35B-A3B NVFP4 | Qwen3.5-35B-A3B GPTQ int4 | Gemma 4 26B-A4B NVFP4 |
+  |---|---|---|---|---|
+  | weights on the GPU; GPU peak at 4 sessions | 10.4 GiB; 29.9 GB | 19.5 GiB; 39.7 GB | 20.3 GiB; — | 16.8 GiB; 36.8 GB |
+  | single-stream decode | 154 tok/s | **224 tok/s** | — | 151 tok/s |
+  | with the expert: right; missed escalations | 99.1%; **0.2%** | 98.7%; 1.3% | 88.0%; **25.2%** (fails) | **99.3%**; 1.5% |
+  | without the expert: right; tool requests answered locally | 99.8%; 0.4% | 100%; 0% | 100%; 0% | 98.4%; **3.6–7.3%** |
+  | wrong-language replies, with the expert: spoken / after a tool | 8 / 346; 2 / 415 | 1 / 343; **9 / 442** | 1 / 479; 5 / 437 | **0 / 352; 0 / 437** |
+  | wrong-language replies, without: spoken / after a tool | 3 / 313; 0 / 247 | 6 / 312; 4 / 248 | **40 / 312**; 0 / 248 | 0 / 321; 3 / 239 |
+  | turn first audio p50, 1 session (3 runs) | 255–262 ms | 248–288 ms | — | 254–299 ms |
+  | turn first audio p50, 4 sessions (3 runs): plain; tool turns | 527–571; 404–411 ms | 541–576; **606–636 ms** | — | 579–634; 474–499 ms |
+  | end of speech → first audio p50, 1 / 4 conversations | 832 / 1093 ms | 846 / 1039 ms | — | 874 / 1028 ms |
+
+  - **Qwen3.5-35B-A3B fails the routing gate.** It answers a quarter of the expert questions itself: code, "think
+    carefully" maths, health and money questions, follow-ups. Every smaller Qwen did the same before. Without the
+    expert, 40 of 312 replies came out in another language. Its checkpoint is deleted.
+  - **Qwen3.6-35B-A3B routes well and decodes fastest, but its language is fragile.**
+    - It needed Qwen's own sampling settings. With the temperature alone it switched language mid-word ("залей
+      водой вtwice the volume") and answered Spanish in Russian. The plugin now sets the card's top_p 0.8, top_k 20
+      and presence_penalty 1.5.
+    - It also needed the no-expert few-shot turns reordered (`config/prompts/qwen3.6-35b-a3b-nvfp4.yaml`): it follows
+      the language of the last non-English example. With the base order, Spanish was answered in Russian 24 times
+      in 560.
+    - Even then it copies example answers word for word in the example's language. A Spanish trip request got the
+      Russian task example's reply ("Хорошо, займусь маршрутом…"), and once a Russian markdown news list.
+    - Its tool turns are ~200 ms slower at 4 sessions, although it decodes 45% faster. A likely cause, not
+      confirmed: vLLM sets its attention block size to 1056 tokens to match the DeltaNet state, and prefixes are
+      cached only in whole blocks. So a short prompt, like the tool lead-in's, is read again in full every time.
+  - **Gemma 4 26B-A4B is the strongest candidate.**
+    - It routes like E4B (1.5% missed against 0.2%) and never replied in the wrong language with the expert, where
+      E4B did 10 times.
+    - Without the expert it often answers reminder and message requests "not connected" without calling the tool
+      (3.6–7.3%, two runs; also seen on 2026-10-05).
+    - It costs +50–70 ms of first audio at 4 sessions and ~7 GB more GPU than E4B.
+    - Its "count to ten" reply in `load_ears.py` varies (3–6 texts a run), so its response-gap numbers compare less
+      well than the others'.
+    - Its thought channel: after a tool result it opens `<|channel>thought`, mostly empty and closed at once. Now and
+      then (~0.5% of answers after a tool) it never closes the channel and writes the answer inside it, after a JSON
+      "thought" object or a stray `<tool_response|>` token.
+      - A filter that dropped everything in an unclosed channel left 1–4 answers in ~435 silent.
+      - The plugin now keeps the answer after that object or token (the routing eval's empty answers 4 → 0 in the
+        final runs, no thought spoken).
+      - The vLLM plugins' end-of-stream check now treats a call that only appears in that final pass as a call, not
+        speech. This also covers E4B's bare `set_reminder{…}` written at the very end.
+  - **First loads compile kernels, and RAM limits how many at once.**
+    - The first load of Qwen3.6 and of Gemma 26B JIT-compiles FlashInfer kernels: 8 min and 17 min at 4 jobs. Each
+      compiler process takes 3–6 GB of RAM, and by default there is one per CPU thread (34 jobs here). That twice ran
+      this box's 64.6 GB container out of memory and restarted it.
+    - With `MAX_JOBS=4` the peak was 32 GiB. The builds are cached for later loads.
+  - **The recommendation (for the user):**
+    - Keep Gemma E4B as the default. It routes best, and nothing in these numbers beats it outright.
+    - If a bigger responder is wanted, the candidate is Gemma 4 26B-A4B on this 48 GB card (it can't fit on the
+      5090). It's worth a live listen with `smart` on, to judge its local answers, before any switch.
+    - Not Qwen3.6, for its language copying and slower tool turns.
+    - With E4B, the 5090 is the faster card for this stack: decode 186 against 154 tok/s, and 4-session turn first
+      audio 397–453 against 527–571 ms.
 
 #### Added
+- **Responder trial plugins for a 48 GB card** (none is the default): `gemma-4-26b-a4b-nvfp4` (with the
+  thought-channel filter), `qwen3.6-35b-a3b-nvfp4` and `qwen3.5-35b-a3b-gptq` (`app/plugins/llm/qwen_moe.py`: thinking
+  off, text only, Qwen's sampling). Qwen XML tool calls are a third parsed format again (`qwen_xml`, vLLM's
+  `qwen3_coder`), with tests, and `strip_think` takes another tag pair. `llm_weights.py` loads Qwen3.x text-only.
+  Numbers under Measured.
 - **GPU-free tests for EARS's turn-taking state machine** (`tests/ears/test_conversation.py`, 6 tests). The
   Conversation runs on the `fake` EARS plugin, with a fake page and a fake MOUTH over TCP, and covers what the floor
   and 2nd-ear tests didn't:

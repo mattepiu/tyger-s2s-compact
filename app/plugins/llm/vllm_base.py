@@ -133,8 +133,10 @@ class VLLMChatPlugin(LLMPlugin):
         if stop_flag and stop_flag():
             return
         visible = visible_now(final=True)
-        if not saw_tool and len(visible) > said:              # flush a held-back "<..." that wasn't a tag
-            yield ("text", visible[said:])
+        if not saw_tool:              # flush a held-back "<..." that wasn't a tag; a call that only shows up now
+            speak, saw_tool = split_speakable(visible, TAGS[self.tool_format])   # (a filter's final pass) is a call
+            if len(speak) > said:
+                yield ("text", speak[said:])
         if saw_tool:
             calls = parse_calls(visible, self.tool_format)
             if not started:               # ended before the name decoded (a cut-off or garbled call)

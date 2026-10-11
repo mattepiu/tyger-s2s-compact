@@ -1,5 +1,5 @@
-"""Text-level LLM helpers (no GPU): speakable splitting at a call tag, the two tool-call formats (Gemma 4, Hermes
-JSON), the <think> guard, and the neutral -> chat-template history conversion.
+"""Text-level LLM helpers (no GPU): speakable splitting at a call tag, the tool-call formats (Gemma 4, Hermes
+JSON, Qwen XML), the <think> guard, and the neutral -> chat-template history conversion.
 Run: .venv/bin/python tests/plugins/test_llm_parse.py"""
 import os, sys
 
@@ -128,6 +128,80 @@ def test_think_then_tool_call():
     raw = "<think>need weather</think>" + HERMES
     assert stream_speakable(raw, 3, strip_think) == ("", True)
     assert parse_calls(strip_think(raw, True), "hermes_json")[0]["name"] == "get_weather"
+
+
+QWEN = ("Let me check.<tool_call>\n<function=get_weather>\n<parameter=location>\nParis, France\n</parameter>\n"
+        "<parameter=days>\n3\n</parameter>\n</function>\n</tool_call>")
+
+
+def test_qwen_xml_parsed_named_never_spoken():
+    assert stream_speakable(QWEN, 3, strip_think) == ("Let me check.", True)
+    assert parse_calls(QWEN, "qwen_xml") == [{"name": "get_weather",
+                                              "arguments": {"location": "Paris, France", "days": 3}}]
+    got, at = first_start(QWEN)
+    assert got == {"name": "get_weather"} and QWEN[:at].endswith("<function=get_weather>")
+    two = QWEN + "<tool_call>\n<function=web_search>\n<parameter=query>\n1, 2: \"x\"\n</parameter>\n</function>\n" \
+                 "</tool_call>"
+    assert [c["name"] for c in parse_calls(two, "qwen_xml")] == ["get_weather", "web_search"]
+    assert parse_calls(two, "qwen_xml")[1]["arguments"] == {"query": '1, 2: "x"'}
+
+
+def test_qwen_xml_after_an_empty_think_block():
+    raw = "<think>\n\n</think>\n\n" + QWEN
+    assert stream_speakable(raw, 2, strip_think)[0].strip() == "Let me check."
+    assert parse_calls(strip_think(raw, True), "qwen_xml")[0]["name"] == "get_weather"
+
+
+def test_qwen_xml_unparseable_dropped():
+    assert parse_calls("<tool_call>\n{\"name\": \"x\"}\n</tool_call>", "qwen_xml") == []
+
+
+def test_gemma_thought_channel_never_spoken():
+    from app.plugins.llm._toolparse import GEMMA_THOUGHT
+    filt = lambda r, final=False: strip_think(r, final, GEMMA_THOUGHT)          # noqa: E731
+    split = lambda r: split_speakable(r, GEMMA_TAG)                              # noqa: E731
+    for raw, want in (("<|channel>thought\n<channel|>It's 14 degrees in Oslo.", "It's 14 degrees in Oslo."),
+                      ("<|channel>thought\nThe user wants the weather.<channel|>Sunny today.", "Sunny today."),
+                      ("<|channel>thought\nStill thinking about it", "")):
+        said = ""
+        for i in range(1, len(raw) + 1):                       # streamed one character at a time
+            speak, _ = split(filt(raw[:i]))
+            assert speak.startswith(said), (speak, said)       # never takes back what was spoken
+            said = speak
+        assert filt(raw, True) == want and "channel" not in said, (raw, said)
+    raw = "<|channel>thought\n<channel|>" + GEMMA
+    assert parse_calls(filt(raw, True), "gemma4")[0]["name"] == "get_weather"
+
+
+def scripted_stream(plugin_cls, raw, tools=None, step=3):
+    """VLLMChatPlugin.stream on a plugin without an engine: the model's raw text arrives in `step`-character deltas."""
+    import threading
+    p = plugin_cls.__new__(plugin_cls)
+    p._tok_lock = threading.Lock(); p.max_tokens = None
+    p.tok = type("Tok", (), {"apply_chat_template": lambda self, *a, **k: "prompt"})()
+    p.sampling = lambda max_new: None
+    p.engine = type("Engine", (), {"abort": lambda self, rid: None})()
+    p.eloop = type("Loop", (), {"iterate": lambda self, gen, abort=None, stop_flag=None:
+                                iter([raw[i:i + step] for i in range(0, len(raw), step)])})()
+    return list(p.stream([{"role": "user", "content": "x"}], tools=tools))
+
+
+def test_gemma_26b_answer_after_an_unclosed_json_thought():
+    """Seen on the box: the thought as a JSON object, then the answer, the channel never closed. The answer is spoken
+    (at the end of the stream), the thought never; a call after such a thought is a call, not speech."""
+    from app.plugins.llm.gemma4 import Gemma4_26B_A4B
+    raw = '<|channel>thought\n{\n  "thought": "No clear answer, {sorry}."\n}Извините, мне не удалось это найти.'
+    assert scripted_stream(Gemma4_26B_A4B, raw) == [("text", "Извините, мне не удалось это найти.")]
+    raw = '<|channel>thought\n<channel|>It is sunny.'                     # the usual empty channel: streamed
+    got = scripted_stream(Gemma4_26B_A4B, raw)
+    assert "".join(t for k, t in got if k == "text") == "It is sunny." and len(got) > 1
+    raw = '<|channel>thought\n{"thought": "check"}' + GEMMA
+    got = scripted_stream(Gemma4_26B_A4B, raw)
+    assert got[0] == ("text", "Sure.") and [k for k, *_ in got[1:]] == ["tool_start", "tool_calls"], got
+    assert got[2][1][0]["name"] == "get_weather" and "tool_call" not in got[0][1]
+    raw = "<|channel>thought\n<tool_response|>Курс сейчас около девяноста двух рублей."     # a stray closing token
+    assert scripted_stream(Gemma4_26B_A4B, raw) == [("text", "Курс сейчас около девяноста двух рублей.")]
+    assert scripted_stream(Gemma4_26B_A4B, "<|channel>thought\nStill thinking about it") == []   # thinking only
 
 
 def test_unknown_format_rejected():
