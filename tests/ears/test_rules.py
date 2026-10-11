@@ -1,5 +1,5 @@
 """nemotron-tyger-1.0's turn rules (app/plugins/ears/nemotron_tyger/rules.py) on synthetic head outputs, GPU-free:
-endpoint by the head and by silence, the minimum speech, backchannel debounce and refractory, barge-in and the turn it
+endpoint by the head (and never by silence alone), the minimum speech, backchannel debounce and refractory, barge-in and the turn it
 seeds, mode switches. The engine and the validators' reference share these rules, so they are tested here.
 Run: .venv/bin/python tests/ears/test_rules.py"""
 import os, sys
@@ -20,8 +20,7 @@ def outputs(p_end=0.0, yield_=0.0, bc=0.0, hazard=0.0):
 
 
 def session(**th):
-    s = EarsSession(0, **{"ep_thr": 0.9, "ep_deb": 2, "barge_thr": 0.5, "barge_deb": 2, "bc_thr": 0.5, "bc_deb": 2,
-                          "fallback_frames": 15, **th})
+    s = EarsSession(0, **{"ep_thr": 0.9, "ep_deb": 2, "barge_thr": 0.5, "barge_deb": 2, "bc_thr": 0.5, "bc_deb": 2, **th})
     rules.begin_hop(s, np.zeros(5120, np.float32), np.zeros(5120, np.float32), "listen")
     return s
 
@@ -52,13 +51,13 @@ def test_no_endpoint_without_enough_speech():
     assert kinds == [] and final is None
 
 
-def test_endpoint_by_silence_fallback():
+def test_silence_alone_never_ends_the_turn():
     s = session(ep_thr=2.0)                                           # the head can't fire
     frames(s, 10, act=VOICED)
-    kinds, _, _ = frames(s, 14, act=SILENT)
-    assert kinds == []
-    kinds, final, _ = frames(s, 1, act=SILENT)                        # the 15th silent frame
-    assert kinds == ["ENDPOINT"] and final[0]["by"] == "silence"
+    kinds, final, _ = frames(s, 100, act=SILENT)                      # 8 s of silence: the turn stays open
+    assert kinds == [] and final is None and s.in_turn
+    kinds, final, _ = frames(s, 2, act=SILENT, p_end=2.5)             # only the head ends it
+    assert kinds == ["ENDPOINT"] and final[0]["by"] == "head"
 
 
 def test_backchannel_debounce_and_refractory():

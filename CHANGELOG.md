@@ -13,8 +13,8 @@ What changed in tyger, newest first, with the numbers behind each change.
 
 ## Headline numbers
 
-Trend only: the rows come from different boxes and configs (noted). Every box is an RTX 5090; the first was
-throttled to half memory clock.
+Trend only: the rows come from different boxes and configs (noted). Every box was an RTX 5090 until 2026-10-11 (the
+first throttled to half memory clock), and since then an RTX PRO 5000.
 
 | When | Code / config | Smoke: plain-turn first audio | 4 conversations: turn first audio p50 | End of speech → first audio p50, 1 / 4 conversations | GPU peak |
 |---|---|---|---|---|---|
@@ -26,11 +26,83 @@ throttled to half memory clock.
 | 2026-10-06 | Gemma, production config (smart + tasks), new box | 279 ms | — | 904 / 1109 ms | 30.4 GB |
 | 2026-10-06 | after the readability refactor, no `smart`, whole-sentence first chunk | 170–282 ms | 474 / 515 ms (2 runs) | ~880 / ~1090 ms | — |
 | 2026-10-10 | after I-16 and I-17, no `smart`, new box | 174 ms | 397–453 ms (3 runs) | 793 / 992 ms | 30.2 GB |
+| 2026-10-11 | no silence fallback, no `smart`, RTX PRO 5000 | 212 ms | 527–571 ms (3 runs) | 832 / 1093 ms | 29.9 GB |
 
 "End of speech → first audio" is what the user hears as the response gap. About 650–850 ms of it is endpoint
 detection, which live tuning of the endpoint thresholds is meant to cut.
 
 ## [Unreleased]
+
+### 2026-10-11 — A new card, the RTX PRO 5000 (48 GB); the silence fallback removed
+
+Box: an **RTX PRO 5000 Blackwell** (48 935 MiB, sm_120 like the 5090; driver 595.84, CUDA 13.2; ECC off; 32 CPU
+threads, 62 GB RAM, 100 GB disk). Under load: P1, SM ~2540 MHz (max 3090), memory 13 365 MHz, at most 234 W of its
+300 W, with no throttle reason. The fresh-box install (README step 1) went through unchanged. The first `./run.sh`,
+downloads included, took 11.5 min (Gemma's download and load 169 s, its first compile 75 s).
+
+#### Measured
+- **The current stack on this card, against the RTX 5090 of 2026-10-10** (the stack without `smart`, the code before
+  the change below; `scripts/bench/stack.sh`, plus `scripts/stack/load.py --sessions 1 --turns 6` ×3, and with the
+  stack stopped, `scripts/bench/llm_weights.py` and `scripts/bench/tts_voice.py`):
+
+  | | RTX 5090 (2026-10-10) | RTX PRO 5000 |
+  |---|---|---|
+  | GPU peak at 4 sessions / the card | 30.2 / 32.6 GB | 29.9 / 48.9 GB (**~19 GB free**) |
+  | Gemma E4B FP8: weights; single-stream decode | 10.39 GiB; 186 tok/s (2026-10-05) | 10.39 GiB; **154 tok/s** (83%) |
+  | VoxCPM2 cloned-voice first audio per request | 78 ms (2026-10-03) | 79 ms |
+  | smoke: plain / weather / reminder / backchannel first audio | 174 ms plain | 216 / 200 / 258 / 154 ms, PASS |
+  | `load.py` turn first audio p50, 1 session (3 runs) | — | 262 / 255 / 262 ms |
+  | `load.py` turn first audio p50, 4 sessions (3 runs) | 397 / 453 / 439 ms | **532 / 581 / 578 ms** |
+  | `load.py --tools --fresh`, 4 sessions (3 runs) | — | 395 / 413 / 413 ms |
+  | `load_ears.py` 1 conv: end of speech → endpoint; → first audio p50 | —; 793 ms | 600 ms; **837 ms** |
+  | `load_ears.py` 4 conv: end of speech → endpoint; → first audio p50 | —; 992 ms | 707 ms; **1096 ms** |
+  | EARS hop lag p50 / p90, 4 conversations | 47 / 124 ms | 68 / 181 ms |
+
+  - The card doesn't make the stack miss its latency, but it is slower under load. At 1 conversation the response
+    gap is +44 ms. At 4 it is +104 ms, and MOUTH's 4-session turn first audio is +~130 ms. Decode runs at 83% of
+    the 5090's, as the bandwidth ratio predicts (1344 / 1792 GB/s = 75%), and EARS has less compute (hop lag p90
+    124 → 181 ms).
+  - VoxCPM2 alone is as fast as on the 5090, and the endpoint detection at 1 conversation (600 ms) is as fast as on
+    the fastest 5090 box.
+  - An LLM engine could have ~19 GB more than E4B's ~15 GB here: ≤ ~28 GiB of weights with the same 3 GiB of KV.
+  - All 57 endpoints of the run came from the head and none from the silence fallback (the stack log's
+    `endpoint by=`).
+
+#### Removed
+- **The silence fallback** (the user's call: "remove it completely"; in every live session of 2026-10-10 they had
+  switched it off). A turn ended after 1.2 s of silence even when the endpoint head hadn't fired. Now only the head
+  ends a turn. A turn the head misses stays open until the user speaks again.
+  - Gone: `ears.fallback_sil_frames` in `config/default.yaml`, the `fallback_frames` threshold and its "silence
+    fallback" slider, `EarsSession`'s `fallback_frames` and silence count, and the ENDPOINT's `by: "silence"`. A
+    config that still sets `fallback_sil_frames` stops at startup, naming the key.
+  - Kept: the −50 dB frame energy, for the 350 ms of voiced speech a turn needs before it can end or get a
+    backchannel, for a barge's onset, and for the page's idle / LISTEN display. The `fake` EARS plugin stays an
+    energy endpointer.
+  - Tests: `test_silence_alone_never_ends_the_turn` (8 s of silence after speech: the turn stays open, then the head
+    ends it) replaces `test_endpoint_by_silence_fallback`. It fails on the old code.
+  - `scripts/validate/long_turn.py` ended its turns with a 3.2 s fallback. Now the head is off while the speech
+    plays (the clips have inner pauses) and at the config's τ from its end, so the head ends the turn. It did,
+    for all three turns, 0.53–0.64 s after the speech.
+  - Before → after, on this box (the stack without `smart`):
+
+    | | before | after |
+    |---|---|---|
+    | endpoints by the head / by silence (smoke + `load_ears.py`, 57 turns) | 57 / 0 | 57 / 0 |
+    | `load_ears.py` 1 conv: end of speech → endpoint p50; → first audio p50 (2 runs) | 600, 601; 837 ms | 597, 597; 832 ms |
+    | `load_ears.py` 4 conv: end of speech → endpoint p50; → first audio p50 (3 runs) | 704–710; 1096 ms | 687–705; 1093 ms |
+    | `load_ears.py` turns ended by the head; lost; endpoints inside the utterance | 4 + 16 per run; 0; 0 | 4 + 16 per run; 0; 0 |
+    | `load.py` turn first audio p50, 4 sessions (3 runs) | 532 / 581 / 578 ms | 527 / 571 / 569 ms |
+    | GPU peak | 29.9 GB | 29.9 GB |
+
+  - The validators pass on this box:
+    - `ears_batched.py` matches events and transcripts in every session;
+    - `heads.py` OK;
+    - `long_turn.py` keeps word recall 1.00 / 0.97 / 0.94 on 25 / 31 / 49 s turns;
+    - `barge.py` 12 / 12, word recall 0.96, first 3 words 0.94, barge 1.06 s after the user starts. The old code
+      gives the same here. The 2026-10-10 record (0.83, 1.22 s) predates `barge_thr` 0.4;
+    - `silent_wait.py` and `second_ear.py --pairing tags`: no false barges.
+
+    The GPU-free tests and the page check (124 / 124) pass.
 
 ### 2026-10-10 — A cut-in round goes on as a background task (I-16); the 2nd ear on the page's clock (I-17)
 

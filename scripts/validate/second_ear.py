@@ -241,8 +241,7 @@ def main():
     ok = [i for i, c in enumerate(clips) if 4.0 <= len(c) / SR <= 12.0]
     cfg = load_config(); e = cfg["ears"]
     thr = dict(ep_thr=float(e["ep_thr"]), ep_deb=int(e["ep_deb"]), barge_thr=float(e["barge_thr"]),
-               barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]),
-               fallback_frames=int(e.get("fallback_sil_frames", 15)))
+               barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]))
     barge_thrs = [float(x) for x in a.barge_thr.split(",")] if a.barge_thr else [thr["barge_thr"]]
     acks = make_acks(cfg, np.median([rms(c) for c in clips])) if a.offset_ms else None
     eng = EarsEngine(heads_release(e["heads"], e.get("heads_revision")), slots=1)

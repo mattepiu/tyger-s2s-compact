@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from app.plugins.base import EarsPlugin, Slider, Threshold
 from app.plugins.options import PluginOptions
-from .constants import FRAME_S, HOP_N, SR
+from .constants import HOP_N, SR
 
 log = logging.getLogger("ears")
 
@@ -25,8 +25,6 @@ THRESHOLDS = (
     Threshold("barge_deb", int),
     Threshold("bc_thr", float, slider=Slider("backchannel", 0.20, 1.00, 0.01, meter="bc")),
     Threshold("bc_deb", int),
-    Threshold("fallback_frames", int, config_key="fallback_sil_frames", default=15,
-              slider=Slider("silence fallback", 0.4, 2.5, 0.1, decimals=1, scale=FRAME_S, unit="s", off=100000)),
 )
 
 

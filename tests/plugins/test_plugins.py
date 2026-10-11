@@ -58,8 +58,8 @@ def test_off_rate_tts_stops():
 
 def test_threshold_spec():
     from app.plugins.base import Slider, Threshold, find_threshold
-    t = Threshold("fallback_frames", int, config_key="fallback_sil_frames", default=15)
-    assert t.from_config({}) == 15 and t.from_config({"fallback_sil_frames": "9"}) == 9
+    t = Threshold("quiet_frames", int, config_key="quiet_sil_frames", default=15)
+    assert t.from_config({}) == 15 and t.from_config({"quiet_sil_frames": "9"}) == 9
     try:
         Threshold("ep_thr", float).from_config({})
         raise AssertionError("a threshold without a default needs its config key")
@@ -106,12 +106,10 @@ def test_nemotron_tyger_sliders_unchanged():
     want = {"ep_thr": ("endpoint p_end τ", 0.30, 0.99, 0.005, 3, 1.0, "", "p_end", None),
             "ep_deb": ("endpoint deb", 1, 5, 1, 0, 1.0, "", None, None),
             "barge_thr": ("barge (yield)", 0.20, 1.00, 0.01, 2, 1.0, "", "yield", None),
-            "bc_thr": ("backchannel", 0.20, 1.00, 0.01, 2, 1.0, "", "bc", None),
-            "fallback_frames": ("silence fallback", 0.4, 2.5, 0.1, 1, 0.08, "s", None, 100000)}
+            "bc_thr": ("backchannel", 0.20, 1.00, 0.01, 2, 1.0, "", "bc", None)}
     keys = ("label", "lo", "hi", "step", "decimals", "scale", "unit", "meter", "off")
     assert {n: tuple(d[k] for k in keys) for n, d in got.items()} == want
-    assert [t.name for t in THRESHOLDS] == ["ep_thr", "ep_deb", "barge_thr", "barge_deb", "bc_thr", "bc_deb",
-                                            "fallback_frames"]
+    assert [t.name for t in THRESHOLDS] == ["ep_thr", "ep_deb", "barge_thr", "barge_deb", "bc_thr", "bc_deb"]
 
 
 if __name__ == "__main__":

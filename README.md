@@ -129,8 +129,8 @@ Browsers only allow the mic over **HTTPS or localhost**, so either:
 - **HTTPS** behind a reverse proxy (e.g. Caddy: `tyger.example.com { reverse_proxy localhost:7860 }`). The
   page upgrades the WebSocket to `wss` automatically when served over HTTPS.
 
-`?debug=1` reveals the live tuning sliders (endpoint τ / debounce, barge, backchannel, silence fallback) and
-the voice picker. Browser DSP (echo cancellation, noise suppression, auto gain) is on.
+`?debug=1` reveals the live tuning sliders (endpoint τ / debounce, barge, backchannel) and the voice picker.
+Browser DSP (echo cancellation, noise suppression, auto gain) is on.
 
 **The page's WebSocket** (`/ws`; for a client of your own; `app/ears/playback.py` has the details). All binary
 frames are little-endian, with int16 audio:

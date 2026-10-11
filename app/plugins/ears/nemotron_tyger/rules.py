@@ -3,8 +3,9 @@ on an EarsSession (no GPU, no threads), shared by the engine and by the plain si
 (scripts/validate/reference.py). Where the heads' context must start over, the functions say so and the caller resets
 it (the engine its KV ring slot, the reference its cache).
 
-  * listening: ENDPOINT when p_end >= ep_thr for ep_deb frames (or fallback_frames of silence) once the user has
-    spoken MIN_SPEECH_MS; BACKCHANNEL when the bc head fires for bc_deb frames (then bc_refractory frames of quiet);
+  * listening: ENDPOINT when p_end >= ep_thr for ep_deb frames once the user has spoken MIN_SPEECH_MS (only the head
+    ends a turn: there is no silence rule); BACKCHANNEL when the bc head fires for bc_deb frames (then
+    bc_refractory frames of quiet);
   * speaking: BARGE when the yield head fires for barge_deb frames, with `onset_s`: how long the user had been
     talking by then (their current stretch of speech, by frame energy), since the head takes a second or more to be
     sure, and EARS tells MOUTH what had played when they started;
@@ -116,9 +117,7 @@ def on_frame(sess, mode, outputs, act_db, left=0):
         return events, None, False
     sess.warm += 1                                         # LISTEN mode
     if voiced:
-        sess.voiced_ms += FRAME_S * 1e3; sess.sil_run = 0; sess.in_turn = True
-    else:
-        sess.sil_run += 1
+        sess.voiced_ms += FRAME_S * 1e3; sess.in_turn = True
     if sess.bc_cooldown > 0:                               # BACKCHANNEL (floor-preserving)
         sess.bc_cooldown -= 1; sess.bc_run = 0
     elif sess.in_turn and sess.voiced_ms >= MIN_SPEECH_MS and sess.warm > WARMUP_FRAMES:
@@ -132,11 +131,9 @@ def on_frame(sess, mode, outputs, act_db, left=0):
     else:
         sess.ep_run = 0
     spoke = sess.in_turn and sess.voiced_ms >= MIN_SPEECH_MS
-    learned_end = sess.ep_run >= sess.ep_deb
-    fallback_end = sess.sil_run >= sess.fallback_frames
-    if spoke and (learned_end or fallback_end):
+    if spoke and sess.ep_run >= sess.ep_deb:
         ev = dict(kind="ENDPOINT", transcript=None, turn_s=sess.turn_len_s(), segments=len(sess.segs),
-                  seg_texts=sess.segs, by="head" if learned_end else "silence", p_end=round(pep, 3))
+                  seg_texts=sess.segs, by="head", p_end=round(pep, 3))
         final = (ev, sess.turn_u.copy())
         events.append(ev)
         sess.turn_u = np.zeros(0, np.float32); sess.voiced_ms = 0.0; sess.in_turn = False

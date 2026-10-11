@@ -45,8 +45,7 @@ def scenario(k):
 cfg = load_config(); e = cfg["ears"]
 release = heads_release(e["heads"], e.get("heads_revision"))
 thr = dict(ep_thr=float(e["ep_thr"]), ep_deb=int(e["ep_deb"]), barge_thr=float(e["barge_thr"]),
-           barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]),
-           fallback_frames=int(e.get("fallback_sil_frames", 15)))
+           barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]))
 
 # ---- reference: one session at a time, the plain way ----
 ref = ReferenceEars(release)

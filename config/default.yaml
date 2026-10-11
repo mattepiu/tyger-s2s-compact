@@ -22,7 +22,6 @@ ears:                      # turn-taking: nemotron ASR + the tyger 1.0 heads (ex
   barge_deb: 2
   bc_thr: 0.5
   bc_deb: 2
-  fallback_sil_frames: 15  # 1.2 s silence fallback (safety net; arm C fired it 0 times live in exp-12)
   ring_frames: 2048        # head context per conversation (frames of 80 ms = 164 s); resets at every turn
   gather_ms: 15            # wait up to this long to batch other conversations' hops into one GPU step
   expect_ms: 60            # ...or this long when a conversation that is behind is about to resubmit
