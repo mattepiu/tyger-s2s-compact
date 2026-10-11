@@ -1,7 +1,7 @@
 # tyger v1 config. Plugins, model options, thresholds, voices, flags. Secrets are NOT here — they live in
 # .env (HF_TOKEN, OPENAI_API_KEY). Thresholds are frozen into this file at milestone V2 (live tuning).
-# Relative paths are relative to the repo root. The LLM, TTS and EARS models are plugins (app/plugins,
-# PLUGINS.md): each block names its plugin, and the rest of the block is that plugin's options.
+# Relative paths are relative to the repo root. The LLM, TTS and EARS models are plugins (app/plugins;
+# DEVELOPING.md -> "Plugins"): each block names its plugin, and the rest of the block is that plugin's options.
 
 server:
   host: 0.0.0.0
@@ -30,7 +30,7 @@ ears:                      # turn-taking: nemotron ASR + the tyger 1.0 heads (ex
 
 llm:                       # MOUTH's LLM roles; each block is one plugin instance
   reply:                   # ordinary turns and the tool phase-B answer
-    plugin: gemma-4-e4b    # in-process vLLM, text only, thinking off (step 11: routes and calls tools reliably, NOTES).
+    plugin: gemma-4-e4b    # in-process vLLM, text only, thinking off (DEVELOPING.md -> "Benchmarks")
     quantization: fp8      # at load: bf16 weights wouldn't fit next to VoxCPM2 and EARS
     gpu_memory_utilization: 0.5    # vLLM start-up free-memory check only; actual KV is pinned below
     kv_cache_gib: 3.0              # fixed KV budget (4 sessions x turn + backchannel)
@@ -72,7 +72,7 @@ mouth:
   cpu_threads: 4                     # torch CPU threads in the MOUTH process
   bc_min_words: 4                    # ASR partial shorter than this is flagged to the LLM as "only a few
                                      # words so far" -> it answers with a neutral hum instead of a reaction
-  tasks:                             # background tasks on llm.smart (start_task / cancel_task); PLUGINS.md 12-14
+  tasks:                             # background tasks on llm.smart (start_task / cancel_task)
     enabled: true                    # needs llm.smart; tasks run there, so their goals + context go to it too
     max_concurrent: 1                # running at once, per conversation
     max_per_session: 5

@@ -1,5 +1,6 @@
-"""Escalation routing eval (PLUGINS.md steps 11, 14): does the `reply` model answer locally, call a lookup tool,
-call ask_expert, or start a background task, on the labelled synthetic set in scripts/bench/escalation_set.yaml?
+"""Escalation routing eval, the gate for any prompt or model change (DEVELOPING.md -> "Checking a change"): does the
+`reply` model answer locally, call a lookup tool, call ask_expert, or start a background task, on the labelled
+synthetic set in scripts/bench/escalation_set.yaml?
 
 Routes: local (no call), tool (any lookup / action, cancel_task included), expert (ask_expert), background
 (start_task). A case may list `also` routes that count as right too (planning: answered now by the expert, or

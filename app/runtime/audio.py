@@ -2,7 +2,7 @@
 # Vendored from vLLM-Omni 0.30.0 (vllm_omni/utils/audio_resample.py, Apache-2.0, Copyright contributors to the
 # vLLM-Omni project), unchanged below the docstring. Vendored because importing it from vllm_omni loads torch and
 # vLLM (~12 s), and MOUTH needs it without them: a TTS plugin whose rate isn't the 24 kHz wire is resampled here,
-# hosted ones included (PLUGINS.md principle 4).
+# hosted ones included (DEVELOPING.md -> "Plugins": lazy imports).
 
 """Stateful polyphase resampler for streaming mono float audio: the output doesn't depend on chunk boundaries.
 Pure numpy."""

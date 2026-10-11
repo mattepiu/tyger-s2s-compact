@@ -1,1 +1,1 @@
-"""EARS (turn-taking) plugins (PLUGINS.md); see app/plugins/__init__.py for the registry."""
+"""EARS (turn-taking) plugins (DEVELOPING.md -> "Plugins"); see app/plugins/__init__.py for the registry."""

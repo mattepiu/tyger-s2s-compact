@@ -1,6 +1,7 @@
-"""Background tasks (PLUGINS.md step 12), GPU-free: the reply model starts / cancels tasks, each runs as an agentic
-loop on a fake `smart` model, the status note reaches the next reply request, caps / timeout / cancel / session
-close, and nothing about a task's content is logged. Run: .venv/bin/python tests/mouth/test_tasks.py
+"""Background tasks (DEVELOPING.md -> "Background tasks and the floor"), GPU-free: the reply model starts / cancels
+tasks, each runs as an agentic loop on a fake `smart` model, the status note reaches the next reply request, caps /
+timeout / cancel / session close, and nothing about a task's content is logged.
+Run: .venv/bin/python tests/mouth/test_tasks.py
 """
 import os, sys, json, logging, socket, threading, time
 

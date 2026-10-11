@@ -1,4 +1,4 @@
-"""gemma-4-e4b: google/gemma-4-E4B-it in-process on vLLM, the responder since PLUGINS.md step 11 (FP8 at load).
+"""gemma-4-e4b: google/gemma-4-E4B-it in-process on vLLM, the responder (FP8 at load; DEVELOPING.md -> "Benchmarks").
 
   * Thinking off (enable_thinking=False, the template's default): replies start with speech.
   * Text only: the checkpoint is multimodal; language_model_only skips the vision and audio towers. The text model

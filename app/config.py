@@ -79,7 +79,7 @@ def validate_config(cfg: dict) -> dict:
     from app.plugins import REGISTRY
     old = _old_shape(cfg)
     if old:
-        raise ConfigError("config uses the pre-plugin shape (see PLUGINS.md -> Config migration):\n  - "
+        raise ConfigError("config uses the pre-plugin shape; each old key and what replaces it:\n  - "
                           + "\n  - ".join(old))
     llm = cfg.get("llm")
     if not isinstance(llm, dict) or not isinstance(llm.get("reply"), dict):

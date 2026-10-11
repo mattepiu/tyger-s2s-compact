@@ -12,7 +12,7 @@ dtype policy is bf16 backbone / fp32 added modules ("keep the stored dtypes"), a
 heads were trained on (repo, revision, layer, window, hop, energy norm). The loader checks that frontend against
 constants.py, so a release that needs a different audio grid fails at load instead of misbehaving.
 scripts/validate/heads.py checks the release as loaded here (on real speech features); when it was introduced (R-06b)
-it was bit-identical to the research model it was exported from (NOTES.md).
+it was bit-identical to the research model it was exported from.
 """
 from __future__ import annotations
 import json

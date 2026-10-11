@@ -1,5 +1,5 @@
-"""TTS plugins (PLUGINS.md); see app/plugins/__init__.py for the registry. Audio leaves MOUTH at WIRE_SR (the
-EARS<->browser wire and EARS's 2nd ear); a plugin with another out_sr is wrapped in AtWireRate."""
+"""TTS plugins (DEVELOPING.md -> "Plugins"); see app/plugins/__init__.py for the registry. Audio leaves MOUTH at
+WIRE_SR (the EARS<->browser wire and EARS's 2nd ear); a plugin with another out_sr is wrapped in AtWireRate."""
 from __future__ import annotations
 import numpy as np
 

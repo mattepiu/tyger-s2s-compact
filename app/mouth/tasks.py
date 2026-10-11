@@ -1,5 +1,5 @@
-"""Background tasks (PLUGINS.md steps 12-14): work that takes minutes runs on the `smart` model while the
-conversation carries on.
+"""Background tasks (DEVELOPING.md -> "Background tasks and the floor"): work that takes minutes runs on the `smart`
+model while the conversation carries on.
 
 The `reply` model calls start_task(goal) / cancel_task(task_id); MOUTH answers those calls here. Each task is an
 agentic loop on the smart plugin in its own thread: stream, run the tool calls (lookups only; finish_task ends it

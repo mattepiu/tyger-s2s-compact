@@ -1,4 +1,4 @@
-"""Plugin contract (PLUGINS.md -> Tests): one suite per kind, run against every plugin that can run here.
+"""Plugin contract (DEVELOPING.md -> "Adding a plugin"): one suite per kind, run against every plugin that can run here.
 
   * the `fake` plugins always run (no GPU);
   * the local model plugins (gemma-4-e4b, voxcpm2, nemotron-tyger-1.0) run with

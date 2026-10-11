@@ -1,5 +1,4 @@
-"""Prompts: every piece of text MOUTH sends to an LLM lives in config/prompts.yaml (PLUGINS.md -> "Prompts in one
-file").
+"""Prompts: every piece of text MOUTH sends to an LLM lives in config/prompts.yaml (DEVELOPING.md -> "Prompts").
 
 Read once at MOUTH start and validated: required keys present, each template's placeholders exactly the ones the
 code passes, shots a list of [user, assistant] pairs, tool descriptions only for tools and parameters that exist.

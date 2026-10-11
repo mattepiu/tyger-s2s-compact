@@ -1,6 +1,6 @@
-# Every piece of text MOUTH sends to an LLM, and the two fixed lines it speaks itself (PLUGINS.md -> "Prompts in
-# one file"). Read once at MOUTH start and validated (app/prompts/); restart MOUTH after editing. The agent speaks
-# English only: every prompt asks for English, and every few-shot turn is in English.
+# Every piece of text MOUTH sends to an LLM, and the two fixed lines it speaks itself (DEVELOPING.md -> "Prompts").
+# Read once at MOUTH start and validated (app/prompts/); restart MOUTH after editing. The agent speaks English
+# only: every prompt asks for English, and every few-shot turn is in English.
 # Keys that take values (`user`, `user_short`, `no_repeat`) are templates: $name (string.Template), $$ for a literal
 # dollar sign; everything else is sent exactly as written. Committed: few-shot examples are synthetic, never user
 # data. Few-shot turns, not quoted examples in a system prompt: a 4B model copies quoted examples verbatim (it said
@@ -206,7 +206,7 @@ smart:
   user: "$transcript\n\n[Restated: $question]"
   results: "\n\n[Already looked up for this question: $results]"   # other tools called in the same turn
   limit: No more lookups are possible for this question; answer now from what you have.
-# background tasks (PLUGINS.md steps 12-14; only with llm.smart and mouth.tasks.enabled)
+# background tasks (only with llm.smart and mouth.tasks.enabled; DEVELOPING.md -> "Background tasks and the floor")
 tasks:
   # the `reply` role's system prompt with tasks on (replaces escalation.system): the same text plus when to
   # start / cancel a task

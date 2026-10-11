@@ -1,12 +1,11 @@
 """MOUTH: the responder LLM and the TTS, both in-process on vLLM engines, plus the turn orchestration.
 
 Architecture:
-  * The models are plugins (app/plugins, PLUGINS.md), chosen in config. LLM roles: `reply` (turns and the tool
-    phase-B answer) and `filler` (backchannels, tool lead-ins, still-looking lines), the same instance unless
-    configured apart. Local plugins run in-process on a shared asyncio loop (app/runtime/event_loop.py): the local LLMs on
-    vLLM AsyncLLM, VoxCPM2 on vLLM-Omni AsyncOmni. No HTTP between MOUTH and the models.
-    They can't be one vLLM-Omni pipeline: MOUTH has to sit between them (chunking, tools + lead-in,
-    backchannels, barge-in).
+  * The models are plugins (app/plugins; DEVELOPING.md -> "Plugins"), chosen in config. LLM roles: `reply` (turns
+    and the tool phase-B answer) and `filler` (backchannels, tool lead-ins, still-looking lines), the same instance
+    unless configured apart. Local plugins run in-process on a shared asyncio loop (app/runtime/event_loop.py): the
+    local LLMs on vLLM AsyncLLM, VoxCPM2 on vLLM-Omni AsyncOmni. No HTTP between MOUTH and the models. They can't be
+    one vLLM-Omni pipeline: MOUTH has to sit between them (chunking, tools + lead-in, backchannels, barge-in).
   * The LLM reply is chunked by chunker.next_chunk into whole sentences (mouth.first_chunk `sentence`, the
     default). With `clause` the FIRST chunk may end at a clause boundary (comma, semicolon, dash), so playback
     doesn't wait for a long opening sentence, at the cost of the intonation restarting there. No chunk

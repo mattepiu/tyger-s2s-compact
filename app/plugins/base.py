@@ -1,4 +1,4 @@
-"""Plugin interfaces (PLUGINS.md). MOUTH owns the conversation; a plugin owns one model.
+"""Plugin interfaces (DEVELOPING.md -> "Plugins"). MOUTH owns the conversation; a plugin owns one model.
 
 Neutral formats, owned by MOUTH:
   * messages: OpenAI-style dicts. {"role": "system" | "user" | "assistant", "content": str}; an assistant tool

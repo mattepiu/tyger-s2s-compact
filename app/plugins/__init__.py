@@ -1,5 +1,5 @@
-"""Plugin registry: kind -> name -> "module:Class", resolved lazily with importlib (PLUGINS.md). No dynamic
-loading of third-party packages: a new plugin is a module in app/plugins plus a line here."""
+"""Plugin registry: kind -> name -> "module:Class", resolved lazily with importlib (DEVELOPING.md -> "Plugins").
+No dynamic loading of third-party packages: a new plugin is a module in app/plugins plus a line here."""
 from __future__ import annotations
 import importlib
 

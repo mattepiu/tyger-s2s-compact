@@ -4,7 +4,7 @@
 #      vLLM AsyncLLM) and VoxCPM2 (vLLM-Omni AsyncOmni). Chunks the reply and streams TTS audio back to EARS
 #      over TCP (:8770).
 #   2. EARS   (app.ears): nemotron + endpoint head + the web app (:7860).
-# MOUTH starts first so its engines claim their (pinned) GPU memory before EARS loads. See NOTES.md.
+# MOUTH starts first so its engines claim their (pinned) GPU memory before EARS loads (DEVELOPING.md -> "GPU memory").
 #
 # Reach it: the web app serves on :7860 (config/default.yaml server.port). The mic needs a secure context, so either
 #   - SSH port-forward 7860 to your localhost and open http://localhost:7860, or

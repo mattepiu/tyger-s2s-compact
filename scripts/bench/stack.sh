@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The same measurement sequence for each stack (e.g. one responder against another), as in NOTES.md 2026-10-05.
+# The same measurement sequence for each stack (e.g. one responder against another):
+# DEVELOPING.md -> "Checking a change", comparing two stacks.
 #   scripts/bench/stack.sh TAG CONFIG STACK_LOG   (start the stack first: CONFIG=... setsid ./run.sh > STACK_LOG 2>&1 &)
 # Waits for "EARS ready" in STACK_LOG, then smoke, load x3, load --tools --fresh x3, load_ears 1 conv x2 and
 # 4 conv x3, GPU memory idle and after load. Logs go to bench_runs/TAG/ (gitignored); compare tags with

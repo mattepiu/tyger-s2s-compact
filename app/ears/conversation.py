@@ -12,10 +12,11 @@ States (the plugin decides from the audio, this class decides what happens):
     second or more).
   * halting: after a barge, until MOUTH confirms the stop (its D). An ENDPOINT meanwhile is held (`pending`) and
     sent as soon as the halt ends.
-Taking the floor (PLUGINS.md step 13): when a background task finishes, MOUTH asks for the floor (F {"task": id}).
-EARS grants it (G) only when the agent isn't speaking or halting, no user turn is held, no backchannel is playing,
-and the user has been quiet for mouth.tasks.announce_after_silence_ms (consecutive `idle` frames). A user endpoint
-always wins: it starts a reply turn first and the request waits. On a grant the agent speaks exactly as for a reply.
+Taking the floor (DEVELOPING.md -> "Background tasks and the floor"): when a background task finishes, MOUTH asks
+for the floor (F {"task": id}). EARS grants it (G) only when the agent isn't speaking or halting, no user turn is
+held, no backchannel is playing, and the user has been quiet for mouth.tasks.announce_after_silence_ms (consecutive
+`idle` frames). A user endpoint always wins: it starts a reply turn first and the request waits. On a grant the
+agent speaks exactly as for a reply.
 
 PRIVACY: no audio or transcript is written to disk or logs; only timings and event types.
 """

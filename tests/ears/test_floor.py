@@ -1,7 +1,8 @@
-"""EARS floor requests (PLUGINS.md step 13), GPU-free: the Conversation state machine (app/ears/conversation.py)
-on the `fake` EARS plugin (energy endpointer), a fake browser WebSocket and a fake MOUTH over real TCP. Covers:
-F -> silence -> G, a user turn winning over a waiting request, silence counted only while both sides are quiet, a
-backchannel holding the grant, barge-in during an announcement, a lost MOUTH. Audio is synthetic (zeros / a tone).
+"""EARS floor requests (DEVELOPING.md -> "Background tasks and the floor"), GPU-free: the Conversation state machine
+(app/ears/conversation.py) on the `fake` EARS plugin (energy endpointer), a fake browser WebSocket and a fake MOUTH
+over real TCP. Covers: F -> silence -> G, a user turn winning over a waiting request, silence counted only while
+both sides are quiet, a backchannel holding the grant, barge-in during an announcement, a lost MOUTH. Audio is
+synthetic (zeros / a tone).
 Run: .venv/bin/python tests/ears/test_floor.py
 """
 import os, sys, asyncio, copy

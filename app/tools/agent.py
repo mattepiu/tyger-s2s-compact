@@ -1,8 +1,9 @@
 """The tools MOUTH answers itself, with what the ToolContext gives it.
 
-  * ask_expert (escalation, PLUGINS.md step 10): offered to the `reply` model only when a `smart` model is
-    configured. The smart model answers the turn; the reply model's call gets a short note as its result.
-  * start_task / cancel_task (background tasks, PLUGINS.md steps 12-14): offered to the `reply` model with
+  * ask_expert (escalation, DEVELOPING.md -> "MOUTH: one conversation"): offered to the `reply` model only when a
+    `smart` model is configured. The smart model answers the turn; the reply model's call gets a short note as its
+    result.
+  * start_task / cancel_task (DEVELOPING.md -> "Background tasks and the floor"): offered to the `reply` model with
     ask_expert when mouth.tasks.enabled; they go to the conversation's task runner (app/mouth/tasks.py).
   * finish_task: offered only to the smart model running a task. The task loop (app/mouth/tasks.py) reads it from the
     calls: it ends the task, and it is never run as a tool.
