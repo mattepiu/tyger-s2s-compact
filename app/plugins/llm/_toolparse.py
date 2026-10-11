@@ -7,6 +7,8 @@ speakable part off at a call's opening tag, parsing the call formats in use, and
     <tool_call>{"name": ..., "arguments": {...}}</tool_call>
   * Qwen XML (vLLM's `qwen3_coder`; the Qwen3.5 / 3.6 MoE trial plugins, qwen_moe.py):
     <tool_call><function=NAME><parameter=P>value</parameter>...</function></tool_call>
+  * MiniCPM5 XML (the minicpm5-2b trial plugin): <function name="NAME"><param name="P">value</param>...</function>,
+    a value with <, & or a newline in <![CDATA[...]]>; <function and <param are special tokens (decode them)
 
 Each format's calls open with their own tag (TAGS), passed to the splitting / naming helpers. strip_think is the
 openai plugin's guard against a <think> block in the text (`strip_think: true`), and the Qwen plugins'; with Gemma's
@@ -19,11 +21,16 @@ import json, logging, re, uuid
 log = logging.getLogger("llm")
 TAG = "<tool_call>"
 GEMMA_TAG, GEMMA_Q = "<|tool_call>", '<|"|>'
-TAGS = {"hermes_json": TAG, "gemma4": GEMMA_TAG, "qwen_xml": TAG}     # the tag a format's calls open with
+MINICPM_TAG = "<function"
+TAGS = {"hermes_json": TAG, "gemma4": GEMMA_TAG, "qwen_xml": TAG,      # the tag a format's calls open with
+        "minicpm5": MINICPM_TAG}
 GCALL = re.compile(r"<\|tool_call>call:([\w.-]+)\{(.*?)\}(?:<tool_call\|>|<turn\|>|$)", re.S)
 TCALL = re.compile(r"<tool_call>(.*?)</tool_call>", re.S)
 TFUNC = re.compile(r"<function=([^>\s]+)>(.*?)(?:</function>|$)", re.S)
 TPARAM = re.compile(r"<parameter=([^>\s]+)>\n?(.*?)\n?</parameter>", re.S)
+MCALL = re.compile(r'<function\s+name="([^"]+)"\s*>(.*?)</function>', re.S)
+MPARAM = re.compile(r'<param\s+name="([^"]+)"\s*>(.*?)</param>', re.S)
+CDATA = re.compile(r"\s*<!\[CDATA\[(.*)\]\]>\s*", re.S)
 THINK_OPEN, THINK_CLOSE = "<think>", "</think>"
 GEMMA_THOUGHT = ("<|channel>", "<channel|>")         # Gemma 4's thought channel: <|channel>thought\n...<channel|>
 
@@ -93,6 +100,13 @@ def _xml(body):
     return {"name": f.group(1), "arguments": {k: _xml_value(v) for k, v in TPARAM.findall(f.group(2))}}
 
 
+def _minicpm_value(v: str):
+    """A MiniCPM5 param value: the CDATA content as is, else JSON if it parses as a number / bool / list / object,
+    else the stripped string."""
+    m = CDATA.fullmatch(v)
+    return m.group(1) if m else _xml_value(v.strip())
+
+
 def _gemma_value(v: str):
     v = v.strip()
     if v.startswith(GEMMA_Q) and v.endswith(GEMMA_Q) and len(v) >= 2 * len(GEMMA_Q):
@@ -145,10 +159,16 @@ def gemma_normalize(raw: str, names, final: bool = False) -> str:
 
 
 def parse_calls(raw: str, fmt: str):
-    """[{"name", "arguments"}] for each call block in raw, read in `fmt` (a TAGS key); a Hermes or Qwen XML block
-    that doesn't parse is dropped (logged by kind only, never its text)."""
+    """[{"name", "arguments"}] for each call block in raw, read in `fmt` (a TAGS key); a Hermes, Qwen XML or
+    MiniCPM5 block that doesn't parse (or never closes: cut off) is dropped (logged by kind only, never its text)."""
     if fmt == "gemma4":
         return [{"name": m.group(1), "arguments": _gemma_args(m.group(2))} for m in GCALL.finditer(raw)]
+    if fmt == "minicpm5":
+        out = [{"name": m.group(1), "arguments": {k: _minicpm_value(v) for k, v in MPARAM.findall(m.group(2))}}
+               for m in MCALL.finditer(raw)]
+        if len(out) < raw.count(MINICPM_TAG):
+            log.warning("unparseable tool call dropped")
+        return out
     if fmt not in ("hermes_json", "qwen_xml"):
         raise ValueError(f"unknown tool-call format {fmt!r}")
     read = _xml if fmt == "qwen_xml" else _hermes
@@ -162,9 +182,10 @@ def parse_calls(raw: str, fmt: str):
     return out
 
 
-# the first call's name, complete: Hermes {"name": "x" (closing quote seen), Gemma call:x{ or Qwen XML <function=x>
+# the first call's name, complete: Hermes {"name": "x" (closing quote seen), Gemma call:x{, Qwen XML <function=x>
+# or MiniCPM5 <function name="x" (after its tag)
 _NAME = (re.compile(r'\s*\{\s*"name"\s*:\s*"([^"\\]+)"'), re.compile(r"\s*call:([\w.-]+)\{"),
-         re.compile(r"\s*<function=([^>\s]+)>"))
+         re.compile(r"\s*<function=([^>\s]+)>"), re.compile(r'\s+name="([^"]+)"'))
 NAME_WAIT = 64          # characters after the tag; a call that hasn't named its tool by then starts unnamed
 
 

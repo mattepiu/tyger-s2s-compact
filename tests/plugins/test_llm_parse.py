@@ -1,5 +1,5 @@
 """Text-level LLM helpers (no GPU): speakable splitting at a call tag, the tool-call formats (Gemma 4, Hermes
-JSON, Qwen XML), the <think> guard, and the neutral -> chat-template history conversion.
+JSON, Qwen XML, MiniCPM5 XML), the <think> guard, and the neutral -> chat-template history conversion.
 Run: .venv/bin/python tests/plugins/test_llm_parse.py"""
 import os, sys
 
@@ -154,6 +154,45 @@ def test_qwen_xml_after_an_empty_think_block():
 
 def test_qwen_xml_unparseable_dropped():
     assert parse_calls("<tool_call>\n{\"name\": \"x\"}\n</tool_call>", "qwen_xml") == []
+
+
+MINICPM = ('One moment.<function name="set_reminder"><param name="text">call mom</param>'
+           '<param name="time">18:00</param></function>')
+
+
+def test_minicpm5_parsed_named_never_spoken():
+    from app.plugins.llm._toolparse import MINICPM_TAG
+    for step in (1, 3):
+        said = ""
+        for i in range(step, len(MINICPM) + step, step):
+            speak, saw = split_speakable(MINICPM[:i], MINICPM_TAG)
+            assert speak.startswith(said) and "<" not in speak; said = speak
+        assert said == "One moment." and saw
+    assert parse_calls(MINICPM, "minicpm5") == [{"name": "set_reminder",
+                                                 "arguments": {"text": "call mom", "time": "18:00"}}]
+    got, at = first_start(MINICPM, MINICPM_TAG)
+    assert got == {"name": "set_reminder"} and MINICPM[:at].endswith('name="set_reminder"')
+    assert tool_start(MINICPM, TAG) is None                          # Hermes's tag is not MiniCPM5's
+
+
+def test_minicpm5_values_cdata_multiple_and_cut_off():
+    raw = ('<function name="ask_expert"><param name="question"><![CDATA[Is 5 < 7 & why?\nThink.]]></param>'
+           '</function>\n<function name="x"><param name="n">3</param><param name="ok">true</param></function>')
+    assert parse_calls(raw, "minicpm5") == [{"name": "ask_expert", "arguments": {"question": "Is 5 < 7 & why?\nThink."}},
+                                            {"name": "x", "arguments": {"n": 3, "ok": True}}]
+    assert parse_calls('<function name="set_reminder"><param name="text">call m', "minicpm5") == []   # cut off
+    assert parse_calls("<function name='bad'></function>", "minicpm5") == []
+
+
+def test_minicpm5_plugin_stream():
+    """The plugin's stream: speech before the call, then the named call; a stray think block never spoken."""
+    from app.plugins.llm.minicpm5 import MiniCPM5_2B
+    got = scripted_stream(MiniCPM5_2B, MINICPM)
+    assert "".join(e[1] for e in got if e[0] == "text") == "One moment."
+    assert [k for k, *_ in got if k != "text"] == ["tool_start", "tool_calls"]
+    assert got[-1][1][0]["arguments"] == {"text": "call mom", "time": "18:00"}
+    got = scripted_stream(MiniCPM5_2B, "<think>\nhm\n</think>\n\nIt's ten past nine.")
+    assert "".join(e[1] for e in got if e[0] == "text").strip() == "It's ten past nine." and got[-1][0] == "text"
 
 
 def test_gemma_thought_channel_never_spoken():

@@ -218,6 +218,30 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
   halting, a backchannel while halting, a barge after D that waits for a D that never comes, and a D after the
   page's report that waits for the timeout. `724271a`
 
+- **`minicpm5-2b`, a trial plugin for OpenBMB's MiniCPM5-2B, and its tool-call format** (the user's request, to
+  be tested in English only; the card lists English and Chinese). A dense 2.5B `LlamaForCausalLM`, run in bf16
+  with thinking off and the card's top_p 0.95 at the block's temperature 0.7 (`app/plugins/llm/minicpm5.py`). Its
+  calls are `<function name="…"><param name="…">…</param></function>` with special-token tags (decoded with
+  `skip_special_tokens=False`), a fourth format in `_toolparse.py` (`minicpm5`: CDATA values, a cut-off call
+  dropped), with tests.
+  - **It fails the routing gate.** On this box, `escalation.py --config <prompts_en> --lang en --samples 8`
+    (current English prompts, 119 cases), against Gemma E4B FP8 on the same runs as the tool removal (Removed):
+
+    | | Gemma E4B FP8 | MiniCPM5-2B bf16 |
+    |---|---|---|
+    | weights on the GPU; single-stream decode (`llm_weights.py`) | 10.4 GiB; 154 tok/s | **4.7 GiB; 189 tok/s** |
+    | with the expert: right; missed escalations (gate ≤ 10%) | 99.9%; 0.2% | 89.4%; **17.0%** |
+    | the 48 hard cases: right; missed escalations | 99.7%; 0.4% | 84.4%; **25.0%** |
+    | without the expert: right | 100% | 99.7% (h26, 1 of 8) |
+    | tool calls; background tasks; wrong language, narration or silence | 72 / 72; 96 / 96; none | 72 / 72; 96 / 96; none |
+
+  - What it keeps for itself, like every small model before it: code (palindrome, regex, SQL: 8 / 8 each), "think
+    carefully" maths (the bat and ball, the hundred cats: 8 / 8), and health questions (ibuprofen on blood-pressure
+    medication 8 / 8, diabetes 8 / 8, stopping antibiotics 5 / 8). Its own answers there are often wrong ("The ball
+    costs a dollar and ten cents"; "Yes, it's generally safe to take ibuprofen with blood pressure medications").
+  - Its calls, task starts and speech are clean, and it's small and fast. But the prompts were tuned on Gemma, and
+    no per-model prompt was tried. The checkpoint is deleted again (it downloads in 40 s).
+
 #### Changed
 - **The Gemma 4 26B-A4B trial plugin loads unsloth's NVFP4 checkpoint instead of NVIDIA's** (the user's request;
   `gemma-4-26b-a4b-nvfp4` now defaults to `unsloth/gemma-4-26B-A4B-it-NVFP4`). It is an llm-compressor checkpoint:
@@ -251,6 +275,8 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
   - Not run: the stack (`stack.sh`, `load.py`) with it; its GPU peak at 4 sessions is untested.
   - First load: FlashInfer JIT compiles again for this checkpoint (RAM peak 26.7 GiB with `MAX_JOBS=4`), plus 142 s
     to download.
+
+  `4216f97`
 
 #### Fixed
 - **"Research this and tell me later" in Russian and Spanish went to the expert instead of a background task.**
