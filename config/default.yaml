@@ -63,7 +63,6 @@ voices:
 
 mouth:
   prompts: config/prompts.yaml       # every prompt MOUTH sends to an LLM (loader: app/prompts/)
-  prompt_overrides_dir: config/prompts   # optional <llm instance name>.yaml here, merged over prompts.yaml
   max_gen: 192
   history_turns: 8                   # ~last 8 turns kept in the responder
   bc_max_new: 12                     # token budget for a backchannel (kept short for low latency)

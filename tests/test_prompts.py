@@ -6,7 +6,7 @@ import copy, os, sys
 
 TESTS = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
-from app.prompts import Prompts, PromptError, default_prompts, deep_merge, load_prompts  # noqa: E402
+from app.prompts import Prompts, PromptError, default_prompts  # noqa: E402
 
 P = default_prompts()
 
@@ -40,24 +40,6 @@ def test_shots_and_tools_checked():
     expect_error(d, "tools.get_current_time.params.city")
     d = copy.deepcopy(P.d); d["tools"]["fly"] = {"description": "x"}
     expect_error(d, "tools.fly")
-
-
-def test_override_merges_and_replaces_lists():
-    over = {"backchannel": {"shots": [["a", "b"]], "user_empty": "Nothing yet."}}
-    m = Prompts(deep_merge(P.d, over))
-    assert m.shots("backchannel") == [("a", "b")] and m.text("backchannel", "user_empty") == "Nothing yet."
-    assert m.text("backchannel", "system") == P.text("backchannel", "system")
-    assert P.text("backchannel", "user_empty") != "Nothing yet."           # the base is untouched
-
-
-def test_load_prompts_per_instance(tmp=None):
-    import tempfile, yaml
-    with tempfile.TemporaryDirectory() as d:
-        with open(os.path.join(d, "small.yaml"), "w") as f:
-            yaml.safe_dump({"warmup": {"user": "Hello."}}, f)
-        got = load_prompts({"mouth": {"prompt_overrides_dir": d}}, ["gemma-4-e4b", "small"])
-    assert got["gemma-4-e4b"].text("warmup", "user") == P.text("warmup", "user")
-    assert got["small"].text("warmup", "user") == "Hello."
 
 
 def test_language_named_in_notes():

@@ -100,6 +100,15 @@ def test_first_chunk_rule_checked():
     validate_config(cfg)
 
 
+def test_mouth_keys_checked():
+    """`mouth:` takes only the keys MOUTH reads: anything else (a typo, an option that was removed) fails the load
+    with the key named, instead of being ignored."""
+    cfg = copy.deepcopy(BASE); cfg["mouth"]["histroy_turns"] = 4
+    rejects(cfg, "unknown option `mouth.histroy_turns`", "did you mean `mouth.history_turns`")
+    cfg = copy.deepcopy(BASE); cfg["mouth"]["voice_dir"] = "voices"
+    rejects(cfg, "unknown option `mouth.voice_dir`", "options: bc_max_new")
+
+
 def test_renamed_option_names_the_new_key():
     """tts.deploy_config became tts.engine_config (R-11, with the engine configs in config/engines/)."""
     cfg = copy.deepcopy(BASE); cfg["tts"]["deploy_config"] = cfg["tts"].pop("engine_config")
@@ -112,8 +121,8 @@ def test_config_files_in_config_dir():
     from app.prompts import load_prompts
     assert DEFAULT == ROOT / "config" / "default.yaml" and DEFAULT.is_file()
     assert repo_path(BASE["tts"]["engine_config"]).is_file()
-    no_paths = {**BASE, "mouth": {k: v for k, v in BASE["mouth"].items() if k not in ("prompts", "prompt_overrides_dir")}}
-    assert load_prompts(no_paths, ["x"])["x"].source == "prompts.yaml"          # the default: config/prompts.yaml
+    no_paths = {**BASE, "mouth": {k: v for k, v in BASE["mouth"].items() if k != "prompts"}}
+    assert load_prompts(no_paths).source == "prompts.yaml"                      # the default: config/prompts.yaml
 
 
 def test_options_types():

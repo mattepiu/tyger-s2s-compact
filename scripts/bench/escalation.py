@@ -211,7 +211,7 @@ def main():
     out = {}
     for pf in (a.prompts.split(",") if a.prompts else [cfg["mouth"].get("prompts") or "config/prompts.yaml"]):
         cfg["mouth"]["prompts"] = str(repo_path(pf))
-        p = load_prompts(cfg, [name])[name]
+        p = load_prompts(cfg)
         results = evaluate(llm, p, cases, a.samples, int(cfg["mouth"].get("max_gen", 192)),
                            int(block.get("max_num_seqs", 8)), expert=expert, tasks=tasks)
         mode = "tasks" if tasks else "expert" if expert else "no expert"

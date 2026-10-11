@@ -1,7 +1,7 @@
 """Load config/default.yaml + v1/.env and check its plugin shape. Secrets (HF_TOKEN, OPENAI_API_KEY) come from the env /
 .env and are never written to logs."""
 from __future__ import annotations
-import os
+import difflib, os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]   # v1/
@@ -44,6 +44,10 @@ class ConfigError(ValueError):
 # reply: ordinary turns + the tool phase-B answer; filler: backchannels, tool lead-ins, still-looking lines (short,
 # low latency); smart: escalated turns and background tasks (optional)
 LLM_ROLES = ("reply", "filler", "smart")
+# the `mouth:` keys MOUTH reads (app/mouth/service.py, app/mouth/__main__.py, app/prompts; EARS reads tasks too):
+# any other key is a typo or a removed option, and stops startup like an unknown plugin option
+MOUTH_KEYS = ("prompts", "max_gen", "history_turns", "bc_max_new", "bc_min_words", "first_chunk", "cpu_threads",
+              "escalation", "tasks")
 
 
 def _old_shape(cfg: dict) -> list[str]:
@@ -70,7 +74,7 @@ def _old_shape(cfg: dict) -> list[str]:
 
 
 def validate_config(cfg: dict) -> dict:
-    """Check the plugin config shape (PLUGINS.md) and every block's options. The old shape is rejected, never
+    """Check the plugin config shape, every block's options and the `mouth:` keys. The old shape is rejected, never
     reinterpreted."""
     from app.plugins import REGISTRY
     old = _old_shape(cfg)
@@ -104,6 +108,11 @@ def validate_config(cfg: dict) -> dict:
 
 def _check_mouth(mouth: dict):
     from app.mouth.chunker import FIRST_CHUNK_RULES
+    for key in mouth:
+        if key not in MOUTH_KEYS:
+            near = difflib.get_close_matches(key, MOUTH_KEYS, n=1)
+            raise ConfigError(f"unknown option `mouth.{key}`" + (f" (did you mean `mouth.{near[0]}`?)" if near else "")
+                              + f"; options: {', '.join(sorted(MOUTH_KEYS))}")
     rule = mouth.get("first_chunk", "sentence")
     if rule not in FIRST_CHUNK_RULES:
         raise ConfigError(f"`mouth.first_chunk: {rule}` is not one of {', '.join(FIRST_CHUNK_RULES)}")

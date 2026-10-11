@@ -39,7 +39,6 @@ voices:
 
 mouth:
   prompts: config/prompts.yaml
-  prompt_overrides_dir: config/prompts
   max_gen: 192
   history_turns: 8
   bc_max_new: 12

@@ -64,7 +64,7 @@ class FakeLLM(LLMPlugin):
         self.fail, self.fail_after, self.refuse = dict(o.fail), o.fail_after, set(o.refuse)
         if ctx is not None:
             from app.prompts import load_prompts
-            self.prompts = load_prompts(ctx.cfg, [ctx.name])[ctx.name]
+            self.prompts = load_prompts(ctx.cfg)
         else:
             from app.prompts import default_prompts
             self.prompts = default_prompts()

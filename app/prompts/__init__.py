@@ -3,12 +3,10 @@ file").
 
 Read once at MOUTH start and validated: required keys present, each template's placeholders exactly the ones the
 code passes, shots a list of [user, assistant] pairs, tool descriptions only for tools and parameters that exist.
-An invalid file stops start-up with the key named. Per-instance overrides: config/prompts/<instance>.yaml, deep-merged
-over the base file (dicts key by key; lists such as `shots` and scalars replaced whole) for the requests that LLM
-instance serves. Not reloaded live: restart MOUTH after editing.
+An invalid file stops start-up with the key named. Every LLM role reads the same file (mouth.prompts). Not reloaded
+live: restart MOUTH after editing.
 """
 from __future__ import annotations
-import copy
 from pathlib import Path
 from string import Template
 
@@ -58,18 +56,8 @@ class PromptError(ValueError):
     pass
 
 
-def deep_merge(base, over):
-    """`over` on top of `base`: dicts merge key by key; anything else (lists, strings) is replaced whole."""
-    if isinstance(base, dict) and isinstance(over, dict):
-        out = dict(base)
-        for k, v in over.items():
-            out[k] = deep_merge(base[k], v) if k in base else copy.deepcopy(v)
-        return out
-    return copy.deepcopy(over)
-
-
 class Prompts:
-    """One LLM instance's prompts (the base file plus its override, if any), validated."""
+    """The prompts file, validated."""
     def __init__(self, data: dict, source: str = "config/prompts.yaml"):
         self.d = data; self.source = source
         self._validate()
@@ -202,25 +190,14 @@ def _read(path: Path) -> dict:
     return data
 
 
-def load_prompts(cfg: dict, names) -> dict[str, Prompts]:
-    """{instance name: Prompts}: the base file (mouth.prompts, default config/prompts.yaml), with
-    <mouth.prompt_overrides_dir>/<name>.yaml (default config/prompts/) merged over it where one exists."""
+def load_prompts(cfg: dict) -> Prompts:
+    """The configured prompts file (mouth.prompts, default config/prompts.yaml), validated."""
     from app.config import CONFIG_DIR, repo_path
-    m = cfg.get("mouth") or {}
-    base_path = repo_path(m.get("prompts")) or CONFIG_DIR / "prompts.yaml"
-    over_dir = repo_path(m.get("prompt_overrides_dir")) or CONFIG_DIR / "prompts"
-    base = _read(base_path)
-    out = {}
-    for name in names:
-        over = over_dir / f"{name}.yaml"
-        if over.is_file():
-            out[name] = Prompts(deep_merge(base, _read(over)), f"{base_path.name} + {over.name}")
-        else:
-            out[name] = Prompts(base, base_path.name)
-    return out
+    path = repo_path((cfg.get("mouth") or {}).get("prompts")) or CONFIG_DIR / "prompts.yaml"
+    return Prompts(_read(path), path.name)
 
 
 def default_prompts() -> Prompts:
-    """The repo's config/prompts.yaml with no overrides (tests and tools)."""
+    """The repo's config/prompts.yaml (tests and tools)."""
     from app.config import CONFIG_DIR
     return Prompts(_read(CONFIG_DIR / "prompts.yaml"))

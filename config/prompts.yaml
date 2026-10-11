@@ -1,7 +1,5 @@
 # Every piece of text MOUTH sends to an LLM, and the two fixed lines it speaks itself (PLUGINS.md -> "Prompts in
-# one file"). Read once at MOUTH start and validated (app/prompts/); restart MOUTH after editing. Per-instance
-# overrides: config/prompts/<instance>.yaml, deep-merged over this file for the requests that LLM instance serves (lists
-# such as `shots` are replaced whole).
+# one file"). Read once at MOUTH start and validated (app/prompts/); restart MOUTH after editing.
 # Keys that take values (`user`, `user_short`, `no_repeat`) are templates: $name (string.Template), $$ for a literal
 # dollar sign; everything else is sent exactly as written. Committed: few-shot examples are synthetic, never user
 # data. Few-shot turns, not quoted examples in a system prompt: a 4B model copies quoted examples verbatim (it said

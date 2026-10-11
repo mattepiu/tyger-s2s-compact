@@ -35,8 +35,8 @@ class Mouth:
         self.max_steps = int(esc.get("max_steps", 3))             # the smart model's own tool rounds per turn
         self.cfg = cfg
         # prompts first: a bad config/prompts.yaml stops start-up before minutes of engine loading
-        by_name = load_prompts(cfg, {name for name, _ in roles.values()})
-        self.prompts = {role: by_name[name] for role, (name, _) in roles.items()}   # role -> Prompts
+        prompts = load_prompts(cfg)
+        self.prompts = {role: prompts for role in roles}           # role -> Prompts: one file for every role
         self.tools = build_tools(self.prompts["reply"], expert=self.expert, tasks=self.tasks_on)
         self.smart_tools = build_tools(self.prompts["smart"]) if self.expert else None   # lookups, no ask_expert
         self.task_tools = build_tools(self.prompts["smart"], finish=True) if self.tasks_on else None
