@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app import tools
-from app.prompts.lang import language_text
 from app.mouth.messages import compact_result, reply_prefix, with_status, smart_messages, round_messages
 from app.mouth.threads import Prefetch
 from app.mouth.turns import Turn
@@ -58,8 +57,7 @@ class ReplyTurn(Turn):
     def __init__(self, session, stop_flag, transcript):
         super().__init__(session, stop_flag)
         self.transcript = transcript
-        self.lang = language_text(transcript, session.history.user_words())
-        self.calling = False                     # a tool call has started decoding
+        self.calling = False                    # a tool call has started decoding
         self.rounds: list[ToolRound] = []        # this turn's tool rounds: the reply model's, then the smart model's
 
     def run(self):
@@ -73,7 +71,7 @@ class ReplyTurn(Turn):
         m, s, t = self.m, self.session, self.transcript
         status = s.tasks.status_block() if s.tasks is not None else ""   # tasks: a note on this message only
         msgs = reply_prefix(m.prompts["reply"], m.expert, m.tasks_on) + s.history.messages + \
-            [{"role": "user", "content": with_status(m.prompts["reply"], status, t, self.lang)}]
+            [{"role": "user", "content": with_status(status, t)}]
         events = m.llms["reply"].stream(msgs, tools=m.tools, max_new=m.max_gen, stop_flag=self._stop_before_call)
         content, calls, native, started, refused = yield from self.speak_stream(events)
         self.calling = bool(calls or started)
@@ -108,7 +106,7 @@ class ReplyTurn(Turn):
         if not self.speaker.said:              # the model's own words before the tag already did the job
             section = "expert_leadin" if to_expert else "tool_leadin"
             fp = m.prompts["filler"]
-            line = yield from self.filler(section, fp.fill(section, "user", transcript=t) + fp.filler_hint(self.lang))
+            line = yield from self.filler(section, fp.fill(section, "user", transcript=t))
             if line:
                 fillers.append(line)
         yield from self.cover(rnd.finished, "expert_still" if to_expert else "still_looking", t, fillers)
@@ -128,8 +126,7 @@ class ReplyTurn(Turn):
         if rnd.next is not None:                            # escalated: the smart model answers, straight to TTS
             answer, refused = yield from self._expert_answer(rnd, fillers)
         else:
-            msgs2 = msgs + round_messages(content, calls, rnd.native, results,
-                                          note=m.prompts["reply"].result_note(self.lang))
+            msgs2 = msgs + round_messages(content, calls, rnd.native, results)
             answer, _, _, _, refused = yield from self.speak_stream(
                 m.llms["reply"].stream(msgs2, max_new=m.max_gen, stop_flag=self.stop))
         if refused and not self.stop():
@@ -201,7 +198,7 @@ class ReplyTurn(Turn):
             return None
         ask = next((c for c in rnd.calls if c["name"] == EXPERT), None)
         question = (ask.get("arguments") or {}).get("question") if ask is not None else None
-        return s.tasks.continue_round(question or self.transcript, self.transcript, self.lang, self._looked_up)
+        return s.tasks.continue_round(question or self.transcript, self.transcript, self._looked_up)
 
     def _looked_up(self, stop):
         """(the task's thread) What this turn's rounds looked up, as [(tool name, result)]. Waits for the reply model's
@@ -255,8 +252,8 @@ class ReplyTurn(Turn):
     def run_calls(self, calls, expert=False, transcript=""):
         """Run one round of tool calls at once; results in call order (app/tools). With `expert`, ask_expert gets a
         note (the smart model answers the turn); start_task / cancel_task go to this conversation's task runner."""
-        ctx = tools.ToolContext(prompts=self.m.prompts["reply"], transcript=transcript, lang=self.lang,
-                                tasks=self.session.tasks, expert=expert)
+        ctx = tools.ToolContext(prompts=self.m.prompts["reply"], transcript=transcript, tasks=self.session.tasks,
+                                expert=expert)
         return tools.run_round(calls, ctx)
 
     # ---- escalation: the smart model answers, with its own tool rounds ----
@@ -308,8 +305,7 @@ class ReplyTurn(Turn):
                 results = [{"error": m.prompts["smart"].text("smart", "limit")}] * len(rnd.calls)
             else:
                 results = rnd.results = self.run_calls(rnd.calls)     # kept: a barged round's task reuses them
-            rnd.next_msgs = msgs + round_messages(text, rnd.calls, rnd.native, results,
-                                                  note=m.prompts["smart"].result_note(self.lang))
+            rnd.next_msgs = msgs + round_messages(text, rnd.calls, rnd.native, results)
             rnd.next = Prefetch(lambda: m.llms["smart"].stream(rnd.next_msgs, tools=m.smart_tools, max_new=m.max_gen,
                                                                stop_flag=self.stop), self.stop)
         except Exception as e:

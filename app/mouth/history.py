@@ -30,7 +30,3 @@ class History:
     def recent(self, n):
         """The last `n` turns (none if n <= 0): the context sent along to the smart model."""
         return self.turns[-n:] if n > 0 else []
-
-    def user_words(self):
-        """The user's earlier messages (MOUTH's bracketed notes left out), oldest first."""
-        return [x["content"] for x in self.messages if x["role"] == "user" and not x["content"].startswith("[")]

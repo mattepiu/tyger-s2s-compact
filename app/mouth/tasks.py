@@ -44,11 +44,10 @@ class TaskSlots:
 
 
 class Task:
-    def __init__(self, tid, goal, transcript="", lang_text=None, known=None):
+    def __init__(self, tid, goal, transcript="", known=None):
         self.id = tid; self.goal = goal; self.t0 = time.monotonic(); self.t_end = None
         self.transcript = transcript    # the words that started it
-        self.lang_text = lang_text or transcript   # what its language is guessed from (app/prompts/lang.language_text)
-        self.known = known              # an interrupted round's: known(stop) -> [(tool name, result)] looked up
+        self.known = known             # an interrupted round's: known(stop) -> [(tool name, result)] looked up
         self.status = "running"         # running / done / failed / cancelled
         self.announced = "no"           # no / yes / partial (step 13)
         self.summary = self.result = None
@@ -70,24 +69,24 @@ class TaskRunner:
         self.tasks: list[Task] = []; self.lock = threading.Lock(); self.closed = False
 
     # ---- the reply model's tools ----
-    def start(self, goal, transcript="", lang_text=None):
+    def start(self, goal, transcript=""):
         """start_task: the tool result for the reply model ({task_id, status} or {error})."""
-        task = self._admit(goal, transcript, lang_text)
+        task = self._admit(goal, transcript)
         if isinstance(task, str):                       # the cap's prompts key: the model tells the user
             return {"error": self.m.prompts["reply"].text("tasks", task)}
         return {"task_id": task.id, "status": "started"}
 
-    def continue_round(self, goal, transcript, lang_text, known):
+    def continue_round(self, goal, transcript, known):
         """A tool or expert round the user cut in on goes on as a task (I-16): `goal` is the expert's question or the
         user's words, and known(stop) gives what the round looked up (it may wait for results still out). Counts
         against the caps like start_task. Returns the Task, or None if a cap stops it (logged)."""
-        task = self._admit(goal, transcript, lang_text, known)
+        task = self._admit(goal, transcript, known)
         if isinstance(task, str):
             log.info("barged tool round: no task (%s), results kept in history", task)
             return None
         return task
 
-    def _admit(self, goal, transcript, lang_text, known=None):
+    def _admit(self, goal, transcript, known=None):
         """Start a task under the caps (max_concurrent and max_per_session here, max_global across conversations):
         the running Task, or the prompts key of the cap that stopped it."""
         goal = (goal or "").strip() or (transcript or "").strip()
@@ -102,7 +101,7 @@ class TaskRunner:
             if not self.m.task_slots.take():
                 log.info("task refused: global cap (%d) reached", self.m.task_slots.n)
                 return "cap_global"
-            task = Task(len(self.tasks) + 1, goal, transcript, lang_text, known)
+            task = Task(len(self.tasks) + 1, goal, transcript, known)
             self.tasks.append(task)
         log.info("task #%d started%s (this conversation: %d running)", task.id,
                  " from an interrupted round" if known else "", running + 1)
@@ -161,10 +160,9 @@ class TaskRunner:
     # ---- the agentic loop, on its own thread ----
     def _messages(self, task, turns, known=()):
         """The task's first request: the task system prompt, the conversation's recent turns as plain text, then the
-        user's words, the goal and the language, plus what was already looked up for it (an interrupted round)."""
+        user's words and the goal, plus what was already looked up for it (an interrupted round)."""
         p = self.m.prompts["smart"]
-        user = p.fill("tasks", "user", goal=task.goal, transcript=task.transcript or task.goal,
-                      language=p.language_or_unknown(task.lang_text))
+        user = p.fill("tasks", "user", goal=task.goal, transcript=task.transcript or task.goal)
         if known:
             user += p.fill("tasks", "looked_up", results="; ".join(f"{n}: {compact_result(r)}" for n, r in known))
         return [{"role": "system", "content": p.text("tasks", "system")}] + plain_context(turns) + \
@@ -207,8 +205,7 @@ class TaskRunner:
                 log.info("task #%d round %d: %s", task.id, task.steps, [c["name"] for c in calls])
                 results = [{"error": p.text("tasks", "limit")} if limit or c["name"] == FINISH else
                            tools.run_call(c, tools.ToolContext(prompts=p)) for c in calls]
-                msgs = msgs + round_messages(text, calls, native, results,
-                                               note=None if limit else p.result_note(task.lang_text))
+                msgs = msgs + round_messages(text, calls, native, results)
             return self._end(task, "failed", why="max_steps")
         except LLMError as e:
             return self._end(task, "failed", why=e.kind)

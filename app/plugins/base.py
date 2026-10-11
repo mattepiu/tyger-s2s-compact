@@ -46,7 +46,6 @@ class LLMError(Exception):
 class TTSCaps:
     cloning: bool = False                  # takes reference clips from voices/ (never sent off the box)
     max_batch: int = 1                     # requests it decodes together
-    languages: list[str] | None = None     # None = whatever the model speaks
     min_first_chars: int | None = None     # chunker hint for hosted TTS (request overhead); None = default
 
 

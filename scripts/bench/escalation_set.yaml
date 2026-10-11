@@ -1,5 +1,5 @@
 # Escalation routing test set (PLUGINS.md step 11), read by scripts/bench/escalation.py. Synthetic prompts only,
-# never user data. Each case is one user turn with the route the `reply` model should take:
+# never user data, English only. Each case is one user turn with the route the `reply` model should take:
 #   local  - chit-chat, simple facts, opinions, short how-tos: answered by the local model
 #   tool   - the time, reminders, messages: a lookup / action tool (not ask_expert)
 #   expert - maths, code, health / money / legal advice, comparisons, planning, long explanations, "think
@@ -11,94 +11,57 @@
 # `also`: routes that count as right too (planning can be answered now or researched). `history` holds earlier
 # turns in the form of config/prompts.yaml escalation.shots: {user, reply} answered locally, or {user, expert, answer}
 # escalated; `status` is the background-task note MOUTH puts in front of the user's message.
-# Held-out cases (not used for tuning the prompt): every third case of each route, in file order (the script
-# computes it), and the `fresh` cases at the end. History turns may also be lookups: {user, call: {name,
-# arguments}, result, answer}. Don't reuse the few-shot topics of config/prompts.yaml here.
+# `split`: held-out cases, never used to tune the prompt, say `split: heldout`, `fresh` or `hard`; a case without
+# one is `tune`. History turns may also be lookups: {user, call: {name, arguments}, result, answer}. Don't reuse the
+# few-shot topics of config/prompts.yaml here.
 version: 1
 cases:
   # ---- local ----
-  - {id: l01, route: local, lang: en, user: "Hey, good morning! How's it going?"}
-  - {id: l02, route: local, lang: en, user: "What's your favorite color?"}
-  - {id: l03, route: local, lang: en, user: "How many legs does a spider have?"}
-  - {id: l04, route: local, lang: en, user: "What's the capital of Japan?"}
-  - {id: l05, route: local, lang: en, user: "Can you tell me a fun fact about penguins?"}
-  - {id: l06, route: local, lang: en, user: "How do I say good night in French?"}
-  - {id: l07, route: local, lang: en, user: "What's a good name for a black cat?"}
-  - {id: l08, route: local, lang: en, user: "Thanks, that was helpful."}
-  - {id: l09, route: local, lang: en, user: "How do you make a cup of tea?"}
-  - {id: l10, route: local, lang: en, user: "Do you think dogs or cats make better pets?"}
-  - {id: l11, route: local, lang: en, user: "What's twelve plus fifteen?"}
-  - {id: l12, route: local, lang: en, user: "Who wrote Romeo and Juliet?"}
-  - {id: l13, route: local, lang: en, user: "Tell me a riddle."}
-  - {id: l14, route: local, lang: en, user: "How long should I boil pasta?"}
-  - {id: l15, route: local, lang: ru, user: "Привет! Как настроение?"}
-  - {id: l16, route: local, lang: ru, user: "Сколько дней в високосном году?"}
-  - {id: l17, route: local, lang: ru, user: "Какая столица Италии?"}
-  - {id: l18, route: local, lang: ru, user: "Расскажи короткий анекдот."}
-  - {id: l19, route: local, lang: ru, user: "Как сварить гречку?"}
-  - {id: l20, route: local, lang: ru, user: "Что ты больше любишь, лето или зиму?"}
-  - {id: l21, route: local, lang: ru, user: "Спасибо, ты очень помог."}
-  - {id: l22, route: local, lang: es, user: "¡Hola! ¿Qué tal tu día?"}
-  - {id: l23, route: local, lang: es, user: "¿Cuál es la capital de Argentina?"}
-  - {id: l24, route: local, lang: es, user: "¿Cuántos continentes hay?"}
-  - {id: l25, route: local, lang: es, user: "Cuéntame un chiste corto."}
-  - {id: l26, route: local, lang: es, user: "¿Cómo se dice gato en inglés?"}
-  - {id: l27, route: local, lang: es, user: "¿Qué prefieres, la playa o la montaña?"}
-  - {id: l28, route: local, lang: es, user: "¿Cómo se prepara un café con leche?"}
+  - {id: l01, route: local, user: "Hey, good morning! How's it going?"}
+  - {id: l02, route: local, user: "What's your favorite color?"}
+  - {id: l03, route: local, split: heldout, user: "How many legs does a spider have?"}
+  - {id: l04, route: local, user: "What's the capital of Japan?"}
+  - {id: l05, route: local, user: "Can you tell me a fun fact about penguins?"}
+  - {id: l06, route: local, split: heldout, user: "How do I say good night in French?"}
+  - {id: l07, route: local, user: "What's a good name for a black cat?"}
+  - {id: l08, route: local, user: "Thanks, that was helpful."}
+  - {id: l09, route: local, split: heldout, user: "How do you make a cup of tea?"}
+  - {id: l10, route: local, user: "Do you think dogs or cats make better pets?"}
+  - {id: l11, route: local, user: "What's twelve plus fifteen?"}
+  - {id: l12, route: local, split: heldout, user: "Who wrote Romeo and Juliet?"}
+  - {id: l13, route: local, user: "Tell me a riddle."}
+  - {id: l14, route: local, user: "How long should I boil pasta?"}
   # ---- tool ----
-  - {id: t01, route: expert, lang: en, user: "What's the weather like in Berlin right now?"}
-  - {id: t02, route: tool, lang: en, user: "What time is it in Sydney?"}
-  - {id: t03, route: expert, lang: en, user: "What's the price of bitcoin today?"}
-  - {id: t04, route: expert, lang: en, user: "Who won the Champions League match last night?"}
-  - {id: t05, route: expert, lang: en, user: "Any big news today?"}
-  - {id: t06, route: tool, lang: en, user: "Remind me to call my mom at six pm."}
-  - {id: t07, route: tool, lang: en, user: "Send a message to Alex saying I'm running late."}
-  - {id: t08, route: expert, lang: en, user: "Is it going to rain in Seattle today?"}
-  - {id: t09, route: expert, lang: en, user: "What's the current exchange rate from euros to dollars?"}
-  - {id: t10, route: expert, lang: en, user: "What's the score in the Lakers game right now?"}
-  - {id: t11, route: expert, lang: ru, user: "Какая сейчас погода в Новосибирске?"}
-  - {id: t12, route: tool, lang: ru, user: "Который час сейчас в Нью-Йорке?"}
-  - {id: t13, route: expert, lang: ru, user: "Какой сейчас курс доллара к рублю?"}
-  - {id: t14, route: tool, lang: ru, user: "Напомни мне завтра в девять утра про встречу."}
-  - {id: t15, route: expert, lang: es, user: "¿Qué tiempo hace ahora en Sevilla?"}
-  - {id: t16, route: tool, lang: es, user: "¿Qué hora es en Ciudad de México?"}
-  - {id: t17, route: expert, lang: es, user: "¿Cuáles son las noticias más importantes de hoy?"}
-  - {id: t18, route: tool, lang: es, user: "Mándale un mensaje a Lucía diciendo que llego en diez minutos."}
+  - {id: t01, route: expert, user: "What's the weather like in Berlin right now?"}
+  - {id: t02, route: tool, user: "What time is it in Sydney?"}
+  - {id: t03, route: expert, user: "What's the price of bitcoin today?"}
+  - {id: t04, route: expert, split: heldout, user: "Who won the Champions League match last night?"}
+  - {id: t05, route: expert, user: "Any big news today?"}
+  - {id: t06, route: tool, user: "Remind me to call my mom at six pm."}
+  - {id: t07, route: tool, split: heldout, user: "Send a message to Alex saying I'm running late."}
+  - {id: t08, route: expert, user: "Is it going to rain in Seattle today?"}
+  - {id: t09, route: expert, split: heldout, user: "What's the current exchange rate from euros to dollars?"}
+  - {id: t10, route: expert, user: "What's the score in the Lakers game right now?"}
   # ---- expert ----
-  - {id: e01, route: expert, lang: en, user: "If I take out a thirty year mortgage of four hundred thousand at six and a half percent, what's my monthly payment?"}
-  - {id: e02, route: expert, lang: en, user: "I've had chest tightness when I climb stairs for a week. Should I be worried?"}
-  - {id: e03, route: expert, lang: en, user: "Can you write me a Python function that checks whether a string is a palindrome, and explain it?"}
-  - {id: e04, route: expert, lang: en, user: "What's the difference between a Roth IRA and a traditional IRA, and which one makes more sense for me at thirty?"}
-  - {id: e05, route: expert, also: [background], lang: en, user: "Plan a one week road trip through Scotland for me."}
-  - {id: e06, route: expert, lang: en, user: "Explain how mRNA vaccines work in detail."}
-  - {id: e07, route: expert, lang: en, user: "My landlord is keeping my whole deposit for normal wear and tear. What are my options?"}
-  - {id: e08, route: expert, lang: en, user: "Think carefully: a bat and a ball cost one dollar ten in total, and the bat costs a dollar more than the ball. How much is the ball?"}
-  - {id: e09, route: expert, lang: en, user: "Should I accept a job offer with higher pay but a much longer commute?"}
-  - {id: e10, route: expert, lang: en, user: "Compare electric cars and hybrids for someone who drives sixty miles a day."}
-  - {id: e11, route: expert, lang: en, user: "How does the TCP three way handshake work, and why is it needed?"}
-  - {id: e12, route: expert, lang: en, user: "What's the best way to pay down three credit cards with different interest rates?"}
-  - {id: e13, route: expert, also: [background], lang: en, user: "Can you help me plan a study schedule to learn Spanish in six months?"}
-  - {id: e14, route: expert, lang: en, user: "Is it safe to take ibuprofen together with my blood pressure medication?"}
-  - {id: e15, route: expert, lang: en, user: "Why did the Western Roman Empire fall? Walk me through the main reasons."}
-  - {id: e16, route: expert, lang: ru, user: "Помоги рассчитать: если откладывать десять тысяч рублей в месяц под восемь процентов годовых, сколько будет через десять лет?"}
-  - {id: e17, route: expert, lang: ru, user: "Что лучше для первоклассника: обычная государственная школа или частная?"}
-  - {id: e18, route: expert, lang: ru, user: "У меня уже неделю держится температура тридцать семь и пять. Что это может быть?"}
-  - {id: e19, route: expert, lang: ru, user: "Объясни подробно, как работает блокчейн."}
-  - {id: e20, route: expert, also: [background], lang: ru, user: "Составь мне план тренировок на месяц для подготовки к полумарафону."}
-  - {id: e21, route: expert, lang: ru, user: "Как правильно оформить договор аренды квартиры, чтобы меня не обманули?"}
-  - {id: e22, route: expert, lang: ru, user: "Подумай хорошенько: чему равна сумма всех чисел от одного до ста?"}
-  - {id: e23, route: expert, lang: es, user: "¿Cuánto pagaría al mes por un préstamo de veinte mil euros a cinco años al siete por ciento?"}
-  - {id: e24, route: expert, lang: es, user: "Mi hijo tiene fiebre alta y manchas en la piel desde ayer, ¿qué hago?"}
-  - {id: e25, route: expert, lang: es, user: "Explícame con detalle cómo funciona la inflación y por qué suben los precios."}
-  - {id: e26, route: expert, also: [background], lang: es, user: "Organízame un viaje de cinco días por Andalucía."}
-  - {id: e27, route: expert, lang: es, user: "¿Me conviene más amortizar la hipoteca antes de tiempo o invertir en bolsa?"}
-  - {id: e28, route: expert, lang: es, user: "Escríbeme una función en JavaScript que ordene una lista de números sin usar sort."}
-  - {id: e29, route: expert, lang: es, user: "¿Qué diferencias hay entre ser autónomo y montar una sociedad limitada en España?"}
-  - {id: e30, route: expert, lang: es, user: "¿Qué derechos tiene un inquilino si el casero quiere echarlo antes de que acabe el contrato?"}
+  - {id: e01, route: expert, split: heldout, user: "If I take out a thirty year mortgage of four hundred thousand at six and a half percent, what's my monthly payment?"}
+  - {id: e02, route: expert, user: "I've had chest tightness when I climb stairs for a week. Should I be worried?"}
+  - {id: e03, route: expert, user: "Can you write me a Python function that checks whether a string is a palindrome, and explain it?"}
+  - {id: e04, route: expert, split: heldout, user: "What's the difference between a Roth IRA and a traditional IRA, and which one makes more sense for me at thirty?"}
+  - {id: e05, route: expert, also: [background], user: "Plan a one week road trip through Scotland for me."}
+  - {id: e06, route: expert, user: "Explain how mRNA vaccines work in detail."}
+  - {id: e07, route: expert, split: heldout, user: "My landlord is keeping my whole deposit for normal wear and tear. What are my options?"}
+  - {id: e08, route: expert, user: "Think carefully: a bat and a ball cost one dollar ten in total, and the bat costs a dollar more than the ball. How much is the ball?"}
+  - {id: e09, route: expert, user: "Should I accept a job offer with higher pay but a much longer commute?"}
+  - {id: e10, route: expert, split: heldout, user: "Compare electric cars and hybrids for someone who drives sixty miles a day."}
+  - {id: e11, route: expert, user: "How does the TCP three way handshake work, and why is it needed?"}
+  - {id: e12, route: expert, user: "What's the best way to pay down three credit cards with different interest rates?"}
+  - {id: e13, route: expert, also: [background], split: heldout, user: "Can you help me plan a study schedule to learn Spanish in six months?"}
+  - {id: e14, route: expert, user: "Is it safe to take ibuprofen together with my blood pressure medication?"}
+  - {id: e15, route: expert, user: "Why did the Western Roman Empire fall? Walk me through the main reasons."}
   # ---- multi-turn ----
   - id: m01
     route: expert                # follow-up on an escalated topic
-    lang: en
+    split: heldout
     history:
       - user: How should I split my savings between stocks and bonds at forty?
         expert: How should a 40-year-old split savings between stocks and bonds?
@@ -106,38 +69,20 @@ cases:
     user: And what if I want to retire at fifty five instead?
   - id: m02
     route: expert                # unhappy with an earlier local answer
-    lang: en
     history:
       - user: How many bones are in the human body?
         reply: There are about three hundred bones in the human body.
     user: That doesn't sound right. Can you double check that carefully?
   - id: m03
     route: local                 # thanks after an escalated answer
-    lang: en
     history:
       - user: What would my monthly payment be on a two hundred thousand dollar loan over fifteen years at five percent?
         expert: Monthly payment on a 200,000 dollar 15-year loan at 5 percent interest?
         answer: It comes to about one thousand five hundred eighty dollars a month.
     user: Great, thanks a lot!
-  - id: m04
-    route: expert
-    lang: ru
-    history:
-      - user: Что лучше купить для семьи с двумя детьми, кроссовер или минивэн?
-        expert: Что выбрать семье с двумя детьми, кроссовер или минивэн, и почему?
-        answer: Минивэн удобнее, если вы часто ездите всей семьёй далеко и с багажом. Кроссовер компактнее и лучше на плохих дорогах.
-    user: А если мы в основном ездим по городу?
-  - id: m05
-    route: expert
-    lang: es
-    history:
-      - user: ¿Cómo preparo una entrevista de trabajo para un puesto de ingeniero de software?
-        expert: ¿Cómo prepararse para una entrevista de trabajo de ingeniero de software?
-        answer: Repasa estructuras de datos y algoritmos, practica en voz alta resolviendo problemas, y prepara dos o tres proyectos tuyos para contarlos con detalle.
-    user: ¿Y qué preguntas técnicas suelen hacer?
   - id: m06
     route: local                 # topic change after an escalated answer
-    lang: en
+    split: heldout
     history:
       - user: Plan me a long weekend in Lisbon.
         expert: A three-day long weekend itinerary for Lisbon.
@@ -145,118 +90,58 @@ cases:
     user: By the way, do you have a name?
   - id: m07
     route: expert                # a live fact, after small talk
-    lang: en
     history:
       - user: Hi there!
         reply: Hi! What can I do for you?
     user: What's the weather in Madrid right now?
-  - id: m08
-    route: expert                # the earlier local answer was wrong (17 x 23 = 391)
-    lang: ru
-    history:
-      - user: Сколько будет семнадцать умножить на двадцать три?
-        reply: Это будет триста семьдесят один.
-    user: Ты уверен? Пересчитай, пожалуйста, внимательно.
-  - id: m09
-    route: local
-    lang: es
-    history:
-      - user: ¿Qué seguro de salud me conviene si soy autónomo en España?
-        expert: ¿Qué seguro de salud conviene a un autónomo en España?
-        answer: Como autónomo ya tienes la sanidad pública; un seguro privado básico compensa sobre todo si quieres especialistas sin esperas.
-    user: Vale, muchas gracias.
   - id: m10
     route: expert
-    lang: en
+    split: heldout
     history:
       - user: Write me a SQL query that finds duplicate emails in a users table.
         expert: A SQL query that finds duplicate email addresses in a users table.
         answer: Group the users by email and keep the groups having a count above one, then select those emails.
     user: Now how would I delete the duplicates but keep one of each?
   # ---- fresh (added 2026-10-04 after the held-out split had been looked at; never used for tuning) ----
-  - {id: f01, route: expert, lang: en, split: fresh, user: "Can you check the weather in Toronto for tomorrow morning?"}
-  - {id: f02, route: tool, lang: en, split: fresh, user: "What time is it in London right now?"}
-  - {id: f03, route: expert, lang: en, split: fresh, user: "Search the web for the Louvre's opening hours today."}
-  - {id: f04, route: tool, lang: en, split: fresh, user: "Set a reminder to water the plants on Sunday at ten."}
-  - {id: f05, route: tool, lang: en, split: fresh, user: "Text Maria that dinner is at eight."}
-  - {id: f06, route: expert, lang: ru, split: fresh, user: "Сколько сейчас стоит биткоин?"}
-  - {id: f07, route: expert, lang: ru, split: fresh, user: "Какие главные новости сегодня?"}
-  - {id: f08, route: tool, lang: ru, split: fresh, user: "Отправь сообщение Олегу, что я опоздаю на пятнадцать минут."}
-  - {id: f09, route: expert, lang: es, split: fresh, user: "¿Va a llover mañana en Barcelona?"}
-  - {id: f10, route: tool, lang: es, split: fresh, user: "Recuérdame comprar pan a las siete de la tarde."}
-  - {id: f11, route: expert, lang: es, split: fresh, user: "¿A cuánto está el euro frente al dólar hoy?"}
+  - {id: f01, route: expert, split: fresh, user: "Can you check the weather in Toronto for tomorrow morning?"}
+  - {id: f02, route: tool, split: fresh, user: "What time is it in London right now?"}
+  - {id: f03, route: expert, split: fresh, user: "Search the web for the Louvre's opening hours today."}
+  - {id: f04, route: tool, split: fresh, user: "Set a reminder to water the plants on Sunday at ten."}
+  - {id: f05, route: tool, split: fresh, user: "Text Maria that dinner is at eight."}
   - id: f12
     route: expert                # a live-fact follow-up must look up again, not answer from the earlier answer (I-12)
-    lang: en
     split: fresh
     history:
       - user: What's the weather in Paris?
         expert: What's the weather in Paris right now?
         answer: It's sunny and about twenty two degrees in Paris.
     user: And in Rome?
-  - {id: f13, route: local, lang: en, split: fresh, user: "What's the opposite of hot?"}
-  - {id: f14, route: local, lang: en, split: fresh, user: "Give me a word that rhymes with cat."}
-  - {id: f15, route: local, lang: en, split: fresh, user: "Good night, talk to you tomorrow!"}
-  - {id: f16, route: local, lang: ru, split: fresh, user: "Сколько будет семь плюс восемь?"}
-  - {id: f17, route: local, lang: ru, split: fresh, user: "Расскажи, какие бывают породы кошек, пару штук."}
-  - {id: f18, route: local, lang: es, split: fresh, user: "¿Me recomiendas un nombre para un perro pequeño?"}
-  - {id: f19, route: local, lang: es, split: fresh, user: "¿Qué día viene después del lunes?"}
-  - id: f20
-    route: local
-    lang: ru
-    split: fresh
-    history:
-      - user: Какая погода в Казани?
-        expert: Какая сейчас погода в Казани?
-        answer: В Казани облачно, около пяти градусов.
-    user: Спасибо!
-  - {id: f21, route: expert, lang: en, split: fresh, user: "Is it better to lease or buy a car if I drive fifteen thousand miles a year?"}
-  - {id: f22, route: expert, lang: en, split: fresh, user: "Write a regular expression that matches an email address and explain each part."}
-  - {id: f23, route: expert, lang: en, split: fresh, user: "My doctor prescribed antibiotics but I feel better after two days. Can I stop taking them?"}
-  - {id: f24, route: expert, lang: en, split: fresh, user: "Explain the difference between a recession and a depression, with examples."}
-  - {id: f25, route: expert, lang: ru, split: fresh, user: "Как мне распределить бюджет на ремонт квартиры в пятьсот тысяч рублей?"}
-  - {id: f26, route: expert, lang: ru, split: fresh, user: "Можно ли уволиться во время больничного и чем это грозит?"}
-  - {id: f27, route: expert, lang: es, split: fresh, user: "¿Cómo calculo cuánto tengo que ahorrar para jubilarme a los sesenta?"}
-  - {id: f28, route: expert, also: [background], lang: es, split: fresh, user: "Planifícame una semana de comidas saludables con poco presupuesto."}
+  - {id: f13, route: local, split: fresh, user: "What's the opposite of hot?"}
+  - {id: f14, route: local, split: fresh, user: "Give me a word that rhymes with cat."}
+  - {id: f15, route: local, split: fresh, user: "Good night, talk to you tomorrow!"}
+  - {id: f21, route: expert, split: fresh, user: "Is it better to lease or buy a car if I drive fifteen thousand miles a year?"}
+  - {id: f22, route: expert, split: fresh, user: "Write a regular expression that matches an email address and explain each part."}
+  - {id: f23, route: expert, split: fresh, user: "My doctor prescribed antibiotics but I feel better after two days. Can I stop taking them?"}
+  - {id: f24, route: expert, split: fresh, user: "Explain the difference between a recession and a depression, with examples."}
   - id: f29
     route: expert
-    lang: en
     split: fresh
     history:
       - user: Should I keep my emergency fund in a high yield savings account or in treasury bills?
         expert: High-yield savings account or treasury bills for an emergency fund?
         answer: A high yield savings account is simpler and you can reach the money any day; treasury bills can pay a bit more but tie it up for weeks.
     user: What about inflation, does that change your answer?
-  - id: f30
-    route: expert
-    lang: es
-    split: fresh
-    history:
-      - user: ¿Cuántos huesos tiene un bebé al nacer?
-        reply: Un bebé nace con unos doscientos seis huesos.
-    user: Eso no me suena bien, ¿puedes comprobarlo con calma?
   # ---- background (step 14) ----
-  - {id: b01, route: background, lang: en, user: "Can you research the best noise-cancelling headphones under three hundred dollars and get back to me?"}
-  - {id: b02, route: background, lang: en, user: "Look into which cities in Portugal are best for remote workers and let me know what you find."}
-  - {id: b03, route: background, also: [expert], lang: en, user: "Plan a two week trip through Japan for me, with a day by day itinerary."}
-  - {id: b04, route: background, lang: en, user: "Could you compare the top five project management tools for a small team and tell me later which one fits?"}
-  - {id: b05, route: background, also: [expert], lang: en, user: "Draft a detailed cover letter for a junior data analyst job, I'd like to hear it when it's ready."}
-  - {id: b06, route: background, lang: en, user: "Find out which electric cars have the lowest running costs over five years and report back."}
-  - {id: b07, route: background, lang: en, user: "Research the pros and cons of the main online coding bootcamps and get back to me."}
-  - {id: b08, route: background, also: [expert], lang: en, user: "Put together a full week of vegetarian dinners with a shopping list."}
-  - {id: b09, route: background, lang: ru, user: "Изучи, какие онлайн-курсы английского лучше всего подходят для взрослых, и потом расскажи."}
-  - {id: b10, route: background, lang: ru, user: "Сравни тарифы мобильных операторов с безлимитным интернетом и скажи, какой выгоднее."}
-  - {id: b11, route: background, also: [expert], lang: ru, user: "Составь подробный план поездки по Золотому кольцу на неделю."}
-  - {id: b12, route: background, lang: ru, user: "Найди, какие роботы-пылесосы лучше всего справляются с шерстью животных, и вернись с ответом."}
-  - {id: b13, route: background, also: [expert], lang: ru, user: "Подготовь подробный план подготовки к собеседованию на позицию проджект-менеджера."}
-  - {id: b14, route: background, lang: es, user: "Investiga qué bicicletas eléctricas plegables tienen mejor autonomía y luego me cuentas."}
-  - {id: b15, route: background, lang: es, user: "Compara los principales bancos online de España por comisiones y avísame qué encuentras."}
-  - {id: b16, route: background, also: [expert], lang: es, user: "Prepárame un itinerario detallado de diez días por México."}
-  - {id: b17, route: background, lang: es, user: "Busca qué cursos de fotografía online valen la pena y dime cuál recomiendas cuando lo tengas."}
-  - {id: b18, route: background, also: [expert], lang: es, user: "Redacta un plan de negocio completo para una pequeña cafetería y avísame cuando esté listo."}
+  - {id: b01, route: background, user: "Can you research the best noise-cancelling headphones under three hundred dollars and get back to me?"}
+  - {id: b02, route: background, user: "Look into which cities in Portugal are best for remote workers and let me know what you find."}
+  - {id: b03, route: background, also: [expert], split: heldout, user: "Plan a two week trip through Japan for me, with a day by day itinerary."}
+  - {id: b04, route: background, user: "Could you compare the top five project management tools for a small team and tell me later which one fits?"}
+  - {id: b05, route: background, also: [expert], user: "Draft a detailed cover letter for a junior data analyst job, I'd like to hear it when it's ready."}
+  - {id: b06, route: background, split: heldout, user: "Find out which electric cars have the lowest running costs over five years and report back."}
+  - {id: b07, route: background, user: "Research the pros and cons of the main online coding bootcamps and get back to me."}
+  - {id: b08, route: background, also: [expert], user: "Put together a full week of vegetarian dinners with a shopping list."}
   - id: b19
     route: local                 # a status question: answered from the note, no new task
-    lang: en
     history:
       - user: Can you compare noise-cancelling headphones under three hundred dollars and get back to me?
         call: {name: start_task, arguments: {goal: Compare noise-cancelling headphones under 300 dollars}}
@@ -266,7 +151,6 @@ cases:
     user: How's that going?
   - id: b20
     route: tool                  # cancel_task
-    lang: en
     history:
       - user: Can you compare noise-cancelling headphones under three hundred dollars and get back to me?
         call: {name: start_task, arguments: {goal: Compare noise-cancelling headphones under 300 dollars}}
@@ -274,29 +158,8 @@ cases:
         answer: Sure, I'll look into that and get back to you.
     status: '[Background tasks you started for the user: #1 "Compare noise-cancelling headphones under 300 dollars": still working on it, 40 seconds so far]'
     user: Actually, never mind, drop that one.
-  - id: b21
-    route: local
-    lang: ru
-    history:
-      - user: Сравни тарифы мобильных операторов и скажи, какой выгоднее.
-        call: {name: start_task, arguments: {goal: Сравнить тарифы мобильных операторов и выбрать самый выгодный}}
-        result: {task_id: 1, status: started}
-        answer: Хорошо, займусь этим и расскажу, когда будет готово.
-    status: '[Background tasks you started for the user: #1 "Сравнить тарифы мобильных операторов и выбрать самый выгодный": still working on it, 25 seconds so far]'
-    user: Ну как там с тарифами?
-  - id: b22
-    route: local                 # the finished task's result is in the note
-    lang: es
-    history:
-      - user: Compara los bancos online de España por comisiones y avísame.
-        call: {name: start_task, arguments: {goal: Comparar bancos online de España por comisiones}}
-        result: {task_id: 1, status: started}
-        answer: Vale, lo investigo y te cuento.
-    status: '[Background tasks you started for the user: #1 "Comparar bancos online de España por comisiones": done, not told to the user yet. What it found: Sobre los bancos online: los que no cobran comisiones de mantenimiento son Openbank, ING y MyInvestor; para operar en el extranjero, el más barato es Openbank.]'
-    user: ¿Y qué encontraste?
   - id: b23
     route: local                 # an unrelated easy question while a task runs
-    lang: en
     history:
       - user: Can you compare noise-cancelling headphones under three hundred dollars and get back to me?
         call: {name: start_task, arguments: {goal: Compare noise-cancelling headphones under 300 dollars}}
@@ -306,7 +169,6 @@ cases:
     user: Meanwhile, what's the capital of Canada?
   - id: b24
     route: background            # a second, different research request (max_concurrent is MOUTH's business)
-    lang: en
     history:
       - user: Can you compare noise-cancelling headphones under three hundred dollars and get back to me?
         call: {name: start_task, arguments: {goal: Compare noise-cancelling headphones under 300 dollars}}
@@ -314,47 +176,46 @@ cases:
         answer: Sure, I'll look into that and get back to you.
     status: '[Background tasks you started for the user: #1 "Compare noise-cancelling headphones under 300 dollars": still working on it, 40 seconds so far]'
     user: Also, could you research good budget microphones for podcasting and get back to me on that too?
-  # ---- hard, English only (2026-10-11): the boundaries the cases above no longer separate (E4B and Gemma 4 26B were
-  # both at ~100% on the English cases). Held out like `fresh`: never used to tune a prompt.
+  # ---- hard (2026-10-11): the boundaries the cases above no longer separate (E4B was at ~100% on them). Held out
+  # like `fresh`: never used to tune a prompt.
   # disguised expert questions: short, casual, with real consequences or several steps
-  - {id: h01, route: expert, lang: en, split: hard, user: "Quick one, can I take ibuprofen if I'm already on blood pressure meds?"}
-  - {id: h02, route: expert, lang: en, split: hard, user: "My landlord is keeping my whole deposit for normal wear and tear. Is that even legal?"}
-  - {id: h03, route: expert, lang: en, split: hard, user: "Is it smarter to pay off my car loan early or put the money into my retirement account?"}
-  - {id: h04, route: expert, lang: en, split: hard, user: "If I drive three hundred forty miles at twenty eight miles per gallon and gas is three seventy nine a gallon, what does the trip cost?"}
-  - {id: h05, route: expert, lang: en, split: hard, user: "My eight month old has a fever of thirty nine and a half. Should I take her to the ER?"}
-  - {id: h06, route: expert, lang: en, split: hard, user: "Can you write a SQL query that finds customers who ordered in January but not in February?"}
-  - {id: h07, route: expert, lang: en, split: hard, user: "What's the difference between a Roth and a traditional IRA for someone in a high tax bracket?"}
-  - {id: h08, route: expert, lang: en, split: hard, user: "My boss wants me to sign a non-compete. What should I watch out for?"}
-  - {id: h09, route: expert, lang: en, split: hard, user: "What's the monthly payment on a thirty thousand dollar student loan at six percent over ten years?"}
-  - {id: h10, route: expert, lang: en, split: hard, user: "Explain why the sky is blue, but properly, with the actual physics."}
+  - {id: h01, route: expert, split: hard, user: "Quick one, can I take ibuprofen if I'm already on blood pressure meds?"}
+  - {id: h02, route: expert, split: hard, user: "My landlord is keeping my whole deposit for normal wear and tear. Is that even legal?"}
+  - {id: h03, route: expert, split: hard, user: "Is it smarter to pay off my car loan early or put the money into my retirement account?"}
+  - {id: h04, route: expert, split: hard, user: "If I drive three hundred forty miles at twenty eight miles per gallon and gas is three seventy nine a gallon, what does the trip cost?"}
+  - {id: h05, route: expert, split: hard, user: "My eight month old has a fever of thirty nine and a half. Should I take her to the ER?"}
+  - {id: h06, route: expert, split: hard, user: "Can you write a SQL query that finds customers who ordered in January but not in February?"}
+  - {id: h07, route: expert, split: hard, user: "What's the difference between a Roth and a traditional IRA for someone in a high tax bracket?"}
+  - {id: h08, route: expert, split: hard, user: "My boss wants me to sign a non-compete. What should I watch out for?"}
+  - {id: h09, route: expert, split: hard, user: "What's the monthly payment on a thirty thousand dollar student loan at six percent over ten years?"}
+  - {id: h10, route: expert, split: hard, user: "Explain why the sky is blue, but properly, with the actual physics."}
   # hard-sounding, but a simple fact, a short how-to or chit-chat: answered locally
-  - {id: h11, route: local, lang: en, split: hard, user: "What's the square root of a hundred forty four?"}
-  - {id: h12, route: local, lang: en, split: hard, user: "What does DNA stand for?"}
-  - {id: h13, route: local, lang: en, split: hard, user: "In one sentence, what is photosynthesis?"}
-  - {id: h14, route: local, lang: en, split: hard, user: "Who was the first person to walk on the moon?"}
-  - {id: h15, route: local, lang: en, split: hard, user: "What's the boiling point of water in Fahrenheit?"}
-  - {id: h16, route: local, lang: en, split: hard, user: "What's a good trick for remembering people's names?"}
-  - {id: h17, route: local, lang: en, split: hard, user: "Is a tomato a fruit or a vegetable?"}
-  - {id: h18, route: local, lang: en, split: hard, user: "What's heavier, a kilo of feathers or a kilo of steel?"}
-  - {id: h19, route: local, lang: en, split: hard, user: "How do you spell necessary?"}
-  - {id: h20, route: local, lang: en, split: hard, user: "Say something nice to cheer me up, I had a rough day."}
+  - {id: h11, route: local, split: hard, user: "What's the square root of a hundred forty four?"}
+  - {id: h12, route: local, split: hard, user: "What does DNA stand for?"}
+  - {id: h13, route: local, split: hard, user: "In one sentence, what is photosynthesis?"}
+  - {id: h14, route: local, split: hard, user: "Who was the first person to walk on the moon?"}
+  - {id: h15, route: local, split: hard, user: "What's the boiling point of water in Fahrenheit?"}
+  - {id: h16, route: local, split: hard, user: "What's a good trick for remembering people's names?"}
+  - {id: h17, route: local, split: hard, user: "Is a tomato a fruit or a vegetable?"}
+  - {id: h18, route: local, split: hard, user: "What's heavier, a kilo of feathers or a kilo of steel?"}
+  - {id: h19, route: local, split: hard, user: "How do you spell necessary?"}
+  - {id: h20, route: local, split: hard, user: "Say something nice to cheer me up, I had a rough day."}
   # actions with health words in them: a tool, not the expert; live facts with money words: the expert
-  - {id: h21, route: expert, lang: en, split: hard, user: "What's the weather in Chicago tomorrow, and do I need an umbrella?"}
-  - {id: h22, route: expert, lang: en, split: hard, user: "What are mortgage rates right now, and is it a good time to refinance?"}
-  - {id: h23, route: expert, lang: en, split: hard, user: "How did the Lakers do last night?"}
-  - {id: h24, route: expert, lang: en, split: hard, user: "What's the euro to dollar exchange rate right now?"}
-  - {id: h25, route: tool, lang: en, split: hard, user: "Remind me to take my medication at eight tonight."}
-  - {id: h26, route: tool, lang: en, split: hard, user: "Message my sister that the doctor's appointment moved to Thursday."}
-  - {id: h27, route: expert, lang: en, split: hard, user: "Is the stock market up or down today?"}
+  - {id: h21, route: expert, split: hard, user: "What's the weather in Chicago tomorrow, and do I need an umbrella?"}
+  - {id: h22, route: expert, split: hard, user: "What are mortgage rates right now, and is it a good time to refinance?"}
+  - {id: h23, route: expert, split: hard, user: "How did the Lakers do last night?"}
+  - {id: h24, route: expert, split: hard, user: "What's the euro to dollar exchange rate right now?"}
+  - {id: h25, route: tool, split: hard, user: "Remind me to take my medication at eight tonight."}
+  - {id: h26, route: tool, split: hard, user: "Message my sister that the doctor's appointment moved to Thursday."}
+  - {id: h27, route: expert, split: hard, user: "Is the stock market up or down today?"}
   # research for later against a question that can be answered now
-  - {id: h28, route: background, lang: en, split: hard, user: "Dig into the best beginner road bikes under a thousand dollars and get back to me."}
-  - {id: h29, route: background, lang: en, split: hard, user: "When you have a minute, put together a comparison of the main meal kit services and let me know."}
-  - {id: h30, route: background, also: [expert], lang: en, split: hard, user: "Draft a full wedding toast for my brother, I'd like to hear it when it's ready."}
-  - {id: h31, route: expert, lang: en, split: hard, user: "Compare the iPhone and the Pixel cameras for me."}
+  - {id: h28, route: background, split: hard, user: "Dig into the best beginner road bikes under a thousand dollars and get back to me."}
+  - {id: h29, route: background, split: hard, user: "When you have a minute, put together a comparison of the main meal kit services and let me know."}
+  - {id: h30, route: background, also: [expert], split: hard, user: "Draft a full wedding toast for my brother, I'd like to hear it when it's ready."}
+  - {id: h31, route: expert, split: hard, user: "Compare the iPhone and the Pixel cameras for me."}
   # several turns
   - id: h32
     route: expert                # follow-up on an escalated topic
-    lang: en
     split: hard
     history:
       - user: How do capital gains taxes work when you sell a house?
@@ -363,7 +224,6 @@ cases:
     user: And does that change if I only lived there for one year?
   - id: h33
     route: local                 # a new, easy topic after an escalated one
-    lang: en
     split: hard
     history:
       - user: Should I refinance my mortgage if rates drop by one percent?
@@ -372,7 +232,6 @@ cases:
     user: Anyway, what's your favorite season?
   - id: h34
     route: expert                # a follow-up on a live fact
-    lang: en
     split: hard
     history:
       - user: What's the weather in Paris today?
@@ -381,7 +240,6 @@ cases:
     user: And what about Rome?
   - id: h35
     route: expert                # unhappy with a local answer
-    lang: en
     split: hard
     history:
       - user: How far away is the moon?
@@ -389,7 +247,6 @@ cases:
     user: That can't be right. Can you double check that?
   - id: h36
     route: local                 # small talk after a local answer
-    lang: en
     split: hard
     history:
       - user: Do you ever get bored?
@@ -397,23 +254,22 @@ cases:
     user: Haha, fair enough. Thanks for chatting.
   - id: h37
     route: expert                # the stakes change mid-conversation
-    lang: en
     split: hard
     history:
       - user: What's an easy dessert I can make tonight?
         reply: A quick fruit crumble, with oats, butter and brown sugar over some sliced apples, is hard to get wrong.
     user: Actually, I'm diabetic. Is that safe for me to eat?
   # long, rambling turns with the real question at the end
-  - {id: h38, route: expert, lang: en, split: hard, user: "So I was talking to my neighbor yesterday about her garden and her tomatoes, anyway, the real question is, I've had chest tightness on and off for a week when I climb stairs. Should I be worried?"}
-  - {id: h39, route: local, lang: en, split: hard, user: "Ugh, long day, the traffic was terrible, I spilled my coffee, and now I just want to know, how many ounces are in a cup?"}
-  - {id: h40, route: expert, lang: en, split: hard, user: "I'm heading out soon and my friend says it might storm, she's usually wrong, but can you check the weather in Denver for this afternoon?"}
+  - {id: h38, route: expert, split: hard, user: "So I was talking to my neighbor yesterday about her garden and her tomatoes, anyway, the real question is, I've had chest tightness on and off for a week when I climb stairs. Should I be worried?"}
+  - {id: h39, route: local, split: hard, user: "Ugh, long day, the traffic was terrible, I spilled my coffee, and now I just want to know, how many ounces are in a cup?"}
+  - {id: h40, route: expert, split: hard, user: "I'm heading out soon and my friend says it might storm, she's usually wrong, but can you check the weather in Denver for this afternoon?"}
   # reasoning, checking a claim, code
-  - {id: h41, route: expert, lang: en, split: hard, user: "Take your time on this one. If three cats catch three mice in three minutes, how long do a hundred cats need for a hundred mice?"}
-  - {id: h42, route: expert, lang: en, split: hard, user: "Can you check my reasoning? At five percent a year my money doubles in about fourteen years, right?"}
-  - {id: h43, route: expert, lang: en, split: hard, user: "What happens if you stop taking antidepressants suddenly?"}
-  - {id: h44, route: expert, lang: en, split: hard, user: "Write a Python script that renames all the photos in a folder by the date they were taken."}
+  - {id: h41, route: expert, split: hard, user: "Take your time on this one. If three cats catch three mice in three minutes, how long do a hundred cats need for a hundred mice?"}
+  - {id: h42, route: expert, split: hard, user: "Can you check my reasoning? At five percent a year my money doubles in about fourteen years, right?"}
+  - {id: h43, route: expert, split: hard, user: "What happens if you stop taking antidepressants suddenly?"}
+  - {id: h44, route: expert, split: hard, user: "Write a Python script that renames all the photos in a folder by the date they were taken."}
   # more local ones
-  - {id: h45, route: local, lang: en, split: hard, user: "What's the opposite of generous?"}
-  - {id: h46, route: local, lang: en, split: hard, user: "Tell me a joke about computers."}
-  - {id: h47, route: local, lang: en, split: hard, user: "Recommend a good movie for a rainy night."}
-  - {id: h48, route: local, lang: en, split: hard, user: "What's the plural of cactus?"}
+  - {id: h45, route: local, split: hard, user: "What's the opposite of generous?"}
+  - {id: h46, route: local, split: hard, user: "Tell me a joke about computers."}
+  - {id: h47, route: local, split: hard, user: "Recommend a good movie for a rainy night."}
+  - {id: h48, route: local, split: hard, user: "What's the plural of cactus?"}

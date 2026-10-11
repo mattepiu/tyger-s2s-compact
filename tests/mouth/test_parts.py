@@ -25,14 +25,12 @@ def test_history_trims_whole_turns_and_skips_empty_users():
     assert h.messages[-1]["content"] == PROMPTS.text("markers", "empty_reply")
 
 
-def test_history_barged_turn_and_user_words():
+def test_history_barged_turn():
     h = History(8, PROMPTS)
-    h.add("[a note from MOUTH]", "x")
     h.add_barged("tell me a story", ["Once upon a time, ", "there was a fox."])
     assert h.messages[-1]["content"] == "Once upon a time, there was a fox." + INTERRUPTED
     h.add_barged("again", [])
     assert h.messages[-1]["content"] == INTERRUPTED.strip()
-    assert h.user_words() == ["tell me a story", "again"]
 
 
 def test_speaker_tracks_lines_and_what_was_heard():

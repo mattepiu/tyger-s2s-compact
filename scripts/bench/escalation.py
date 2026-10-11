@@ -7,18 +7,16 @@ researched as a task). The decision is the reply model's alone, so only that mod
 remote calls, no cost. Each case is sent exactly as MOUTH would send it (messages.reply_prefix for the mode, then the
 case's history, then the user turn, with the case's `status` note in front as MOUTH prepends it), at the model's
 configured temperature, `--samples` times. The mode follows config/default.yaml (tasks on if mouth.tasks.enabled);
---no-tasks / --no-expert evaluate the prompts without them (cases needing the missing route are skipped). Needs the GPU free (stop run.sh). Prints routes and rates;
-the set is synthetic, so misrouted cases are listed with their text.
+--no-tasks / --no-expert evaluate the prompts without them (cases needing the missing route are skipped). Needs the
+GPU free (stop run.sh). Prints routes and rates; the set is synthetic, so misrouted cases are listed with their text.
 
-Also scores what the model would say aloud (its text before a call, or its whole local reply): replies of 4+
-words in a language other than the case's (script + stopword guess), and narration: words about tools / the
-expert, or call markup leaking into speech. For tool-route samples it also runs the answer after the tool
-result (phase B), with fixed English stub results (the real reminder / message stubs; the time tool runs for
-real), and scores that answer's speech the same way: English tool output must not pull the reply language.
+Also scores what the model would say aloud (its text before a call, or its whole local reply) for narration: words
+about tools / the expert, or call markup leaking into speech. For tool-route samples it also runs the answer after
+the tool result (phase B), with fixed stub results (the real reminder / message stubs; the time tool runs for
+real), and scores that answer's speech the same way.
 
   .venv/bin/python scripts/bench/escalation.py [--samples 8] [--no-expert] [--opt temperature=0.5] [--plugin NAME]
       [--split heldout] [--prompts config/prompts.yaml,/path/candidate.yaml]   several prompt files: one model load
-      [--lang en --prompts config/prompts_en.yaml]   English only (the `hard` split is English)
 """
 import sys, re, json, argparse, logging, collections
 from concurrent.futures import ThreadPoolExecutor
@@ -33,7 +31,6 @@ from app.plugins.base import PluginContext
 from app.prompts import load_prompts
 from app.tools import build_tools, execute_tool, EXPERT, START, CANCEL
 from app.mouth.messages import reply_prefix, turns_messages, round_messages, with_status
-from app.prompts.lang import guess_language, language_text
 
 ROUTES = ("local", "tool", "expert", "background")
 SPLITS = ("tune", "heldout", "fresh", "hard")
@@ -42,13 +39,10 @@ HERE = Path(__file__).resolve().parent
 
 def load_set(path):
     cases = yaml.safe_load(Path(path).read_text(encoding="utf-8"))["cases"]
-    seen = collections.Counter()
-    for c in cases:                # held out: every third case of each route, in file order; `fresh` as marked
+    for c in cases:                # a case without `split` is a tuning case; held-out ones say so
         assert c["route"] in ROUTES, c["id"]
-        if "split" in c:
-            continue
-        seen[c["route"]] += 1
-        c["split"] = "heldout" if seen[c["route"]] % 3 == 0 else "tune"
+        c.setdefault("split", "tune")
+        assert c["split"] in SPLITS, c["id"]
     return cases
 
 
@@ -89,20 +83,12 @@ def route_of(events):
     return ("broken" if started else "local"), text
 
 
-NARRATE = re.compile(r"\b(ask_expert|tools?|experts?|инструмент\w*|эксперт\w*|herramientas?|expert[oa]s?)\b|<\||\|>"
-                     r"|call:|<tool_call|</?function", re.I)
+NARRATE = re.compile(r"\b(ask_expert|tools?|experts?)\b|<\||\|>|call:|<tool_call", re.I)
 
 
-def speech_issues(case, text):
-    """[] or the problems with what would be spoken: 'language', 'narration'."""
-    out = []
-    if NARRATE.search(text):
-        out.append("narration")
-    if len(text.split()) >= 4:
-        got = guess_language(text)
-        if got and got != case["lang"]:
-            out.append("language")
-    return out
+def speech_issues(text):
+    """[] or the problems with what would be spoken: 'narration'."""
+    return ["narration"] if NARRATE.search(text) else []
 
 
 def right(case, got):
@@ -116,8 +102,7 @@ def evaluate(llm, p, cases, samples, max_new, workers, expert=True, tasks=False)
 
     def run(job):
         c, _ = job
-        lang = language_text(c["user"], [t["user"] for t in c.get("history", [])])    # as MOUTH guesses it
-        user = with_status(p, c.get("status"), c["user"], lang)      # MOUTH's status note, as MOUTH builds it
+        user = with_status(c.get("status"), c["user"])                # MOUTH's status note, as MOUTH builds it
         msgs = prefix + turns_messages(p, c.get("history", []), f"h{c['id']}_") + [{"role": "user", "content": user}]
         evs = list(llm.stream(msgs, tools=tools, max_new=max_new))
         route, text = route_of(evs)
@@ -126,8 +111,7 @@ def evaluate(llm, p, cases, samples, max_new, workers, expert=True, tasks=False)
             calls = next(e[1] for e in evs if e[0] == "tool_calls")
             results = [STUB.get(x["name"]) or execute_tool(x["name"], x.get("arguments", {}))
                        for x in calls]                         # get_current_time runs locally
-            phase_b, _ = collect(llm.stream(msgs + round_messages(text, calls, None, results,
-                                                                  note=p.result_note(lang)), max_new=max_new))
+            phase_b, _ = collect(llm.stream(msgs + round_messages(text, calls, None, results), max_new=max_new))
         return c, route, text, phase_b
     with ThreadPoolExecutor(workers) as ex:
         return list(ex.map(run, jobs))
@@ -162,18 +146,16 @@ def report(results, title):
     print(f"expert -> background {eb} ({eb_ok} allowed by `also`), background -> expert {be} ({be_ok} allowed)")
     print(f"expert -> tool {100 * rate(('expert',), ('tool',))[0]:.1f}%, tool -> expert / background "
           f"{100 * rate(('tool',), up)[0]:.1f}%, tool -> local {100 * rate(('tool',), ('local',))[0]:.1f}%")
-    issues = collections.Counter(i for c, _, text, _ in results for i in speech_issues(c, text))
+    issues = collections.Counter(i for _, _, text, _ in results for i in speech_issues(text))
     spoken = sum(1 for _, _, text, _ in results if text.strip())
-    print(f"speech: wrong language {issues['language']}, narration / markup {issues['narration']} "
-          f"(of {spoken} samples that spoke)")
-    pb = [(c, b) for c, _, _, b in results if b is not None]
-    pb_issues = collections.Counter(i for c, b in pb for i in speech_issues(c, b))
-    print(f"after the tool / task result: wrong language {pb_issues['language']}, narration / markup "
-          f"{pb_issues['narration']}, empty {sum(1 for _, b in pb if not b.strip())} (of {len(pb)})")
+    print(f"speech: narration / markup {issues['narration']} (of {spoken} samples that spoke)")
+    pb = [b for _, _, _, b in results if b is not None]
+    pb_issues = collections.Counter(i for b in pb for i in speech_issues(b))
+    print(f"after the tool / task result: narration / markup {pb_issues['narration']}, "
+          f"empty {sum(1 for b in pb if not b.strip())} (of {len(pb)})")
     return {"missed": missed, "unneeded": unneeded, "right": ok, "n": len(results), "expert_to_bg": eb,
             "bg_to_expert": be, "matrix": {r: dict(by[r]) for r in ROUTES},
-            "language": issues["language"], "narration": issues["narration"], "spoke": spoken,
-            "pb_language": pb_issues["language"], "pb_narration": pb_issues["narration"], "pb_n": len(pb)}
+            "narration": issues["narration"], "spoke": spoken, "pb_narration": pb_issues["narration"], "pb_n": len(pb)}
 
 
 def main():
@@ -183,7 +165,6 @@ def main():
     ap.add_argument("--prompts", default=None, help="comma-separated prompt files to compare (default: config's)")
     ap.add_argument("--set", default=str(HERE / "escalation_set.yaml"))
     ap.add_argument("--split", choices=("all",) + SPLITS, default="all")
-    ap.add_argument("--lang", default=None, help="only the cases in this language (e.g. en)")
     ap.add_argument("--samples", type=int, default=3)
     ap.add_argument("--json", default=None, help="write the rates and per-case routes here")
     ap.add_argument("--no-expert", action="store_true", help="the prompt and tools without a smart model (no "
@@ -203,7 +184,6 @@ def main():
     expert = not a.no_expert
     tasks = expert and not a.no_tasks and bool((cfg["mouth"].get("tasks") or {}).get("enabled"))
     cases = [c for c in load_set(a.set) if (a.split == "all" or c["split"] == a.split)
-             and (a.lang is None or c["lang"] == a.lang)
              and not (not expert and c["route"] == "expert") and not (not tasks and c["route"] == "background")
              and not (not tasks and (c.get("status") or any("call" in t and t["call"]["name"] in (START, CANCEL)
                                                               for t in c.get("history", []))))]
@@ -223,13 +203,13 @@ def main():
                 out[pf][split] = report(part, f"{title}: {split} only")
         wrong = collections.defaultdict(list); said = collections.defaultdict(list)
         for c, got, text, pbtext in results:
-            for issue in speech_issues(c, pbtext or ""):
+            for issue in speech_issues(pbtext or ""):
                 said[c["id"]].append(f"after tool, {issue}: {pbtext.strip()[:90]!r}")
             if not right(c, got):
                 wrong[c["id"]].append(got)
                 if text.strip() and len(said[c["id"] + ":misrouted"]) < 2:
                     said[c["id"] + ":misrouted"].append(text.strip()[:90])
-            for issue in speech_issues(c, text):
+            for issue in speech_issues(text):
                 said[c["id"]].append(f"{issue}: {text.strip()[:90]!r}")
         out[pf]["wrong"] = wrong; out[pf]["speech"] = said
         print("\nmisrouted (id, expected, got per sample):")
@@ -241,7 +221,7 @@ def main():
         print("\nspeech issues (id: issue: what it would say):")
         for c in cases:
             for line in said.get(c["id"], [])[:2]:  # (misrouted samples' text is listed above)
-                print(f"  {c['id']} [{c['lang']}]: {line}")
+                print(f"  {c['id']}: {line}")
     if a.json:
         Path(a.json).write_text(json.dumps(out, ensure_ascii=False, indent=1))
     llm.shutdown()

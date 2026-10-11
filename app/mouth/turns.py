@@ -26,7 +26,6 @@ class Turn:
         self.session = session; self.m = session.m; self.stop = stop_flag
         self.voice = session.voice               # one voice per turn: a switch applies to the next one
         self.speaker = Speaker(self.m.tts, self.m.sr)
-        self.lang = ""                           # what the language hints are guessed from (ReplyTurn sets it)
 
     def run(self):
         raise NotImplementedError
@@ -132,8 +131,7 @@ class Turn:
             if n < MAX_STILL and self.speaker.played_out_for(FILLER_GAP_S):
                 n += 1
                 fp = self.m.prompts["filler"]
-                line = yield from self.filler(section, still_user(fp, transcript, fillers, section) +
-                                              fp.filler_hint(self.lang))
+                line = yield from self.filler(section, still_user(fp, transcript, fillers, section))
                 if line:
                     fillers.append(line)
             else:
@@ -171,7 +169,7 @@ class AnnouncementTurn(Turn):
                           result=compact_result(task.result or task.summary or ""))
         else:
             fp = m.prompts["filler"]
-            user = fp.fill("task_failed", "user", goal=task.goal) + fp.filler_hint(task.lang_text)
+            user = fp.fill("task_failed", "user", goal=task.goal)
             line = text_of(m.llms["filler"].stream(with_shots(fp.text("task_failed", "system"),
                                                               fp.shots("task_failed"), user),
                                                    max_new=40, stop_flag=self.stop)).strip()

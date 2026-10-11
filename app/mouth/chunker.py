@@ -4,9 +4,8 @@ as it closes, so playback starts on chunk 1 while the rest render. The TTS has n
 sanitizer strips all bracketed tags. The TTS-safe system prompt is in config/prompts.yaml (system.voice_tools)."""
 import re
 
-# Sanitizer: keep letters of ANY script (Cyrillic, CJK, Latin, ...) + digits + basic speakable punctuation,
-# strip markdown/symbols/emoji. \w is Unicode-aware in Python 3, so Russian etc. survive for multilingual TTS
-# (the old [A-Za-z] whitelist silently dropped all non-Latin text before it reached the TTS).
+# Sanitizer: keep letters + digits + basic speakable punctuation, strip markdown/symbols/emoji. \w is Unicode-aware
+# in Python 3, so accented letters in names ("José", "Zürich") survive; an [A-Za-z] whitelist would drop them.
 _KEEP = re.compile(r"[^\w\s.,!?;:'\"()\-$%]", re.UNICODE)   # $ and % carry meaning ("0.50$", "50%")
 # Clause dashes -> comma (a pause cue). "Las-Palmas" (unspaced hyphen) and ranges like "5 - 10" / "5–10"
 # (digit on both sides) are left alone.
@@ -30,12 +29,9 @@ def say_clean(text: str) -> str:
 # "0.50$", "3,000", "1:30", "example.com" -- and never cuts a buffer that merely ends in "0." because
 # "50" hasn't streamed yet. The end-of-reply tail is flushed by the caller (Mouth._flush_tail).
 # ASCII hyphen is a boundary only when spaced (" - "), so "Las-Palmas" / "well-known" never split.
-# Full-width CJK punctuation is always a boundary (CJK text has no spaces after it).
 _STRONG = ".!?…"
 _WEAK = ",;:—–"
 _CLOSERS = '"\')]»”’'
-_STRONG_FW = "。！？"
-_WEAK_FW = "，；：、"
 # A "." after these (lower-cased, without the dot) is not a sentence end; neither is a single-letter
 # initial ("J. K. Rowling") or a dotted acronym ("U.S.", "e.g.").
 _ABBREV = {"mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "approx", "mt", "ft", "no", "fig"}
@@ -67,13 +63,6 @@ def _boundaries(core: str):
     i = 0
     while i < n:
         ch = core[i]
-        if ch in _STRONG_FW or ch in _WEAK_FW:
-            j = i
-            while j + 1 < n and core[j + 1] in _STRONG_FW + _WEAK_FW + _CLOSERS:
-                j += 1
-            yield j + 1, ch in _STRONG_FW
-            i = j + 1
-            continue
         spaced_hyphen = ch == "-" and i > 0 and core[i - 1] == " "
         if (spaced_hyphen or ch == "–") and core[:i].rstrip()[-1:].isdigit():   # "5 - 10": a range
             i += 1

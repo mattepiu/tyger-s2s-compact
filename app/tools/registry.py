@@ -30,11 +30,9 @@ class Tool:
 @dataclass(frozen=True)
 class ToolContext:
     """What MOUTH's own tools may read: the calling turn's prompts (for the notes they answer with), the user's
-    words and language, the conversation's task runner (None: tasks off) and whether the smart model answers
-    ask_expert."""
+    words, the conversation's task runner (None: tasks off) and whether the smart model answers ask_expert."""
     prompts: Any = None
     transcript: str = ""
-    lang: Any = None
     tasks: Any = None
     expert: bool = False
 

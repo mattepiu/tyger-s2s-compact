@@ -10,7 +10,7 @@ on the replies (keywords), never their words. Which path MOUTH took comes from i
 only): the round went on as a task, or the user had already heard part of the answer when the barge fired (then
 nothing is said later, by design).
 
-  .venv/bin/python scripts/stack/barged_round.py --stack-log STACK_LOG [--user-voice ru] [--cut-in-after 0.0]
+  .venv/bin/python scripts/stack/barged_round.py --stack-log STACK_LOG [--user-voice NAME] [--cut-in-after 0.0]
 """
 import sys, json, time, asyncio, argparse, re
 from pathlib import Path
@@ -23,6 +23,16 @@ from scripts.stack.page import PageSim  # noqa: E402
 ASK = "If I save three hundred dollars every month for fifteen years at five percent interest, how much will I have?"
 CUT_IN = "Wait, sorry, quick one first: what is the capital of Australia?"
 NUMBER = re.compile(r"\d|thousand|hundred", re.I)          # the expert's answer gives an amount
+
+
+def other_voice(cfg):
+    """The first voice clip that isn't the agent's: the user's lines must not sound like the agent's own echo."""
+    from app.plugins import plugin_class
+    names, agent = plugin_class("tts", cfg["tts"]["plugin"]).list_voices(cfg)
+    rest = [n for n in names if n != agent]
+    if not rest:
+        sys.exit("the user's lines need a second voice clip in voices/ (or --user-voice)")
+    return rest[0]
 
 
 async def run(port, ask, cut_in, cut_in_after, timeout_s, barge_thr=None, turns=3):
@@ -109,7 +119,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--stack-log", required=True, help="run.sh's log, to read which path MOUTH took")
     ap.add_argument("--cut-in-after", type=float, default=0.0, help="s after the lead-in's first audio")
-    ap.add_argument("--user-voice", default="ru", help="the voice (a clip in voices/) the user's lines are said in")
+    ap.add_argument("--user-voice", default=None, help="the voice (a clip in voices/) the user's lines are said in "
+                    "(default: the first clip that isn't the agent's)")
     ap.add_argument("--ask", default=ASK, help="the first question (default: one the reply model escalates)")
     ap.add_argument("--barge-thr", type=float, default=None,
                     help="this conversation's barge threshold (the page's slider; default: the config's)")
@@ -118,7 +129,8 @@ def main():
     ap.add_argument("--config", default=None)
     a = ap.parse_args()
     cfg = load_config(a.config)
-    ask, cut_in = (speech_from_mouth(cfg, x, voice=a.user_voice) for x in (a.ask, CUT_IN))
+    voice = a.user_voice or other_voice(cfg)
+    ask, cut_in = (speech_from_mouth(cfg, x, voice=voice) for x in (a.ask, CUT_IN))
     since = len(Path(a.stack_log).read_text(errors="replace").splitlines())
     ev, texts, yields = asyncio.run(run(int(cfg["server"]["port"]), ask, cut_in, a.cut_in_after, a.timeout,
                                         a.barge_thr, a.turns))

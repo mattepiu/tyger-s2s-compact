@@ -76,10 +76,8 @@ def test_abbreviations_and_initials():
 
 # ---- the MIN_CHARS window: short text is never fragmented --------------------------------------
 def test_short_reply_goes_whole():
-    assert stream_chunks("Привет, как у тебя сегодня дела? Всё хорошо.") == \
-        ["Привет, как у тебя сегодня дела? Всё хорошо."]
+    assert stream_chunks("Hey, how is your day going? All good.") == ["Hey, how is your day going? All good."]
     assert stream_chunks("Hi! How can I help you today?") == ["Hi! How can I help you today?"]
-    assert stream_chunks("你好，我是你的助手。今天天气很好！") == ["你好，我是你的助手。今天天气很好！"]
 
 
 def test_short_sentences_merge_with_the_next():
@@ -101,8 +99,8 @@ def test_first_chunk_is_a_clause_later_are_sentences():
         "it only takes a few minutes. First, boil the water, then add the pasta and a little salt.",
         "Enjoy it.",
     ]
-    assert stream_chunks("Ну что ж, давай посмотрим, что там у нас есть. Да.") == \
-        ["Ну что ж, давай посмотрим, что там у нас есть.", "Да."]
+    assert stream_chunks("Well then, let's see what we have here today. Yes.") == \
+        ["Well then, let's see what we have here today.", "Yes."]
 
 
 def test_first_chunk_word_cap_without_punctuation():
@@ -125,7 +123,7 @@ def test_dashes():
         "Paris — the capital of France, is lovely in the spring."
     assert say_clean("Paris — the capital - is lovely") == "Paris, the capital, is lovely"
     assert say_clean("Las-Palmas, a well-known spot,") == "Las-Palmas, a well-known spot,"
-    assert say_clean("Привет — мир") == "Привет, мир"
+    assert say_clean("José — in Zürich") == "José, in Zürich"                    # accented letters in names stay
 
 
 def test_keeps_dollar_and_percent():

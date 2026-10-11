@@ -16,8 +16,8 @@ class Tasks:
     def __init__(self):
         self.asked = []
 
-    def start(self, goal, transcript, lang):
-        self.asked.append(("start", goal, transcript, lang)); return {"task_id": 1, "status": "started"}
+    def start(self, goal, transcript):
+        self.asked.append(("start", goal, transcript)); return {"task_id": 1, "status": "started"}
 
     def cancel(self, task_id):
         self.asked.append(("cancel", task_id)); return {"task_id": task_id, "status": "cancelled"}
@@ -56,11 +56,11 @@ def test_expert_only_where_escalation_is_on():
 
 
 def test_tasks_only_where_tasks_are_on():
-    t = Tasks(); ctx = ToolContext(prompts=PROMPTS, transcript="find me a laptop", lang="en", tasks=t)
+    t = Tasks(); ctx = ToolContext(prompts=PROMPTS, transcript="find me a laptop", tasks=t)
     assert run_call(call("start_task", goal="laptops"), ctx)["status"] == "started"
     assert run_call(call("cancel_task", task_id="1"), ctx)["status"] == "cancelled"
     assert run_call(call("cancel_task", task_id="one"), ctx) == {"error": PROMPTS.text("tasks", "unknown_task")}
-    assert t.asked == [("start", "laptops", "find me a laptop", "en"), ("cancel", 1)]
+    assert t.asked == [("start", "laptops", "find me a laptop"), ("cancel", 1)]
     off = ToolContext(prompts=PROMPTS)
     assert run_call(call("start_task", goal="x"), off) == {"error": "unknown tool 'start_task'"}
     assert run_call(call("finish_task", summary="s", result="r"), ctx) == {"error": "unknown tool 'finish_task'"}

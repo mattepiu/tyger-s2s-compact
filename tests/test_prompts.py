@@ -1,5 +1,5 @@
 """config/prompts.yaml loader (no GPU). The step-1b byte-identity gate against the pre-move constants (commit
-ddb1128) was deleted when the prompts were first edited on purpose (step 11: reply language, tool rules). Run:
+ddb1128) was deleted when the prompts were first edited on purpose (step 11: the tool rules). Run:
 .venv/bin/python tests/test_prompts.py
 """
 import copy, os, sys
@@ -40,19 +40,6 @@ def test_shots_and_tools_checked():
     expect_error(d, "tools.get_current_time.params.city")
     d = copy.deepcopy(P.d); d["tools"]["fly"] = {"description": "x"}
     expect_error(d, "tools.fly")
-
-
-def test_language_named_in_notes():
-    from app.prompts.lang import guess_language
-    assert [guess_language(t) for t in ("Какая погода в Казани?", "¿Va a llover mañana?", "Que hora es en Madrid",
-                                        "What time is it in Tokyo?", "Wie spät ist es?", "Hmm")] == \
-        ["ru", "es", "es", "en", None, None]
-    assert "Russian" in P.result_note("Какая погода в Казани?") and P.filler_hint("Какая погода в Казани?")
-    assert P.result_note("Hmm") == P.text("language", "tool_note_any") and P.filler_hint("Hmm") == ""
-    from app.prompts.lang import language_text
-    assert language_text("Actually, never mind, drop that one.", ["Сравни тарифы операторов, пожалуйста"]) \
-        .endswith("drop that one.") and guess_language(language_text("Ok, drop it.", ["Сравни тарифы, пожалуйста"])) == "ru"
-    assert language_text("What time is it in Tokyo?", ["Привет"]) == "What time is it in Tokyo?"
 
 
 def test_reply_shots_checked():

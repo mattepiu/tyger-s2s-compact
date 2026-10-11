@@ -24,7 +24,7 @@ def ask_expert(args, ctx):
             group="tasks")
 def start_task(args, ctx):
     if ctx.tasks is not None:
-        return ctx.tasks.start(args.get("goal"), ctx.transcript, ctx.lang)
+        return ctx.tasks.start(args.get("goal"), ctx.transcript)
 
 
 @agent_tool(CANCEL, {"type": "object", "properties": {"task_id": {"type": "integer"}}, "required": ["task_id"]},

@@ -21,7 +21,7 @@ TOOL_PROMPTS = ["What time is it in Paris right now?", "What's the time in Tokyo
                 "What time is it in Madrid right now?", "What's the current time in Toronto?"]
 PARTIALS = ["so yesterday I finally got the job offer I was hoping for",
             "and then my dog got really sick and we had to rush him to the vet",
-            "я вот думаю, может, в выходные съездить на море"]
+            "so I was thinking maybe we could drive down to the sea this weekend"]
 
 
 def gpu_mib():

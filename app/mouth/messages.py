@@ -77,15 +77,10 @@ def reply_prefix(p, expert, tasks=False):
     return msgs + (turns_messages(p, p.turns("tasks"), "tshot") if tasks else [])
 
 
-def with_status(p, status, transcript, lang_text=None):
-    """The user's message as the reply model gets it while background tasks exist: the status note (+ the user's
-    language named, guessed from `lang_text` (default: their words), as the note is English: step 14 eval), then
-    their words."""
-    if not status:
-        return transcript
-    name = p.language_name(lang_text or transcript)
-    lang = " " + p.fill("language", "status_note", language=name) if name else ""
-    return f"{status}{lang}\n\n{transcript}"
+def with_status(status, transcript):
+    """The user's message as the reply model gets it while background tasks exist: the status note, then their
+    words."""
+    return f"{status}\n\n{transcript}" if status else transcript
 
 
 def plain_context(turns):
@@ -106,16 +101,15 @@ def smart_messages(p, turns, transcript, question, others=()):
     return [{"role": "system", "content": p.text("smart", "system")}] + ctx + [{"role": "user", "content": user}]
 
 
-def round_messages(content, calls, native, results, compact=False, note=None):
+def round_messages(content, calls, native, results, compact=False):
     """One tool round in the neutral format: the assistant's calls (plugin-issued IDs; `native` passed through)
-    and a result per call, full or compacted for history. `note` (Prompts.result_note) is appended to each full
-    result: tool output is usually English, and a small model otherwise answers in its language."""
+    and a result per call, full or compacted for history."""
     asst = {"role": "assistant", "content": (content or "").strip() or None,
             "tool_calls": [{"id": c["id"], "name": c["name"], "arguments": c.get("arguments", {})} for c in calls]}
     if native is not None:
         asst["native"] = native
     res = (lambda r: compact_result(r)) if compact else \
-        (lambda r: json.dumps(r if r is not None else {"error": "no result"}) + (f"\n\n{note}" if note else ""))
+        (lambda r: json.dumps(r if r is not None else {"error": "no result"}))
     return [asst] + [{"role": "tool", "tool_call_id": c["id"], "content": res(r)} for c, r in zip(calls, results)]
 
 

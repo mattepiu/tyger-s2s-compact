@@ -65,14 +65,14 @@ def test_start_chat_done_status():
 def test_status_while_running_and_request():
     smart = FakeLLM(step_s=0.05, chars=2)                              # the finish call takes ~2 s to stream
     s, m, llm, done = session(smart=smart)
-    run_turn(s, "Подбери мне ноутбук для программирования")
+    run_turn(s, "Find me a laptop for programming")
     llm.text["reply"] = "Still working on it."
-    run_turn(s, "ну что там?")
+    run_turn(s, "so, any news?")
     assert "still working on it" in last_user(llm) and not done
     req = smart.calls[0][1]
     assert smart.calls[0][0] == "task" and req[0]["content"] == PROMPTS.text("tasks", "system")
-    assert GOAL in req[-1]["content"] and "Russian" in req[-1]["content"]        # the language to write in
-    assert '"Подбери мне ноутбук для программирования"' in req[-1]["content"]       # the user's own words
+    assert GOAL in req[-1]["content"]
+    assert '"Find me a laptop for programming"' in req[-1]["content"]                # the user's own words
     s.tasks.close()
 
 
@@ -268,7 +268,7 @@ def test_failed_task_announced_in_one_sentence():
     d = frames(peer, lambda k, p: k == b"D")[-1][1]
     assert d["text"] == llm.task_failed and d["proactive"] == 1
     req = [c[1] for c in llm.calls if c[0] == "task_failed"][-1]
-    assert GOAL in req[-1]["content"] and req[-1]["content"].endswith("Say it in English.")
+    assert req[-1]["content"] == PROMPTS.fill("task_failed", "user", goal=GOAL)
     assert s.history.messages[-2]["content"] == PROMPTS.fill("tasks", "failed_note", id=1, goal=GOAL)
     peer.close()
 
