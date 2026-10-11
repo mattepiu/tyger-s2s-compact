@@ -256,6 +256,14 @@ tasks:
       call: {name: start_task, arguments: {goal: Buscar gimnasios con piscina en el centro de Valencia y compararlos por precio y horario.}}
       result: {task_id: 3, status: started}
       answer: Vale, lo investigo y te cuento cuando lo tenga.
+    - user: Выясни, какой робот для мойки окон надёжнее, и потом мне расскажешь.
+      call: {name: start_task, arguments: {goal: Выяснить, какие роботы для мойки окон самые надёжные, и сравнить их по цене и отзывам.}}
+      result: {task_id: 4, status: started}
+      answer: Хорошо, разберусь и потом расскажу.
+    - user: Mira qué cafeteras de cápsulas salen más baratas a la larga y luego me dices.
+      call: {name: start_task, arguments: {goal: Comparar cafeteras de cápsulas por el coste total a largo plazo, máquina y cápsulas incluidas.}}
+      result: {task_id: 5, status: started}
+      answer: Vale, lo miro y luego te digo.
     # a status question is answered from the note (never cancel_task); only an explicit "drop it" cancels
     - user: "[Background tasks you started for the user: #1 \"Find the three best-rated budget laptops for programming, under about 800 dollars, and compare them.\": still working on it, 35 seconds so far] [Answer the user in English, even though this note is in English.]\n\nAny news on that?"
       reply: Not yet, I'm still comparing them. I'll tell you as soon as it's ready.

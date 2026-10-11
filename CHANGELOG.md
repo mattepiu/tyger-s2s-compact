@@ -86,6 +86,28 @@ downloads included, took 11.5 min (Gemma's download and load 169 s, its first co
   halting, a backchannel while halting, a barge after D that waits for a D that never comes, and a D after the
   page's report that waits for the timeout.
 
+#### Fixed
+- **"Research this and tell me later" in Russian and Spanish went to the expert instead of a background task.**
+  - Why: the reply prompt lists comparisons and planning under `ask_expert`, and research and comparing many options
+    under `start_task`. The task examples in Russian and Spanish were a trip plan and a gym comparison, with no
+    "tell me later", so a Russian "compare… and then tell me" read as a comparison.
+  - The fix: two task examples whose cue is "find out or compare, then tell me later", one in Russian ("…и потом мне
+    расскажешь") and one in Spanish ("…y luego me dices"), on topics the routing set doesn't use. A rule sentence
+    saying the same was tried on top and changed nothing, so it isn't in.
+  - Before → after, Gemma E4B on this box (`scripts/bench/escalation.py --samples 8`, smart + tasks, 140 cases; one
+    model load for all three prompt files):
+
+    | prompts | right | background → expert, not allowed | b09 RU (held out) | b10 RU | b15 ES (held out) | wrong language: speech / after a tool |
+    |---|---|---|---|---|---|---|
+    | before | 98.4% | 16 | 6 / 8 | 8 / 8 | 1 / 8 | 7 / 1 |
+    | **after** | **99.1%** | 8 | **0 / 8** | 8 / 8 | **0 / 8** | 8 / 2 |
+    | after, plus the rule sentence | 99.2% | 8 | 0 / 8 | 8 / 8 | 0 / 8 | 11 / 0 |
+
+  - Missed escalations 0.4 → 0.2%; no new misroute on any other route.
+  - b10 ("Сравни тарифы… и скажи, какой выгоднее": compare… and tell me which is cheaper) still goes to the expert
+    8 / 8. It has no "later", and an expert answer is a fair reading of it. No example was shaped to match it.
+  - Cost: ~190 tokens on the tasks prompt's fixed start, which vLLM's prefix cache covers after the first request.
+
 #### Removed
 - **The silence fallback** (the user's call: "remove it completely"; in every live session of 2026-10-10 they had
   switched it off). A turn ended after 1.2 s of silence even when the endpoint head hadn't fired. Now only the head
