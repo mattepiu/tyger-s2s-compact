@@ -27,7 +27,8 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **A new page, on trial** (`web/`): one mic button and the characters as tabs. An orb in the middle (OrbKit's Ion)
   follows the conversation and the voices, in each character's own colours. The exchange shows as text: your words
   as you say them, the agent's backchannels in a bubble beside them, its reply with its sources. A history
-  holds the whole conversation. The classic page is still at `/`.
+  holds the whole conversation. A Tuning panel over the page has the meters and the sliders, to tune while you
+  talk. The classic page is still at `/`.
 - **Tests that need no GPU,** and a check of the web page in jsdom.
 - **A routing test** (`scripts/bench/escalation.py`): 119 synthetic cases, no API cost.
 - **Measurement scripts:** smoke and load tests on the running stack, GPU parity checks, stack comparisons.

@@ -153,7 +153,9 @@ suppression, auto gain) is on.
   thinking, speaking), and it reacts to your voice while you talk and to the agent's while it speaks. Each
   character has its own colours;
 - the exchange as text: your words as you say them, the agent's backchannels in a bubble beside them, its reply with
-  the sources it cited; and the whole conversation in a history.
+  the sources it cited; and the whole conversation in a history;
+- the live tuning in a panel over the page ("Tuning"): the meters with their thresholds and the sliders, as on the
+  classic page, so you can tune while you talk.
 
 It's the same WebSocket and the same audio code as the classic page. Run it beside the stack (node ≥ 22):
 
@@ -161,8 +163,7 @@ It's the same WebSocket and the same audio code as the classic page. Run it besi
 cd web && npm install && npm run dev   # http://localhost:3000; /ws and /voices pass through to EARS on :7860
 ```
 
-Forward port 3000 the same way as 7860. The classic page, with the meters and the sliders, is one click away from it
-("Classic view").
+Forward port 3000 the same way as 7860. The classic page is one click away from it ("Classic view").
 
 **The page's WebSocket** (`/ws`; for a client of your own; `app/ears/playback.py` has the details). All binary
 frames are little-endian, with int16 audio:

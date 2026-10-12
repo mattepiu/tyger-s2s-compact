@@ -77,7 +77,8 @@ tests/                     # GPU-free: ears/, mouth/, plugins/, the config / pro
                            #   page/ holds the pages' own checks (node): page_check.mjs (jsdom), web_check.mjs
 static/index.html          # the page: mic capture (AudioWorklet), playback, the tags, the debug sliders
 web/                       # the new page (a trial, Next.js): lib/conversation.ts = the page's audio + WebSocket code,
-                           #   lib/talk.ts = what it shows (the phases), components/orb.tsx = the orb; OrbKit's
+                           #   lib/talk.ts = what it shows (the phases), lib/tuning.ts = the live tuning (its
+                           #   panel: components/tuning.tsx), components/orb.tsx = the orb; OrbKit's
                            #   files as copied from the Agents Kit registry (orbkit-shdr-13, with their licence) in
                            #   components/voice-agents/orbkit/; `npm run dev` on :3000 passes /ws to EARS
 run.sh, stop.sh            # start and stop the stack
@@ -562,7 +563,8 @@ own web search.
 - **The page's own check** (node ≥ 18): `cd tests/page && npm install && node page_check.mjs`. It covers the mic
   worklet, the tags, the int16 frames, the played report, Stop → Start, the voice picker and a reply's links.
 - **The new page's own check** (node ≥ 22.18, nothing to install): `node tests/page/web_check.mjs`. It runs the same
-  cases on `web/lib/conversation.ts`, then the phases the page shows (`web/lib/talk.ts`) and a reply's links. After
+  cases on `web/lib/conversation.ts`, then the phases the page shows (`web/lib/talk.ts`), a reply's links and the
+  live tuning (`web/lib/tuning.ts`). After
   a change in `web/`, also run `cd web && npx tsc --noEmit && npm run build`.
 - **The whole stack on the fakes:** `CONFIG=config/fake.yaml ./run.sh`, no GPU and no downloads.
 - **GPU checks, with the stack stopped:**

@@ -2,15 +2,18 @@
 // tyger's page: talk, and see what it's doing. The conversation (lib/conversation.ts) is the classic page's
 // (static/index.html), its protocol unchanged; this page shows it differently: an orb in the middle whose state follows
 // the conversation (lib/talk.ts has the phases), the phase as a word, the exchange as text (the user's words, the
-// agent's backchannels and reply, the sources it cited) and all of it in the history, the characters, one mic button.
-// The classic page, with the turn-taking meters and the live tuning, is one link away.
+// agent's backchannels and reply, the sources it cited) and all of it in the history, the characters, one mic button,
+// and the live tuning (the turn-taking meters and thresholds, lib/tuning.ts) in a panel over it on demand. The classic
+// page is one link away.
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
 import { AnimatedText } from "@/components/animated-text"
 import { Characters, MicButton, type Character } from "@/components/controls"
 import { Orb } from "@/components/orb"
 import { Exchange, History } from "@/components/transcript"
+import { TuningPanel } from "@/components/tuning"
 import { Conversation } from "@/lib/conversation"
-import { initial, phaseOf, reduce, type Phase } from "@/lib/talk"
+import { initial, phaseOf, reduce, type Action, type Phase } from "@/lib/talk"
+import { noTuning, tune } from "@/lib/tuning"
 
 const LABELS: Record<Phase, string> = {
   off: "",                     // "Talk to <name>"
@@ -36,10 +39,13 @@ function useTicks(on: boolean) {              // re-render 10 times a second whi
 }
 
 export default function Page() {
-  const [talk, dispatch] = useReducer(reduce, initial)
+  const [talk, toTalk] = useReducer(reduce, initial)
+  const [tuning, toTuning] = useReducer(tune, noTuning)
+  const dispatch = useCallback((a: Action) => { toTalk(a); toTuning(a) }, [])   // every event to both
   const [voices, setVoices] = useState<Voices>({ list: [], labels: {} })
   const [voice, setVoice] = useState("")
   const [history, setHistory] = useState(false)
+  const [tuningOpen, setTuningOpen] = useState(false)
   const conv = useRef<Conversation | null>(null)
   useTicks(talk.conn === "on")
 
@@ -71,13 +77,17 @@ export default function Page() {
       },
     })
     return () => c.stop()
-  }, [populate])
+  }, [populate, dispatch])
 
   const meter = useCallback(() => conv.current ? conv.current.meter() : { mic: 0, out: 0 }, [])
   const pick = (v: string) => {
     setVoice(v)
     try { localStorage.setItem("tyger_voice", v) } catch {}
     conv.current?.send("voice:" + v)
+  }
+  const setThreshold = (name: string, value: number) => {   // shown at once; EARS echoes it back
+    toTuning({ kind: "set", name, value })
+    conv.current?.send(`set:${name}:${value}`)
   }
   const toggle = () => {
     if (talk.conn === "off") { dispatch({ kind: "connecting" }); conv.current?.start() }
@@ -98,6 +108,10 @@ export default function Page() {
         <header className="absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-2 px-4 pt-[max(1rem,env(safe-area-inset-top))] sm:px-6">
           <span className="text-sm font-semibold tracking-wide text-white/80">tyger</span>
           <nav className="flex items-center gap-1 text-sm">
+            <button onClick={() => setTuningOpen((o) => !o)} aria-pressed={tuningOpen}
+                    className={`rounded-full px-3 py-1.5 hover:bg-white/10 hover:text-white ${tuningOpen ? "bg-white/10 text-white" : "text-white/70"}`}>
+              Tuning
+            </button>
             <button onClick={() => setHistory(true)} className="rounded-full px-3 py-1.5 text-white/70 hover:bg-white/10 hover:text-white">
               History{talk.log.length ? ` · ${talk.log.length}` : ""}
             </button>
@@ -125,6 +139,7 @@ export default function Page() {
           <p className="min-h-5 max-w-md text-center text-sm text-white/65" role="status">{talk.note}</p>
         </footer>
       </main>
+      <TuningPanel open={tuningOpen} tuning={tuning} onSet={setThreshold} onClose={() => setTuningOpen(false)} />
       <History open={history} log={talk.log} name={name} onClose={() => setHistory(false)} />
     </>
   )

@@ -34,6 +34,7 @@ Object.defineProperty(G, "navigator", { configurable: true, value: { mediaDevice
 
 const { Conversation, MIC_WORKLET } = await import("../../web/lib/conversation.ts");
 const T = await import("../../web/lib/talk.ts");
+const U = await import("../../web/lib/tuning.ts");
 
 // ---- the worklet, in a fake AudioWorkletGlobalScope -------------------------------------------------------------
 function runWorklet(sr, startFrame, seconds, hz) {
@@ -287,6 +288,42 @@ ev({ type: "partial", text: "" });                                              
 ok(s.words === "", "words taken back");
 s = T.reduce(s, { kind: "closed", why: "" });
 ok(s.words === "", "Stop clears the words so far");
+
+// ---- live tuning (tuning.ts): the plugin's sliders and this conversation's values, the meters ----------------------
+// the sliders as nemotron-tyger's THRESHOLDS declare them (app/plugins/ears/nemotron_tyger/plugin.py), and the fake
+// plugin's frames -> seconds one, with an "off" value
+const SLIDERS = [
+  { name: "ep_thr", type: "float", label: "endpoint p_end τ", lo: 0.3, hi: 0.99, step: 0.005, decimals: 3, scale: 1, unit: "", meter: "p_end", off: null },
+  { name: "ep_deb", type: "int", label: "endpoint deb", lo: 1, hi: 5, step: 1, decimals: 0, scale: 1, unit: "", meter: null, off: null },
+  { name: "barge_thr", type: "float", label: "barge (yield)", lo: 0.2, hi: 1, step: 0.01, decimals: 2, scale: 1, unit: "", meter: "yield", off: null },
+  { name: "silence", type: "int", label: "endpoint silence", lo: 0.16, hi: 2, step: 0.08, decimals: 2, scale: 0.08, unit: "s", meter: null, off: 25 },
+];
+let u = U.noTuning;
+const act = (a) => { u = U.tune(u, a); }, msg = (m) => act({ kind: "message", m, now });
+act({ kind: "connecting" }); act({ kind: "opened" });
+ok(u.sliders.length === 0, "no sliders before the conversation says which");
+msg({ type: "ready", mouth: true, sliders: SLIDERS, thresholds: { ep_thr: 0.9146, ep_deb: 2, barge_thr: 0.4, silence: 6 } });
+ok(u.sliders.length === 4 && u.values.ep_thr === 0.9146, "the sliders and this conversation's values");
+msg({ type: "threshold", attr: "barge_thr", value: 0.55 });
+ok(u.values.barge_thr === 0.55, "a change, echoed");
+msg({ type: "state", state: "LISTEN", p_end: 0.42, yield: 0.1, bc: 0.05, hazard: 0 });
+ok(u.meters.p_end === 0.42 && u.meters.yield === 0.1 && u.meters.bc === 0.05, "the meters, every hop");
+ok(U.markOf(u, "p_end") === 0.9146 && U.markOf(u, "yield") === 0.55 && U.markOf(u, "bc") === null,
+   "a meter's mark: its slider's value (none without one)");
+const [ep, deb, , sil] = SLIDERS;
+ok(U.shown(ep, 0.9146) === "0.915" && U.shown(deb, 2) === "2" && U.shown(sil, 6) === "0.48s", `shown: ${U.shown(sil, 6)}`);
+ok(U.shown(sil, 25) === "off" && U.shown(sil, 30) === "off" && U.isOff(sil, 25) && !U.isOff(ep, 0.99), "off at and past its value");
+ok(U.valueOf(ep, 0.915) === 0.915 && U.valueOf(deb, 3) === 3 && U.valueOf(sil, 0.56) === 7, `slider -> value: ${U.valueOf(sil, 0.56)}`);
+ok(U.positionOf(sil, 6) === 0.48 && U.positionOf(ep, 0.9146) === 0.9146, "value -> slider");
+for (const v of [0.56, 0.57, 0.58]) act({ kind: "set", name: "barge_thr", value: v });   // a drag
+ok(u.values.barge_thr === 0.58, "a drag shows at once");
+msg({ type: "threshold", attr: "barge_thr", value: 0.56 });
+ok(u.values.barge_thr === 0.58, "an older echo doesn't pull the slider back");
+msg({ type: "threshold", attr: "barge_thr", value: 0.57 }); msg({ type: "threshold", attr: "barge_thr", value: 0.58 });
+msg({ type: "threshold", attr: "barge_thr", value: 0.6 });
+ok(u.values.barge_thr === 0.6, `once the last one is back, EARS's word goes again: ${u.values.barge_thr}`);
+act({ kind: "closed", why: "" });
+ok(u.sliders.length === 0 && u.meters.p_end === 0, "Stop: nothing to tune (the values were this conversation's)");
 
 console.log(`${checks - fails}/${checks} checks passed`);
 process.exit(fails ? 1 : 0);
