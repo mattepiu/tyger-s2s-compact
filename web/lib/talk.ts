@@ -26,14 +26,12 @@ export type Talk = {
   from: number            // the exchange on screen is log[from..]: from the user's words to the next turn
   words: string           // the user's words so far in their turn (EARS's partial; the whole of them come with the endpoint)
   acks: string[]          // backchannels in the user's turn so far
-  ack: Ack | null         // the latest of them, shown for a moment beside the user's words
   task: number | null     // the background task whose result is said next
 }
-export type Ack = { text: string; at: number }
 
 export const initial: Talk = {
   conn: "off", note: "", turn: false, turnAt: -Infinity, speakAt: -Infinity, bargeAt: -Infinity, playing: false,
-  quietSince: -Infinity, spoke: false, log: [], open: false, from: 0, words: "", acks: [], ack: null, task: null,
+  quietSince: -Infinity, spoke: false, log: [], open: false, from: 0, words: "", acks: [], task: null,
 }
 
 // The user's turn has shown on screen already (its words so far, or a backchannel to them)
@@ -65,7 +63,7 @@ function onMessage(s: Talk, m: Message, now: number): Talk {
       const text = (m.transcript || "").trim()
       const log: Said[] = text ? [...s.log, { who: "user", text, acks: s.acks }] : s.log
       return { ...s, turn: true, turnAt: now, spoke: false, open: false, log, from: text ? log.length - 1 : log.length,
-               words: "", acks: [], ack: null }
+               words: "", acks: [] }
     }
     case "partial":                // the user's words so far: their turn takes the screen
       return { ...s, words: m.text || "", from: userTurnShown(s) ? s.from : s.log.length }
@@ -84,12 +82,11 @@ function onMessage(s: Talk, m: Message, now: number): Talk {
       return { ...s, log: [...s.log.slice(0, -1), { ...last, links }] }
     }
     case "backchannel":            // the agent acks while the user speaks: the user's new turn takes the screen
-      return { ...s, acks: [...s.acks, m.text], ack: { text: m.text, at: now },
-               from: userTurnShown(s) ? s.from : s.log.length }
+      return { ...s, acks: [...s.acks, m.text], from: userTurnShown(s) ? s.from : s.log.length }
     case "backchannel_done": {     // dropped unvoiced (the user's turn ended first): take it back, wherever it went
       if (!m.aborted) return s
       const drop = (acks: string[]) => { const i = acks.lastIndexOf(m.text); return i < 0 ? acks : acks.filter((_, k) => k !== i) }
-      if (s.acks.includes(m.text)) return { ...s, acks: drop(s.acks), ack: s.ack?.text === m.text ? null : s.ack }
+      if (s.acks.includes(m.text)) return { ...s, acks: drop(s.acks) }
       const i = s.log.map((x) => x.who).lastIndexOf("user"), u = s.log[i]
       return u && u.who === "user" && u.acks.includes(m.text)
         ? { ...s, log: s.log.map((x, k) => (k === i ? { ...u, acks: drop(u.acks) } : x)) } : s
@@ -114,11 +111,6 @@ export const ENDPOINT_GRACE_MS = 1000  // EARS says SPEAK a hop or two after a t
 export const SPEAK_STALE_MS = 600      // no SPEAK this long in a turn: EARS isn't giving the agent the floor
 export const LOOKUP_AFTER_MS = 700     // the agent's turn, its voice quiet this long after it spoke: a tool, the expert
 export const BARGE_FLASH_MS = 900
-export const ACK_SHOW_MS = 2000        // a backchannel shows this long beside the user's words
-
-export function ackShown(s: Talk, now: number): Ack | null {
-  return s.ack && now - s.ack.at < ACK_SHOW_MS ? s.ack : null
-}
 
 export function phaseOf(s: Talk, now: number): Phase {
   if (s.conn !== "on") return s.conn

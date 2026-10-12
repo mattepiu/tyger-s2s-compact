@@ -288,22 +288,5 @@ ok(s.words === "", "words taken back");
 s = T.reduce(s, { kind: "closed", why: "" });
 ok(s.words === "", "Stop clears the words so far");
 
-// ---- a backchannel shows for a moment beside the user's words, like a notification ---------------------------------
-s = T.reduce(s, { kind: "connecting" }); s = T.reduce(s, { kind: "opened" });
-s = T.reduce(s, { kind: "message", m: { type: "partial", text: "So I went" }, now: 1000 });
-ok(T.ackShown(s, 1000) === null, "no backchannel yet");
-s = T.reduce(s, { kind: "message", m: { type: "backchannel", text: "Mm-hm." }, now: 2000 });
-ok(T.ackShown(s, 2100)?.text === "Mm-hm.", "a backchannel shows");
-ok(T.ackShown(s, 2000 + T.ACK_SHOW_MS + 1) === null, `gone after ${T.ACK_SHOW_MS} ms`);
-s = T.reduce(s, { kind: "message", m: { type: "backchannel_done", text: "Mm-hm.", aborted: false }, now: 2300 });
-s = T.reduce(s, { kind: "message", m: { type: "backchannel", text: "Right." }, now: 3000 });
-ok(T.ackShown(s, 3100)?.text === "Right." && T.ackShown(s, 3100).at === 3000, "the next one replaces it");
-s = T.reduce(s, { kind: "message", m: { type: "backchannel_done", text: "Right.", aborted: true }, now: 3200 });
-ok(T.ackShown(s, 3300) === null, "dropped unvoiced: taken back at once");
-s = T.reduce(s, { kind: "message", m: { type: "backchannel", text: "Okay." }, now: 4000 });
-s = T.reduce(s, { kind: "message", m: { type: "endpoint", turn_s: 3, transcript: "So I went home." }, now: 4500 });
-ok(T.ackShown(s, 4600) === null, "the user's turn is over: gone");
-ok(s.log.at(-1).acks.join() === "Mm-hm.,Okay.", `the history still has the turn's backchannels: ${s.log.at(-1).acks}`);
-
 console.log(`${checks - fails}/${checks} checks passed`);
 process.exit(fails ? 1 : 0);

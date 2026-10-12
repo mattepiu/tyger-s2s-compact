@@ -152,8 +152,8 @@ suppression, auto gain) is on.
   [Agents Kit](https://agents-ui.github.io/agents-kit/voice) registry). Its state follows the conversation (idle,
   thinking, speaking), and it reacts to your voice while you talk and to the agent's while it speaks. Each
   character has its own colours;
-- the exchange as text: your words as you say them, each of the agent's backchannels beside them for 2 s, its reply
-  with the sources it cited; and the whole conversation in a history.
+- the exchange as text: your words as you say them, the agent's backchannels in a bubble beside them, its reply with
+  the sources it cited; and the whole conversation in a history.
 
 It's the same WebSocket and the same audio code as the classic page. Run it beside the stack (node ≥ 22):
 

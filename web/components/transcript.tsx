@@ -3,7 +3,7 @@
 // reply with the sources it cited, never spoken), and the whole of it in the history drawer.
 import { useEffect, useRef } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import type { Ack, Link, Said } from "@/lib/talk"
+import type { Link, Said } from "@/lib/talk"
 
 function Sources({ links }: { links: Link[] }) {
   if (!links.length) return null
@@ -17,12 +17,6 @@ function Sources({ links }: { links: Link[] }) {
       ))}
     </div>
   )
-}
-
-// The agent's backchannels while the user spoke ("Ori: Mm-hm."), under the user's words in the history.
-function Acks({ acks, name }: { acks: string[]; name: string }) {
-  if (!acks.length) return null
-  return <div className="mt-1 px-1 text-right text-xs text-white/55"><span className="font-medium">{name}:</span> {acks.join(" ")}</div>
 }
 
 const TAIL = 100      // characters of a turn shown while it's spoken: its newest words, within the bubble's 3 lines
@@ -44,18 +38,29 @@ function UserLine({ text, small, live }: { text: string; small?: boolean; live?:
   )
 }
 
-// A backchannel while the user speaks: for a moment, on the left of their words, in the agent's card
-function AckNote({ ack }: { ack: Ack | null }) {
+// The agent's backchannels while the user spoke ("Mm-hm. Right."), in a bubble of the agent's on the left
+function AckBubble({ acks, small }: { acks: string[]; small?: boolean }) {
   return (
     <AnimatePresence>
-      {ack && (
-        <motion.div key={ack.at} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}
-                    transition={{ duration: 0.25 }} role="status"
-                    className="shrink-0 rounded-2xl rounded-bl-md border border-white/10 bg-black/35 px-4 py-2.5 text-base text-white/90 backdrop-blur-xl md:text-lg">
-          {ack.text}
+      {acks.length > 0 && (
+        <motion.div key="acks" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}
+                    transition={{ duration: 0.25 }}
+                    className={`max-w-[40%] shrink-0 rounded-2xl rounded-bl-md border border-white/10 bg-black/35 text-white/90 backdrop-blur-xl ${
+                      small ? "px-3 py-2 text-sm" : "px-4 py-2.5 text-base md:text-lg"}`}>
+          {acks.join(" ")}
         </motion.div>
       )}
     </AnimatePresence>
+  )
+}
+
+// The user's turn, as one row: the agent's backchannels on the left, the user's words on the right
+function UserTurn({ text, acks, small, live }: { text: string; acks: string[]; small?: boolean; live?: boolean }) {
+  return (
+    <div className="flex items-end gap-3">
+      <AckBubble acks={acks} small={small} />
+      <UserLine text={text} small={small} live={live} />
+    </div>
   )
 }
 
@@ -74,10 +79,10 @@ function AgentLine({ said, live, small }: { said: Extract<Said, { who: "agent" }
 }
 
 // The exchange on screen: `items` (the log from the user's words on), then, while the user is still speaking, their
-// turn so far: their words so far ("…" before any), with a backchannel beside them for a moment. Keys are log
-// positions, so the live turn becomes its words in place.
-export function Exchange({ items, from, words, acks, ack, open }: {
-  items: Said[]; from: number; words: string; acks: string[]; ack: Ack | null; open: boolean
+// turn so far: their words so far ("…" before any) and the backchannels it got. Keys are log positions, so the live
+// turn becomes its words in place.
+export function Exchange({ items, from, words, acks, open }: {
+  items: Said[]; from: number; words: string; acks: string[]; open: boolean
 }) {
   const live = words !== "" || acks.length > 0
   return (
@@ -86,17 +91,14 @@ export function Exchange({ items, from, words, acks, ack, open }: {
         {items.map((it, i) => (
           <motion.div key={from + i} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
                       transition={{ duration: 0.3 }}>
-            {it.who === "user" ? <UserLine text={it.text} />
+            {it.who === "user" ? <UserTurn text={it.text} acks={it.acks} />
                                : <AgentLine said={it} live={open && i === items.length - 1} />}
           </motion.div>
         ))}
         {live && (
           <motion.div key={from + items.length} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
-            <div className="flex items-end gap-3">
-              <AckNote ack={ack} />
-              <UserLine text={words} live />
-            </div>
+            <UserTurn text={words} acks={acks} live />
           </motion.div>
         )}
       </AnimatePresence>
@@ -124,8 +126,7 @@ export function History({ open, log, name, onClose }: { open: boolean; log: Said
                 <div className={`mb-1 px-1 text-[11px] uppercase tracking-wider text-white/40 ${it.who === "user" ? "text-right" : ""}`}>
                   {it.who === "user" ? "You" : name}
                 </div>
-                {it.who === "user" ? <><UserLine text={it.text} small /><Acks acks={it.acks} name={name} /></>
-                                   : <AgentLine said={it} small />}
+                {it.who === "user" ? <UserTurn text={it.text} acks={it.acks} small /> : <AgentLine said={it} small />}
               </div>
             ))}
           </div>

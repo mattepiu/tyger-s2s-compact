@@ -10,7 +10,7 @@ import { Characters, MicButton, type Character } from "@/components/controls"
 import { Orb } from "@/components/orb"
 import { Exchange, History } from "@/components/transcript"
 import { Conversation } from "@/lib/conversation"
-import { ackShown, initial, phaseOf, reduce, type Phase } from "@/lib/talk"
+import { initial, phaseOf, reduce, type Phase } from "@/lib/talk"
 
 const LABELS: Record<Phase, string> = {
   off: "",                     // "Talk to <name>"
@@ -84,8 +84,7 @@ export default function Page() {
     else if (talk.conn === "on") conv.current?.stop()
   }
 
-  const now = performance.now()
-  const phase = phaseOf(talk, now)
+  const phase = phaseOf(talk, performance.now())
   const characters: Character[] = voices.list.map((v) => ({ voice: v, name: nameOf(voices.labels[v], v) }))
   const me = characters.find((c) => c.voice === voice)
   const name = me ? me.name : "tyger"
@@ -115,8 +114,7 @@ export default function Page() {
           {phase === "off" && <p className="text-white/60">Tap the mic to start</p>}
           {exchange && (
             <div className="pointer-events-auto flex w-full justify-center">
-              <Exchange items={shown} from={talk.from} words={talk.words} acks={talk.acks} ack={ackShown(talk, now)}
-                        open={talk.open} />
+              <Exchange items={shown} from={talk.from} words={talk.words} acks={talk.acks} open={talk.open} />
             </div>
           )}
         </section>
