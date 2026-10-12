@@ -617,6 +617,13 @@ only within one box and config.
 | 2026-10-11 | no silence fallback, no `smart`, RTX PRO 5000 | 212 ms | 527–571 ms (3 runs) | 832 / 1093 ms | 29.9 GB |
 | 2026-10-11 | `1b8e6ff`, no `smart`, a new RTX 5090 (the cleanup round's baseline) | 233 ms | 449–518 ms (3 runs) | 964 / 1105 ms | 30.2 GB |
 | 2026-10-11 | after the cleanup (English only), no `smart`, same box | 204 ms | 473–517 ms (3 runs) | 935–959 / 1057–1096 ms (2 / 3 runs) | 30.1 GB |
+| 2026-10-12 | `9caeca9`, no `smart`, voice `ori`, a fresh container on an RTX 5090 (this round's baseline) | 202 ms | 458–520 ms (3 runs) | 835–846 / 870–975 ms | 30.3 GB |
+| 2026-10-12 | `e7b7eea`, Ori's character, same box | 215 ms | 459–514 ms (3 runs) | 836–892 / 920–974 ms (the reply varies: 2–10 texts a run) | 30.2 GB |
+
+The voice changes the end-of-speech numbers: `load_ears.py` speaks its utterance in the default voice, and with the
+`ori` clip the endpoint comes ~100 ms sooner than on the last box. Since the characters, `load_ears.py`'s "count to
+ten" reply is no longer the same text every turn (2–10 distinct texts in a run, was 1), so its end-of-speech → audio
+varies more.
 
 "End of speech → first audio" is what the user hears as the response gap. About 600–850 ms of it is endpoint
 detection, which live tuning of the endpoint thresholds is meant to cut (O-01).
