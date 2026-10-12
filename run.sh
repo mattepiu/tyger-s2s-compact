@@ -17,6 +17,10 @@ export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
 # secrets + overrides from .env (HF_TOKEN, OPENAI_API_KEY); never printed
 [ -f .env ] && { set -a; . ./.env; set +a; }
 [ -z "${HF_TOKEN:-}" ] && [ -f "$HF_HOME/token" ] && export HF_TOKEN="$(cat "$HF_HOME/token")"
+# a first start JIT-compiles GPU kernels, one compiler per CPU thread at 3-6 GB each, which ran a 64 GB box out of RAM;
+# with these the peak was 32 GiB (DEVELOPING.md -> "On the GPU box"). Anything already set wins.
+export MAX_JOBS="${MAX_JOBS:-4}" FLASHINFER_NVCC_THREADS="${FLASHINFER_NVCC_THREADS:-1}" \
+       TORCHINDUCTOR_COMPILE_THREADS="${TORCHINDUCTOR_COMPILE_THREADS:-4}"
 
 VENV="${VENV:-.venv}"
 PY="$VENV/bin/python"

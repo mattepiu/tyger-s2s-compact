@@ -583,8 +583,10 @@ The full measurements behind these tables are in git history: CHANGELOG.md and N
   memory 13 801 MHz. Note whether ECC is on: it costs memory and bandwidth.
 - **RAM.** The first load of a model or quantization JIT-compiles FlashInfer kernels, one compiler (`cicc`) per CPU
   thread at 3–6 GB each. That twice ran a 64.6 GB container out of memory and restarted it, Claude included.
-  - Before any first load: `export MAX_JOBS=4 FLASHINFER_NVCC_THREADS=1 TORCHINDUCTOR_COMPILE_THREADS=4`. The peak
-    was then 32 GiB. The builds are cached in `~/.cache/flashinfer`.
+  - `run.sh` sets `MAX_JOBS=4 FLASHINFER_NVCC_THREADS=1 TORCHINDUCTOR_COMPILE_THREADS=4`, unless they're already
+    set. The peak was then 32 GiB. The builds are cached in `~/.cache/flashinfer`.
+  - Scripts that load a model outside `run.sh` don't get them: export them by hand before a first load in the
+    validators, the local contract test, `escalation.py` or `llm_weights.py`.
   - Run long GPU jobs under a RAM watchdog that kills them before the container dies (`ramguard.sh`, in the agent's
     memory).
 - **Start detached** (`setsid ./run.sh > log 2>&1 &`) and wait for `EARS ready` in the log. A warm start takes

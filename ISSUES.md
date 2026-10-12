@@ -4,7 +4,8 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
 - When an issue is fixed, it leaves this file. Its fix gets a short line in `CHANGELOG.md`, and its commit message
   has the detail and the numbers.
 - The write-ups of fixed issues (I-01 to I-17, L-03, L-04, O-04) are in git history: this file at `4d4c2e3`. I-19,
-  I-22 and I-23 left when the agent became English only: this file at `1b8e6ff`.
+  I-22 and I-23 left when the agent became English only: this file at `1b8e6ff`. O-06 (run.sh now limits the
+  kernel compilers): this file at `9caeca9`.
 - Each issue says how sure it is: **confirmed** (in code or on the box), **likely**, or **hypothesis** (measure
   before fixing).
 
@@ -24,7 +25,6 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
 | O-02 | ops | — | blocked | The Dockerfile was never built |
 | O-03 | ops | — | needs the user | `main` is over 130 commits behind `plugins` |
 | O-05 | ops | — | partly done | No CI |
-| O-06 | ops | — | needs the user | A first model load can run the box out of RAM |
 | P | packaging | — | planned (parked) | The pip package `tyger-s2s` |
 
 ---
@@ -172,13 +172,6 @@ user says so. The user pushes.
 The GPU-free tests and the page check cover MOUTH's session, tasks, the EARS state machine, the 2nd ear and the
 plugins, and run in about a minute. Nothing runs them automatically. A CI workflow (no GPU) could run both on every
 push.
-
-### O-06 — A first model load can run the box out of RAM (needs the user)
-The first load of a model or quantization JIT-compiles FlashInfer kernels, one compiler per CPU thread at 3–6 GB
-each. On 2026-10-11 that twice ran the 64.6 GB container out of memory and restarted it. With `MAX_JOBS=4
-FLASHINFER_NVCC_THREADS=1 TORCHINDUCTOR_COMPILE_THREADS=4` the peak was 32 GiB.
-
-**Fix:** `run.sh` exports those three unless they're already set. **Needs the user:** do it? (Recommended: yes.)
 
 ---
 

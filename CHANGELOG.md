@@ -57,6 +57,7 @@ Everything since the imported v1 baseline. It becomes the first release.
 - The agent's own voice, echoed into the mic, no longer counts as you interrupting.
 - A backchannel that was still being made when the reply started is cancelled.
 - When MOUTH goes away, the page says so instead of going silent.
+- A first start no longer risks running the machine out of memory while it compiles GPU kernels.
 
 ### Removed
 - **The silence fallback:** only the turn-taking model ends a turn.
