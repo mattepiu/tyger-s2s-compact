@@ -131,6 +131,14 @@ def test_keeps_dollar_and_percent():
     assert say_clean("**Bold** #tag 🎉 done") == "Bold tag done"
 
 
+def test_typographic_apostrophes_stay_apostrophes():
+    """The bug: OpenAI's models write ’ (U+2019), which the sanitizer turned into a space, so the TTS got "I d"."""
+    assert say_clean("I’d recommend it, it’s great.") == "I'd recommend it, it's great."
+    assert say_clean("Rock ’n’ roll, the ‘90s, O’Brien.") == "Rock 'n' roll, the '90s, O'Brien."
+    assert say_clean("I`d go, you´re right, itʼs fine.") == "I'd go, you're right, it's fine."
+    assert say_clean("Run `ls` here.") == "Run ls here."                         # a backtick that isn't one: gone
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in list(globals().items()):

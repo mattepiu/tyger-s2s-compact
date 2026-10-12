@@ -7,6 +7,9 @@ import re
 # Sanitizer: keep letters + digits + basic speakable punctuation, strip markdown/symbols/emoji. \w is Unicode-aware
 # in Python 3, so accented letters in names ("José", "Zürich") survive; an [A-Za-z] whitelist would drop them.
 _KEEP = re.compile(r"[^\w\s.,!?;:'\"()\-$%]", re.UNICODE)   # $ and % carry meaning ("0.50$", "50%")
+# Apostrophes as other writers type them (OpenAI's models write ’) become ', or _KEEP would make them spaces ("I d"):
+# ’ ‘ ʼ always, a backtick or an acute accent only inside a word ("I`d").
+_APOS = re.compile(r"[’‘ʼ]|(?<=\w)[`´](?=\w)")
 # Clause dashes -> comma (a pause cue). "Las-Palmas" (unspaced hyphen) and ranges like "5 - 10" / "5–10"
 # (digit on both sides) are left alone.
 _DASH = re.compile(r"\s*[—–]\s*|\s+-(?:\s+|$)")
@@ -16,7 +19,8 @@ def _dash_to_comma(m):
         return "-"                                  # range "5 – 10" -> "5-10" (en dash isn't kept below)
     return ", "
 def say_clean(text: str) -> str:
-    s = _DASH.sub(_dash_to_comma, text)
+    s = _APOS.sub("'", text)
+    s = _DASH.sub(_dash_to_comma, s)
     s = _KEEP.sub(" ", s)
     s = s.replace("_", " ")
     s = re.sub(r"\s+", " ", s)

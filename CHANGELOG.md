@@ -67,6 +67,7 @@ Everything since the imported v1 baseline. It becomes the first release.
 - A backchannel that was still being made when the reply started is cancelled.
 - When MOUTH goes away, the page says so instead of going silent.
 - A first start no longer risks running the machine out of memory while it compiles GPU kernels.
+- The expert's typographic apostrophes ("I’d") reach the voice as apostrophes, not spaces ("I d").
 
 ### Removed
 - **The silence fallback:** only the turn-taking model ends a turn.
