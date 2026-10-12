@@ -267,5 +267,26 @@ s = T.reduce(s, { kind: "closed", why: "" });
 ok(s.conn === "off" && s.log.length === 5 && screen().length === 0, "Stop keeps the history, clears the screen");
 ok(s.log.map(x => x.who).join() === "user,agent,user,agent,agent", `the history, in order: ${s.log.map(x => x.who)}`);
 
+// ---- the user's words as they come (EARS's `partial`), then whole with the endpoint --------------------------------
+s = T.reduce(s, { kind: "connecting" }); s = T.reduce(s, { kind: "opened" });
+ev({ type: "endpoint", turn_s: 1, transcript: "Hi." }); ev({ type: "reply", text: "Hello!" }); ev({ type: "turn_done" });
+ok(screen().length === 2, "an exchange on screen");
+ev({ type: "partial", text: "What's the" });
+ok(screen().length === 0 && s.words === "What's the", `the user's first words: their new turn takes the screen: ${screen()}`);
+ev({ type: "backchannel", text: "Mm-hm." });
+ok(s.from === s.log.length && s.acks.join() === "Mm-hm.", "a backchannel in the same turn keeps it on screen");
+ev({ type: "partial", text: "What's the weather like" });
+ok(s.words === "What's the weather like", `the words so far: ${s.words}`);
+ev({ type: "endpoint", turn_s: 2, transcript: "What's the weather like?" });
+ok(screen().join() === "user:What's the weather like?[Mm-hm.]" && s.words === "",
+   `the endpoint's transcript replaces the words so far: ${screen()} / ${s.words}`);
+ev({ type: "reply", text: "Sunny." }); ev({ type: "barge", yield: 0.9 });
+ev({ type: "partial", text: "Wait" });                                                   // talking over the reply
+ok(screen().length === 0 && s.words === "Wait", `a cut-in's words take the screen: ${screen()}`);
+ev({ type: "partial", text: "" });                                                       // heard nothing after all
+ok(s.words === "", "words taken back");
+s = T.reduce(s, { kind: "closed", why: "" });
+ok(s.words === "", "Stop clears the words so far");
+
 console.log(`${checks - fails}/${checks} checks passed`);
 process.exit(fails ? 1 : 0);

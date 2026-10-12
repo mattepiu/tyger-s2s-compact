@@ -90,7 +90,7 @@ export default function Page() {
   const name = me ? me.name : "tyger"
   const label = phase === "off" ? `Talk to ${name}` : phase === "speaking" ? name : LABELS[phase]
   const shown = talk.conn === "on" ? talk.log.slice(talk.from) : []
-  const exchange = shown.length > 0 || (talk.conn === "on" && talk.acks.length > 0)
+  const exchange = shown.length > 0 || (talk.conn === "on" && (talk.words !== "" || talk.acks.length > 0))
 
   return (
     <>
@@ -114,7 +114,7 @@ export default function Page() {
           {phase === "off" && <p className="text-white/60">Tap the mic to start</p>}
           {exchange && (
             <div className="pointer-events-auto flex w-full justify-center">
-              <Exchange items={shown} from={talk.from} acks={talk.acks} open={talk.open} name={name} />
+              <Exchange items={shown} from={talk.from} words={talk.words} acks={talk.acks} open={talk.open} name={name} />
             </div>
           )}
         </section>

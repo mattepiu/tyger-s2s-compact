@@ -5,7 +5,7 @@ it (the engine its KV ring slot, the reference its cache).
 
   * listening: ENDPOINT when p_end >= ep_thr for ep_deb frames once the user has spoken MIN_SPEECH_MS (only the head
     ends a turn: there is no silence rule); BACKCHANNEL when the bc head fires for bc_deb frames (then
-    bc_refractory frames of quiet);
+    bc_refractory frames of quiet); PARTIAL, once a hop, when the user's words so far (from the ASR thread) changed;
   * speaking: BARGE when the yield head fires for barge_deb frames, with `onset_s`: how long the user had been
     talking by then (their current stretch of speech, by frame energy), since the head takes a second or more to be
     sure, and EARS tells MOUTH what had played when they started;
@@ -79,6 +79,16 @@ def switch_mode(sess, mode) -> bool:
     return True
 
 
+def words_event(sess, mode):
+    """The user's words so far in this turn, for the page: a PARTIAL event when they changed since the last one (only
+    while listening), else None."""
+    words = sess.words                  # set on the ASR thread
+    if mode != "listen" or words == sess.words_sent:
+        return None
+    sess.words_sent = words
+    return dict(kind="PARTIAL", text=words)
+
+
 def track_talk(sess, voiced):
     """Speaking mode, every frame: how long the user has been talking. A stretch of speech starts at a voiced frame
     and lasts through pauses of up to ONSET_GAP_FRAMES."""
@@ -141,6 +151,7 @@ def on_frame(sess, mode, outputs, act_db, left=0):
         sess.prev_state = LISTEN; sess.warm = 0
         sess.bc_run = 0; sess.bc_cooldown = 0; sess.ep_run = 0
         sess.partial_asr = ""; sess.partial_at_s = 0.0; sess.turn_gen += 1
+        sess.words = sess.words_sent = ""
         events.append(dict(kind="FRAME", state="idle", yield_prob=round(yp, 3), hazard=round(haz, 3),
                            bc_prob=round(bcp, 3), p_end=round(pep, 3)))
         return events, final, True

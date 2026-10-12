@@ -15,6 +15,7 @@ logging.disable(logging.CRITICAL)                  # the failure paths log trace
 class Sess:
     def __init__(self):
         self.turn_gen = 1; self.partial_asr = "old"; self.partial_inflight = True
+        self.segs = []; self.words = "old"
 
 
 def engine(transcribe):
@@ -28,8 +29,8 @@ def final(sess, got):
     return Job("final", sess, sess.turn_gen, np.zeros(16, np.float32), done=got.append)
 
 
-def partial(sess, gen=None):
-    return Job("partial", sess, sess.turn_gen if gen is None else gen, np.zeros(16, np.float32))
+def partial(sess, gen=None, segs=0):
+    return Job("partial", sess, sess.turn_gen if gen is None else gen, np.zeros(16, np.float32), segs=segs)
 
 
 def test_finals_and_partials_resolved():
@@ -67,7 +68,15 @@ def test_failed_finals_resolve_empty_once():
 def test_stale_partial_dropped():
     s = Sess()
     engine(lambda wavs: ["new"])._finish_partials([partial(s, gen=0)])   # from a turn that already ended
-    assert s.partial_asr == "old" and not s.partial_inflight
+    assert s.partial_asr == "old" and s.words == "old" and not s.partial_inflight
+
+
+def test_the_words_so_far_are_the_blocks_before_the_partial_then_the_partial():
+    """A long turn's blocks (I-05) are transcribed apart from its partial. The words for the page are the blocks cut
+    before the partial's audio, then the partial: not a block cut since, whose audio the partial already has."""
+    s = Sess(); s.segs = ["first block.", "second block."]
+    engine(lambda wavs: ["and then"])._finish_partials([partial(s, segs=1)])
+    assert s.partial_asr == "and then" and s.words == "first block. and then", s.words
 
 
 if __name__ == "__main__":

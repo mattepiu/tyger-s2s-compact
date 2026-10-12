@@ -152,7 +152,9 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Run & rea
   barge seeds the new turn with it.
 - **Long turns** are transcribed in blocks. Past 15 s, a block is cut at its quietest frame and transcribed on the
   ASR thread, and the endpoint transcribes only the tail.
-- **The ASR partial** for backchannels is re-decoded from the last 8 s at most every 0.8 s, off the critical path.
+- **The ASR partial** of the turn (its audio since the last block) is re-decoded at most every 0.8 s once the user
+  has made a sound, off the critical path. Backchannels react to it, and the page gets the user's words so far (the
+  blocks, then the partial) as `partial` when they change.
 - **Batching.** One GPU thread serves every conversation.
   - A tick gathers the conversations' hops, waiting up to `gather_ms`, or `expect_ms` when one is catching up.
   - It encodes their windows in one batch, then steps the heads in one batch. Each conversation has a slot in a KV

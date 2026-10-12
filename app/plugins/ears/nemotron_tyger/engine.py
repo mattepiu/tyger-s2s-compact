@@ -4,7 +4,8 @@ Per tick: each conversation's (user, agent) 8 s windows go through nemotron-3.5-
 equal-length windows batched), then the tyger heads step frame by frame for all of them at once (HeadBatch: a KV ring
 slot per conversation, CUDA graphs), and each frame's outputs become events by the turn rules (rules.py). Transcription
 runs on the ASR thread (Job queue): an ENDPOINT's hop resolves when its transcript is ready; long turns are
-transcribed in segments as they grow (I-05); the rolling partial for backchannels lands asynchronously.
+transcribed in segments as they grow (I-05); the rolling partial of the turn (for backchannels, and the user's words
+so far for the page) lands asynchronously.
 scripts/validate/ears_batched.py checks the engine against a plain single-session run of the same release
 (scripts/validate/reference.py: CPU features, the full encoder, eager heads, HF generate).
 Privacy: audio and transcripts stay in memory; logs carry counts and timings only.
@@ -25,11 +26,12 @@ log = logging.getLogger("ears")
 
 class Job:
     """A transcription for the ASR thread. kind: "final" (an endpoint's transcript), "segment" (a finished block of
-    a long turn), "partial" (the rolling partial for backchannels); gen: the session's turn it belongs to."""
-    __slots__ = ("kind", "sess", "gen", "wav", "done")
+    a long turn), "partial" (the rolling partial of the turn); gen: the session's turn it belongs to; segs (a
+    partial): how many of the turn's blocks were cut before its audio."""
+    __slots__ = ("kind", "sess", "gen", "wav", "done", "segs")
 
-    def __init__(self, kind, sess, gen, wav, done=None):
-        self.kind = kind; self.sess = sess; self.gen = gen; self.wav = wav; self.done = done
+    def __init__(self, kind, sess, gen, wav, done=None, segs=0):
+        self.kind = kind; self.sess = sess; self.gen = gen; self.wav = wav; self.done = done; self.segs = segs
 
 
 class EarsEngine:
@@ -83,14 +85,16 @@ class EarsEngine:
             j.done(t)
 
     def _finish_partials(self, jobs):
-        """Backchannel partials: best effort. A failure keeps the previous partial; either way the session may ask
-        for the next one. Partials from a turn that already ended are dropped."""
+        """Partials: best effort. A failure keeps the previous partial; either way the session may ask for the next
+        one. Partials from a turn that already ended are dropped. The user's words so far are the blocks cut before
+        the partial's audio (their jobs were queued first, so they're done), then the partial."""
         if not jobs:
             return
         texts = self._transcribe_or_none(jobs, "partials") or [None] * len(jobs)
         for j, t in zip(jobs, texts):
             if t is not None and j.sess.turn_gen == j.gen:
                 j.sess.partial_asr = t
+                j.sess.words = " ".join(x for x in [*j.sess.segs[:j.segs], t] if x)
             j.sess.partial_inflight = False
 
     # ---- one tick ----
@@ -105,7 +109,8 @@ class EarsEngine:
                 if len(sess.turn_u) > SEG_S * SR:
                     self._cut_segment(sess)
                 sess.turn_u = sess.turn_u[-int(TURN_MAX_S * SR):]
-            res[sess] = ([], [])
+            words = rules.words_event(sess, mode)              # the partial that landed since the last hop
+            res[sess] = ([words] if words else [], [])
         t0 = time.perf_counter()
         hs = self.asr.encode([w for sess, *_ in items for w in (sess.win_u, sess.win_a)])
         torch.cuda.current_stream().synchronize(); t1 = time.perf_counter()
@@ -149,11 +154,13 @@ class EarsEngine:
         self.asr_q.put(Job("segment", sess, sess.turn_gen, seg, done=done))
 
     def _maybe_partial(self, sess):
-        """Ask for a fresh partial (for backchannels) at most every partial_refresh_s, decoded on the ASR thread."""
+        """Ask for a fresh partial of the turn (its audio since the last block: for backchannels, and the user's words
+        so far for the page) at most every partial_refresh_s once the user has made a sound, decoded on the ASR
+        thread."""
         cur_s = sess.turn_len_s()
-        if sess.partial_inflight or cur_s - sess.partial_at_s < sess.partial_refresh_s:
+        if not sess.in_turn or sess.partial_inflight or cur_s - sess.partial_at_s < sess.partial_refresh_s:
             return
-        if sess.win_u.size < int(0.3 * SR):
+        if sess.turn_u.size < int(0.3 * SR):
             return
         sess.partial_at_s = cur_s; sess.partial_inflight = True
-        self.asr_q.put(Job("partial", sess, sess.turn_gen, sess.win_u.copy()))
+        self.asr_q.put(Job("partial", sess, sess.turn_gen, sess.turn_u.copy(), segs=len(sess.segs)))

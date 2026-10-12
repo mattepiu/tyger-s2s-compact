@@ -74,6 +74,23 @@ def test_backchannel_debounce_and_refractory():
     assert kinds == ["BACKCHANNEL"]
 
 
+def test_the_users_words_go_out_once_each_time_they_change():
+    """PARTIAL carries the turn's words so far: only when they changed, only while listening; the endpoint (its
+    transcript has them all) starts the next turn's words from nothing."""
+    s = session(ep_thr=0.9)
+    assert rules.words_event(s, "listen") is None                    # nothing said yet
+    s.words = "so I"
+    assert rules.words_event(s, "listen") == {"kind": "PARTIAL", "text": "so I"}
+    assert rules.words_event(s, "listen") is None                    # unchanged
+    s.words = "so I went"
+    assert rules.words_event(s, "speaking") is None                  # the agent has the floor
+    assert rules.words_event(s, "listen") == {"kind": "PARTIAL", "text": "so I went"}
+    frames(s, WARMUP_FRAMES + 2, p_end=0.95)                         # the endpoint
+    assert s.words == "" and rules.words_event(s, "listen") is None
+    s.words = "and"
+    assert rules.words_event(s, "listen") == {"kind": "PARTIAL", "text": "and"}
+
+
 def test_barge_seeds_the_next_turn_with_the_users_speech():
     s = session()
     speech = np.full(5120, 0.1, np.float32)

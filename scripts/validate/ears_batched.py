@@ -90,8 +90,8 @@ def run_eng(sessions, hop_lists, offsets):
                         time.sleep(0.01)
                     ev["transcript"] = " ".join(t for t in [*ev.pop("seg_texts", []), txt] if t)
             k = sessions.index(s)
-            for ev in events:
-                if ev["kind"] != "FRAME":
+            for ev in events:                          # PARTIAL: the ASR thread's timing, not a decision; no reference
+                if ev["kind"] not in ("FRAME", "PARTIAL"):
                     out[k].append((ev["kind"], len(s.trace), (ev.get("transcript") or "")[:40] if ev["kind"] == "ENDPOINT" else "",
                                    ev.get("turn_s", 0.0)))
     return [(list(s.trace), o) for s, o in zip(sessions, out)], ticks

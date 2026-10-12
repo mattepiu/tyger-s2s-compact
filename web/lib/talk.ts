@@ -3,7 +3,7 @@
 import type { Message } from "./conversation"
 
 export type Link = { label: string; url: string }
-// One line of the conversation: the user's words (from the endpoint) with the agent's backchannels while they spoke,
+// One line of the conversation: the user's words (the endpoint's) with the agent's backchannels while they spoke,
 // or the agent's (a reply, or a background task's result) with the sources it cited and whether the user cut it off.
 export type Said =
   | { who: "user"; text: string; acks: string[] }
@@ -24,14 +24,18 @@ export type Talk = {
   log: Said[]             // the conversation so far, oldest first (kept across Stop / Start)
   open: boolean           // the agent's last line is still being said: `reply` updates its text, `links` add to it
   from: number            // the exchange on screen is log[from..]: from the user's words to the next turn
-  acks: string[]          // backchannels in the user's turn so far (its words come with the endpoint)
+  words: string           // the user's words so far in their turn (EARS's partial; the whole of them come with the endpoint)
+  acks: string[]          // backchannels in the user's turn so far
   task: number | null     // the background task whose result is said next
 }
 
 export const initial: Talk = {
   conn: "off", note: "", turn: false, turnAt: -Infinity, speakAt: -Infinity, bargeAt: -Infinity, playing: false,
-  quietSince: -Infinity, spoke: false, log: [], open: false, from: 0, acks: [], task: null,
+  quietSince: -Infinity, spoke: false, log: [], open: false, from: 0, words: "", acks: [], task: null,
 }
+
+// The user's turn has shown on screen already (its words so far, or a backchannel to them)
+const userTurnShown = (s: Talk) => s.words !== "" || s.acks.length > 0
 
 export type Action =
   | { kind: "connecting" }
@@ -59,8 +63,10 @@ function onMessage(s: Talk, m: Message, now: number): Talk {
       const text = (m.transcript || "").trim()
       const log: Said[] = text ? [...s.log, { who: "user", text, acks: s.acks }] : s.log
       return { ...s, turn: true, turnAt: now, spoke: false, open: false, log, from: text ? log.length - 1 : log.length,
-               acks: [] }
+               words: "", acks: [] }
     }
+    case "partial":                // the user's words so far: their turn takes the screen
+      return { ...s, words: m.text || "", from: userTurnShown(s) ? s.from : s.log.length }
     case "reply": {                // the text so far
       const last = s.log[s.log.length - 1]
       const log: Said[] = s.open && last.who === "agent" ? [...s.log.slice(0, -1), { ...last, text: m.text }]
@@ -76,7 +82,7 @@ function onMessage(s: Talk, m: Message, now: number): Talk {
       return { ...s, log: [...s.log.slice(0, -1), { ...last, links }] }
     }
     case "backchannel":            // the agent acks while the user speaks: the user's new turn takes the screen
-      return { ...s, acks: [...s.acks, m.text], from: s.acks.length ? s.from : s.log.length }
+      return { ...s, acks: [...s.acks, m.text], from: userTurnShown(s) ? s.from : s.log.length }
     case "backchannel_done": {     // dropped unvoiced (the user's turn ended first): take it back, wherever it went
       if (!m.aborted) return s
       const drop = (acks: string[]) => { const i = acks.lastIndexOf(m.text); return i < 0 ? acks : acks.filter((_, k) => k !== i) }

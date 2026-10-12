@@ -25,12 +25,22 @@ function Acks({ acks, name }: { acks: string[]; name: string }) {
   return <div className="px-1 text-xs text-white/55"><span className="font-medium">{name}:</span> {acks.join(" ")}</div>
 }
 
-function UserLine({ text, acks, name, small }: { text: string; acks: string[]; name: string; small?: boolean }) {
+const TAIL = 100      // characters of a turn shown while it's spoken: its newest words, within the bubble's 3 lines
+
+function tailOf(text: string) {
+  if (text.length <= TAIL) return text
+  const cut = text.slice(-TAIL), sp = cut.indexOf(" ")
+  return "…" + (sp >= 0 ? cut.slice(sp + 1) : cut)
+}
+
+function UserLine({ text, acks, name, small, live }: {
+  text: string; acks: string[]; name: string; small?: boolean; live?: boolean
+}) {
   return (
     <div className="flex flex-col items-end gap-1">
       <div className={`max-w-[85%] rounded-2xl rounded-br-md bg-white/12 text-white/90 backdrop-blur-xl ${
              small ? "px-3 py-2 text-sm" : "line-clamp-3 px-4 py-2.5 text-base md:text-lg"}`}>
-        {text || <span className="animate-pulse" aria-label="speaking">…</span>}
+        {(live ? tailOf(text) : text) || <span className="animate-pulse" aria-label="speaking">…</span>}
       </div>
       <Acks acks={acks} name={name} />
     </div>
@@ -52,11 +62,12 @@ function AgentLine({ said, live, small }: { said: Extract<Said, { who: "agent" }
 }
 
 // The exchange on screen: `items` (the log from the user's words on), then, while the user is still speaking, their
-// turn so far: "…" with the backchannels it got. Keys are log positions, so the live turn becomes its words in place.
-export function Exchange({ items, from, acks, open, name }: {
-  items: Said[]; from: number; acks: string[]; open: boolean; name: string
+// turn so far: their words so far ("…" before any) with the backchannels it got. Keys are log positions, so the live
+// turn becomes its words in place.
+export function Exchange({ items, from, words, acks, open, name }: {
+  items: Said[]; from: number; words: string; acks: string[]; open: boolean; name: string
 }) {
-  const live = acks.length > 0
+  const live = words !== "" || acks.length > 0
   return (
     <div className="flex w-full max-w-2xl flex-col gap-3" aria-live="polite">
       <AnimatePresence initial={false}>
@@ -70,7 +81,7 @@ export function Exchange({ items, from, acks, open, name }: {
         {live && (
           <motion.div key={from + items.length} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
-            <UserLine text="" acks={acks} name={name} />
+            <UserLine text={words} acks={acks} name={name} live />
           </motion.div>
         )}
       </AnimatePresence>

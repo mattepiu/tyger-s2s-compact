@@ -34,6 +34,7 @@ class EarsSession:
         self.voiced_ms = 0.0; self.in_turn = False; self.warm = 0
         self._mode = "listen"; self.bc_run = 0; self.bc_cooldown = 0; self.ep_run = 0
         self.partial_asr = ""; self.partial_at_s = 0.0
+        self.words = ""; self.words_sent = ""  # the turn's words so far (blocks, then the partial), for the page
 
     def reset(self):
         """Thread-safe: applied by the GPU thread before this session's next hop."""

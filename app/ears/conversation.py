@@ -19,7 +19,7 @@ held, no backchannel is playing, and the user has been quiet for mouth.tasks.ann
 agent speaks exactly as for a reply.
 
 PRIVACY: no audio or transcript is written to disk or logs; only timings and event types. The page gets the user's
-own transcript back (on `endpoint`), to show it.
+own transcript back (as it grows on `partial`, then whole on `endpoint`), to show it.
 """
 from __future__ import annotations
 import asyncio, json, logging, math, time
@@ -183,6 +183,8 @@ class Conversation:
                 await self._on_backchannel(e)
             elif kind == "BARGE" and self.speaking:
                 await self._on_barge(e, hop_end)
+            elif kind == "PARTIAL" and not self.speaking:   # the user's words so far, for the page
+                await self.ws.send_json({"type": "partial", "text": e["text"]})
         if self.have_mouth:
             await self._maybe_grant_floor()             # after this hop's events: an endpoint wins
         if last is not None:

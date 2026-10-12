@@ -227,6 +227,27 @@ def test_the_page_gets_the_users_words_and_the_backchannels():
     run(go())
 
 
+def test_the_users_words_reach_the_page_as_they_come():
+    """PARTIAL (the user's words so far in their turn) goes to the page while the user has the floor, never while the
+    agent speaks."""
+    async def go():
+        page, mouth, conv, task, calls, ears = await start()
+        orig = ears.feed
+
+        async def feed(sess, uh, ah, mode, more=False):            # the plugin has new words every hop
+            return [{"kind": "PARTIAL", "text": "so I went"}] + await orig(sess, uh, ah, mode, more)
+        ears.feed = feed
+        page.push(speech(1)); await settle()
+        assert {"type": "partial", "text": "so I went"} in page.sent, page.sent
+        page.push(speech(1)); page.push(silence(2)); await settle()  # the endpoint: the agent's turn
+        assert conv.speaking
+        n = page.types().count("partial")
+        page.push(silence(2)); await settle()
+        assert page.types().count("partial") == n                   # none while the agent has the floor
+        await stop(page, task)
+    run(go())
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in list(globals().items()):
