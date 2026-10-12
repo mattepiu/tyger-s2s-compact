@@ -140,6 +140,34 @@ def test_options_types():
             assert next(iter(bad)) in str(e)
 
 
+def test_env_only_from_the_repo_or_the_path_given():
+    """load_env reads the repo's own .env, or the path given, never a .env in the folder above the repo (a
+    leftover of the old v1/ layout)."""
+    import tempfile
+    from pathlib import Path
+    from unittest import mock
+    from app import config
+    keys = ("TYGER_TEST_PARENT_ENV", "TYGER_TEST_REPO_ENV", "TYGER_TEST_GIVEN_ENV")
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d) / "repo"; repo.mkdir()
+        (Path(d) / ".env").write_text("TYGER_TEST_PARENT_ENV=1\n")
+        (repo / ".env").write_text("TYGER_TEST_REPO_ENV=1\n")
+        (Path(d) / "given.env").write_text("TYGER_TEST_GIVEN_ENV=1\n")
+        try:
+            with mock.patch.object(config, "ROOT", repo):
+                config.load_env()
+                assert os.environ.get("TYGER_TEST_REPO_ENV") == "1"
+                assert "TYGER_TEST_PARENT_ENV" not in os.environ, "read the .env above the repo"
+                (repo / ".env").unlink()
+                config.load_env()                                   # no .env in the repo: nothing, no fallback
+                assert "TYGER_TEST_PARENT_ENV" not in os.environ, "fell back to the .env above the repo"
+                config.load_env(str(Path(d) / "given.env"))
+                assert os.environ.get("TYGER_TEST_GIVEN_ENV") == "1"
+        finally:
+            for k in keys:
+                os.environ.pop(k, None)
+
+
 def test_registry_unknown_name():
     try:
         plugin_class("llm", "nope")

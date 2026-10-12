@@ -72,17 +72,11 @@ class VLLMChatPlugin(LLMPlugin):
         self._tok_lock = threading.Lock()
 
     # ---- hooks ----
-    # The plugin API. prepare_messages has no override now; a new model may need it (a template that reads a switch
-    # from the system prompt).
     def engine_kwargs(self) -> dict:
         return {}
 
     def template_kwargs(self) -> dict:
         return {}
-
-    def prepare_messages(self, messages: list) -> list:
-        """The template messages, adjusted for the model (e.g. a switch its template reads from the system prompt)."""
-        return messages
 
     def sampling(self, max_new):
         from vllm import SamplingParams
@@ -99,8 +93,7 @@ class VLLMChatPlugin(LLMPlugin):
     # ---- LLMPlugin ----
     def stream(self, messages, tools=None, max_new=192, stop_flag=None):
         with self._tok_lock:      # sessions call this from several threads; HF fast tokenizers aren't re-entrant
-            prompt = self.tok.apply_chat_template(self.prepare_messages(to_template_messages(messages)),
-                                                  tools=tools or None,
+            prompt = self.tok.apply_chat_template(to_template_messages(messages), tools=tools or None,
                                                   tokenize=False, add_generation_prompt=True,
                                                   **self.template_kwargs())
         sp = self.sampling(self.max_tokens or max_new)

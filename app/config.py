@@ -1,29 +1,28 @@
-"""Load config/default.yaml + v1/.env and check its plugin shape. Secrets (HF_TOKEN, OPENAI_API_KEY) come from the env /
-.env and are never written to logs."""
+"""Load config/default.yaml + the repo's .env and check its plugin shape. Secrets (HF_TOKEN, OPENAI_API_KEY) come from
+the env / .env and are never written to logs."""
 from __future__ import annotations
 import difflib, os
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]   # v1/
+ROOT = Path(__file__).resolve().parents[1]   # the repo
 CONFIG_DIR = ROOT / "config"                 # the stack's config, prompts and engine configs
 DEFAULT = CONFIG_DIR / "default.yaml"         # what run.sh loads unless CONFIG names another file
 
 
 def load_env(env_path: str | None = None):
-    """Load KEY=VALUE lines into os.environ (without overwriting an already-set var). Checks v1/.env first,
-    then the repo-root .env (/workspace/tyger/.env) as a fallback."""
-    cands = [Path(env_path)] if env_path else [ROOT / ".env", ROOT.parent / ".env"]
-    for p in cands:
-        if not p.exists():
+    """Load KEY=VALUE lines into os.environ (without overwriting an already-set var) from `env_path`, else from the
+    repo's own .env."""
+    p = Path(env_path) if env_path else ROOT / ".env"
+    if not p.exists():
+        return
+    for line in p.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
             continue
-        for line in p.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            k, v = k.strip(), v.strip().strip('"').strip("'")
-            if k and v and not os.environ.get(k):
-                os.environ[k] = v
+        k, v = line.split("=", 1)
+        k, v = k.strip(), v.strip().strip('"').strip("'")
+        if k and v and not os.environ.get(k):
+            os.environ[k] = v
 
 
 def _expand(obj):
