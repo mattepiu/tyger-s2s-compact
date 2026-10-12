@@ -13,13 +13,13 @@ search is billed on top of the tokens.
     in the log.
   * Streaming: response.output_text.delta -> text; a function_call output item -> tool_start (with its name, as
     the API sends it whole); at response.completed the function calls -> tool_calls (arguments parsed and checked
-    against the offered schema: _toolparse.flag_invalid; IDs are this plugin's own). A refusal -> ("refusal",
+    against the offered schema: calls.flag_invalid; IDs are this plugin's own). A refusal -> ("refusal",
     "refusal"). A response cut off by max_output_tokens never runs a call cut off with it. response.failed / an
     error event -> LLMError.
   * History: neutral messages -> Responses input items: {role, content} messages; an assistant tool call ->
     function_call items {call_id, name, arguments}; a tool result -> function_call_output {call_id, output}.
   * Reasoning: `reasoning_effort` -> reasoning.effort (None: the model's default). Thinking is never read.
-  * Key, timeouts, concurrency, errors -> LLMError, shutdown: HostedLLM (hosted.py), as for openai and anthropic.
+  * Key, timeouts, concurrency, errors -> LLMError, shutdown: HostedLLM (hosted/base.py), as for openai and anthropic.
   * Abort: when stop_flag turns true the stream is closed (tokens already generated are still billed).
 """
 from __future__ import annotations
@@ -27,8 +27,8 @@ import json, logging
 from dataclasses import dataclass
 
 from app.plugins.base import LLMError
-from app.plugins.llm.hosted import HostedLLM
-from app.plugins.llm._toolparse import flag_invalid, new_call_id
+from app.plugins.llm.hosted.base import HostedLLM
+from app.plugins.llm.calls import flag_invalid, new_call_id
 
 log = logging.getLogger("llm")
 

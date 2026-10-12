@@ -7,8 +7,8 @@
     decoded with skip_special_tokens=False (the call tags would vanish otherwise). It sometimes drops the markers
     and writes a bare `set_reminder{...}`: for the offered tools that counts as a call too (never spoken).
 """
-from app.plugins.llm.vllm_base import VLLMChatPlugin
-from app.plugins.llm._toolparse import gemma_normalize
+from app.plugins.llm.local.vllm_base import VLLMChatPlugin
+from app.plugins.llm.calls import gemma_normalize
 
 
 class Gemma4E4B(VLLMChatPlugin):

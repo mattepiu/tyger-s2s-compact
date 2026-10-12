@@ -4,9 +4,10 @@ from __future__ import annotations
 import importlib
 
 REGISTRY = {
-    "llm": {"gemma-4-e4b": "app.plugins.llm.gemma4:Gemma4E4B",                # the responder (FP8 at load)
-            "openai-responses": "app.plugins.llm.openai_responses:OpenAIResponsesLLM",   # hosted, OpenAI web search
-            "anthropic": "app.plugins.llm.anthropic:AnthropicLLM",         # hosted: transcripts leave the box
+    "llm": {"gemma-4-e4b": "app.plugins.llm.local.gemma4.plugin:Gemma4E4B",       # the responder (FP8 at load)
+            # hosted: transcripts leave the box
+            "openai-responses": "app.plugins.llm.hosted.openai_responses:OpenAIResponsesLLM",   # OpenAI web search
+            "anthropic": "app.plugins.llm.hosted.anthropic:AnthropicLLM",
             "fake": "app.plugins.llm.fake:FakeLLM"},
     "tts": {"voxcpm2": "app.plugins.tts.voxcpm2:VoxCPM2",
             "fake": "app.plugins.tts.fake:FakeTTS"},

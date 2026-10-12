@@ -6,7 +6,7 @@ import asyncio, json, os, sys, time
 TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 from app.plugins.base import LLMError, PluginContext  # noqa: E402
-from app.plugins.llm.anthropic import (AnthropicLLM, ClaudeStreamParser, FALLBACK_BETA,  # noqa: E402
+from app.plugins.llm.hosted.anthropic import (AnthropicLLM, ClaudeStreamParser, FALLBACK_BETA,  # noqa: E402
                                        to_claude, to_claude_tools)
 from app.runtime.event_loop import EngineLoop  # noqa: E402
 

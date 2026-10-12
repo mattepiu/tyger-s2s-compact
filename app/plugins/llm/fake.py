@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 
 from app.plugins.base import LLMError, LLMPlugin
 from app.plugins.options import PluginOptions
-from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id, tool_start, names_tool
+from app.plugins.llm.calls import split_speakable, parse_calls, new_call_id, tool_start, names_tool
 
 KINDS = ("reply", "phase_b", "leadin", "still", "ack", "expert_leadin", "expert_still", "smart", "smart_b", "task",
          "task_b", "task_failed")

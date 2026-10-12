@@ -128,7 +128,7 @@ def test_config_files_in_config_dir():
 def test_options_types():
     """Scalars as YAML leaves them: an int where a float is declared, an all-digit revision hash as a string."""
     from app.plugins.ears.nemotron_tyger.plugin import NemotronTyger
-    from app.plugins.llm.vllm_base import VLLMChatPlugin
+    from app.plugins.llm.local.vllm_base import VLLMChatPlugin
     o = NemotronTyger.options({**BASE["ears"], "gather_ms": 20, "heads_revision": 1234567})
     assert o.gather_ms == 20.0 and isinstance(o.gather_ms, float) and o.heads_revision == "1234567"
     assert o.heads == BASE["ears"]["heads"] and o.ring_frames == BASE["ears"]["ring_frames"]

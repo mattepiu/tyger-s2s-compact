@@ -5,9 +5,9 @@ import os, sys
 
 TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
-from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id, tool_start, \
+from app.plugins.llm.calls import split_speakable, parse_calls, new_call_id, tool_start, \
     NAME_WAIT, TAG, GEMMA_TAG, gemma_normalize, names_tool, check_arguments, flag_invalid  # noqa: E402
-from app.plugins.llm.vllm_base import to_template_messages  # noqa: E402
+from app.plugins.llm.local.vllm_base import to_template_messages  # noqa: E402
 
 
 def stream_speakable(raw, step=2):
@@ -125,7 +125,7 @@ def scripted_stream(plugin_cls, raw, tools=None, step=3):
 def test_gemma_plugin_stream_bare_call_at_the_end():
     """gemma-4-e4b's stream: speech, then a bare `set_reminder{...}` as the very last text, in any deltas (one
     character at a time, or the whole call in the final one): a call, never spoken."""
-    from app.plugins.llm.gemma4 import Gemma4E4B
+    from app.plugins.llm.local.gemma4.plugin import Gemma4E4B
     from app.prompts import default_prompts
     from app.tools import build_tools
     raw = 'Okay. set_reminder{text:<|"|>call my mom<|"|>,time:<|"|>6 pm<|"|>}'

@@ -40,13 +40,15 @@ app/
     base.py                #   LLMPlugin, TTSPlugin, EarsPlugin: ABC bases with defaults; Threshold, Slider
     options.py             #   PluginOptions: a plugin's config block, typed, checked at load
     llm/
-      vllm_base.py         #   VLLMChatPlugin: an in-process vLLM AsyncLLM (pinned KV, abort by request id)
-      gemma4.py            #   gemma-4-e4b, the responder
-      hosted.py            #   HostedLLM: key, timeouts, concurrency, errors, the debug-log guard
-      openai_responses.py  #   openai-responses, the smart model
-      anthropic.py         #   anthropic, its alternative
-      _toolparse.py        #   splitting speech from calls, parsing them (Gemma 4, Hermes JSON), check_arguments
+      calls.py             #   splitting speech from calls, parsing them (Gemma 4, Hermes JSON), check_arguments
       fake.py
+      local/               #   in-process vLLM models
+        vllm_base.py       #     VLLMChatPlugin: an in-process vLLM AsyncLLM (pinned KV, abort by request id)
+        gemma4/plugin.py   #     gemma-4-e4b, the responder
+      hosted/              #   hosted APIs
+        base.py            #     HostedLLM: key, timeouts, concurrency, errors, the debug-log guard
+        openai_responses.py  #   openai-responses, the smart model
+        anthropic.py       #     anthropic, its alternative
     tts/
       voxcpm2.py
       fake.py
@@ -266,7 +268,7 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Run & rea
     - `("refusal", category)`.
 - **Lazy imports.** A plugin imports vllm, vllm-omni or an SDK in its constructor, so EARS and the tests can import
   plugin classes cheaply. `test_plugins.py` checks it.
-- **The local LLM** (`VLLMChatPlugin` + `gemma4.py`) is Gemma 4 E4B:
+- **The local LLM** (`VLLMChatPlugin` + `local/gemma4/plugin.py`) is Gemma 4 E4B:
   - FP8 at load (`quantization: fp8`);
   - text only (`language_model_only`: the vision and audio towers aren't loaded);
   - thinking off.
@@ -390,8 +392,8 @@ What the base gives you, and what is yours to write:
 - **LLM.**
   - `stream()` yields the neutral events above.
   - It polls `stop_flag`, and raises `LLMError` for a failed request (MOUTH speaks an apology).
-  - Local vLLM models subclass `VLLMChatPlugin` and override only its hooks, as `gemma4.py` does.
-  - Hosted APIs subclass `HostedLLM`, as `openai_responses.py` and `anthropic.py` do.
+  - Local vLLM models subclass `VLLMChatPlugin` and override only its hooks, as `local/gemma4/plugin.py` does.
+  - Hosted APIs subclass `HostedLLM`, as `hosted/openai_responses.py` and `hosted/anthropic.py` do.
 - **TTS.**
   - Set `out_sr` and `caps`.
   - Write `list_voices(cfg)`, a classmethod: EARS calls it without loading the model.

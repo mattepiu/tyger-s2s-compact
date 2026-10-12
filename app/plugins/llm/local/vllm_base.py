@@ -1,5 +1,5 @@
 """In-process chat LLM on a vLLM AsyncLLM engine (no server, no HTTP), on MOUTH's EngineLoop. The base of the local
-plugins (gemma-4-e4b, gemma4.py), which override only the hooks: default_model, tool_format, engine_kwargs,
+plugins (gemma-4-e4b, local/gemma4/), which override only the hooks: default_model, tool_format, engine_kwargs,
 template_kwargs, sampling, normalize_calls.
 
 stream(messages, tools=...) yields ("text", delta) for speakable text as it decodes; ("tool_start", {"name": ...})
@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from app.plugins.base import LLMPlugin
 from app.plugins.options import PluginOptions
-from app.plugins.llm._toolparse import split_speakable, parse_calls, new_call_id, tool_start, TAGS, names_tool
+from app.plugins.llm.calls import split_speakable, parse_calls, new_call_id, tool_start, TAGS, names_tool
 
 log = logging.getLogger("llm")
 
@@ -36,7 +36,7 @@ def to_template_messages(messages):
 
 class VLLMChatPlugin(LLMPlugin):
     default_model: str = ""
-    tool_format: str = "hermes_json"            # _toolparse.TAGS key: the call format the model writes
+    tool_format: str = "hermes_json"            # calls.TAGS key: the call format the model writes
 
     @dataclass(frozen=True, kw_only=True)
     class Options(PluginOptions):

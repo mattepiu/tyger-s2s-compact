@@ -7,7 +7,7 @@ import asyncio, json, os, sys, time
 TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 from app.plugins.base import LLMError, PluginContext  # noqa: E402
-from app.plugins.llm.openai_responses import (OpenAIResponsesLLM, ResponsesStreamParser,  # noqa: E402
+from app.plugins.llm.hosted.openai_responses import (OpenAIResponsesLLM, ResponsesStreamParser,  # noqa: E402
                                               to_responses_input, to_responses_tools)
 from app.runtime.event_loop import EngineLoop  # noqa: E402
 

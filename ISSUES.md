@@ -41,7 +41,7 @@ questions). A live run against OpenAI needs the user's OK each time.
 - Once it looped through four `get_current_time` rounds and then gave an empty answer.
 - Once it called `set_reminder` with the text "Dummy" for a savings question.
 
-**Where:** `app/plugins/llm/openai_responses.py`, and the smart model's tools: `Mouth.smart_tools` in
+**Where:** `app/plugins/llm/hosted/openai_responses.py`, and the smart model's tools: `Mouth.smart_tools` in
 `app/mouth/service.py` gives it every tool except the ones MOUTH answers itself.
 
 **Fix options:**
