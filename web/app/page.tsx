@@ -1,15 +1,14 @@
 "use client"
 // tyger's page: talk, and see what it's doing. The conversation (lib/conversation.ts) is the classic page's
 // (static/index.html), its protocol unchanged; this page shows it differently: a voice glow along the bottom that
-// rises with whoever is talking and sweeps while the agent thinks, the phase as a word (lib/talk.ts), the reply as text
-// with the sources it cited, the characters, one mic button. The classic page, with the turn-taking meters and the
-// live tuning, is one link away.
+// rises with whoever is talking and sweeps while the agent thinks, the phase as a word (lib/talk.ts), the exchange as
+// text (the user's words, the agent's backchannels and reply, the sources it cited) and all of it in the history, the
+// characters, one mic button. The classic page, with the turn-taking meters and the live tuning, is one link away.
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
-import { AnimatePresence, motion } from "framer-motion"
 import { AnimatedText } from "@/components/animated-text"
 import { Characters, MicButton, type Character } from "@/components/controls"
 import { Glow } from "@/components/glow"
-import { History, ReplyCard } from "@/components/replies"
+import { Exchange, History } from "@/components/transcript"
 import { Conversation } from "@/lib/conversation"
 import { initial, phaseOf, reduce, type Phase } from "@/lib/talk"
 
@@ -90,7 +89,8 @@ export default function Page() {
   const me = characters.find((c) => c.voice === voice)
   const name = me ? me.name : "tyger"
   const label = phase === "off" ? `Talk to ${name}` : phase === "speaking" ? name : LABELS[phase]
-  const reply = talk.conn === "on" && talk.shown ? talk.replies[talk.replies.length - 1] : null
+  const shown = talk.conn === "on" ? talk.log.slice(talk.from) : []
+  const exchange = shown.length > 0 || (talk.conn === "on" && talk.acks.length > 0)
 
   return (
     <>
@@ -100,26 +100,23 @@ export default function Page() {
           <span className="text-sm font-semibold tracking-wide text-white/80">tyger</span>
           <nav className="flex items-center gap-1 text-sm">
             <button onClick={() => setHistory(true)} className="rounded-full px-3 py-1.5 text-white/70 hover:bg-white/10 hover:text-white">
-              History{talk.replies.length ? ` · ${talk.replies.length}` : ""}
+              History{talk.log.length ? ` · ${talk.log.length}` : ""}
             </button>
             <a href={CLASSIC} className="rounded-full px-3 py-1.5 text-white/70 hover:bg-white/10 hover:text-white">Classic view</a>
           </nav>
         </header>
 
         <section className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-6 px-4 pb-56 pt-20">
-          <h1 className="text-center text-5xl font-bold md:text-7xl">
+          <h1 className={`text-center font-bold transition-[font-size] duration-300 ${
+                exchange ? "text-3xl md:text-5xl" : "text-5xl md:text-7xl"}`}>
             <AnimatedText key={label} text={label} />
           </h1>
           {phase === "off" && <p className="text-white/60">Tap the mic to start</p>}
-          <AnimatePresence>
-            {reply && (
-              <motion.div key={talk.replies.length} className="pointer-events-auto flex w-full justify-center" aria-live="polite"
-                          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-                          transition={{ duration: 0.35 }}>
-                <ReplyCard reply={reply} live={talk.open} />
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {exchange && (
+            <div className="pointer-events-auto flex w-full justify-center">
+              <Exchange items={shown} from={talk.from} acks={talk.acks} open={talk.open} name={name} />
+            </div>
+          )}
         </section>
 
         <footer className="absolute inset-x-0 bottom-0 z-20 flex flex-col items-center gap-4 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
@@ -128,7 +125,7 @@ export default function Page() {
           <p className="min-h-5 max-w-md text-center text-sm text-white/65" role="status">{talk.note}</p>
         </footer>
       </main>
-      <History open={history} replies={talk.replies} name={name} onClose={() => setHistory(false)} />
+      <History open={history} log={talk.log} name={name} onClose={() => setHistory(false)} />
     </>
   )
 }

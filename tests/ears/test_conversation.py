@@ -9,7 +9,8 @@ over real TCP. Covers what test_floor.py and test_second_ear.py don't:
     the barge survives it (I-02);
   * MOUTH's D after the page has played the reply ends the turn at once; a D before it, followed by a barge in the
     tail, closes the turn on the spot (no B: MOUTH has nothing left to stop);
-  * MOUTH's L (the links a reply cites) reaches the page after the reply's text.
+  * MOUTH's L (the links a reply cites) reaches the page after the reply's text;
+  * the page gets the user's transcript on `endpoint`, and the backchannels, with whether one was dropped unvoiced.
 Audio is synthetic (zeros / a tone).
 Run: .venv/bin/python tests/ears/test_conversation.py
 """
@@ -205,6 +206,23 @@ def test_links_reach_the_page():
         await settle()
         assert {"type": "links", "links": [link]} in page.sent
         assert page.types().index("reply") < page.types().index("links"), page.types()
+        await stop(page, task)
+    run(go())
+
+
+def test_the_page_gets_the_users_words_and_the_backchannels():
+    """The page shows the user's transcript, from the endpoint, and the agent's backchannels, with whether one was
+    dropped unvoiced (the user's turn ended first)."""
+    async def go():
+        page, mouth, conv, task, calls, ears = await start()
+        await user_turn(page, mouth)
+        said = load_config(os.path.join(ROOT, "config/fake.yaml"))["ears"]["transcript"]
+        ep = next(m for m in page.sent if m["type"] == "endpoint")
+        assert ep["transcript"] == said, ep
+        await mouth.send(b"X", {"text": "Mm-hm.", "bc": True})
+        await mouth.send(b"D", {"text": "Mm-hm.", "bc": True, "aborted": True}); await settle()
+        assert {"type": "backchannel", "text": "Mm-hm."} in page.sent
+        assert {"type": "backchannel_done", "text": "Mm-hm.", "aborted": True} in page.sent, page.sent[-2:]
         await stop(page, task)
     run(go())
 

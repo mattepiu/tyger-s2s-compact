@@ -3,7 +3,11 @@
 import type { Message } from "./conversation"
 
 export type Link = { label: string; url: string }
-export type Reply = { text: string; links: Link[]; task: number | null }
+// One line of the conversation: the user's words (from the endpoint) with the agent's backchannels while they spoke,
+// or the agent's (a reply, or a background task's result) with the sources it cited and whether the user cut it off.
+export type Said =
+  | { who: "user"; text: string; acks: string[] }
+  | { who: "agent"; text: string; links: Link[]; task: number | null; cut: boolean }
 export type Phase = "off" | "connecting" | "listening" | "thinking" | "lookup" | "speaking" | "barge"
 
 export type Talk = {
@@ -17,15 +21,16 @@ export type Talk = {
   playing: boolean        // reply audio is playing
   quietSince: number      // when reply audio last stopped
   spoke: boolean          // reply audio has played in this turn
-  replies: Reply[]        // the replies so far, oldest first (kept across Stop / Start)
-  open: boolean           // the last reply is still being said: `reply` updates its text, `links` add to it
-  shown: boolean          // the last reply is on screen: from its first text to the user's next turn
+  log: Said[]             // the conversation so far, oldest first (kept across Stop / Start)
+  open: boolean           // the agent's last line is still being said: `reply` updates its text, `links` add to it
+  from: number            // the exchange on screen is log[from..]: from the user's words to the next turn
+  acks: string[]          // backchannels in the user's turn so far (its words come with the endpoint)
   task: number | null     // the background task whose result is said next
 }
 
 export const initial: Talk = {
   conn: "off", note: "", turn: false, turnAt: -Infinity, speakAt: -Infinity, bargeAt: -Infinity, playing: false,
-  quietSince: -Infinity, spoke: false, replies: [], open: false, shown: false, task: null,
+  quietSince: -Infinity, spoke: false, log: [], open: false, from: 0, acks: [], task: null,
 }
 
 export type Action =
@@ -37,9 +42,9 @@ export type Action =
 
 export function reduce(s: Talk, a: Action): Talk {
   switch (a.kind) {
-    case "connecting": return { ...initial, conn: "connecting", replies: s.replies }
+    case "connecting": return { ...initial, conn: "connecting", log: s.log, from: s.log.length }
     case "opened": return { ...s, conn: "on" }
-    case "closed": return { ...initial, replies: s.replies, note: a.why }
+    case "closed": return { ...initial, log: s.log, from: s.log.length, note: a.why }
     case "playing": return a.on ? { ...s, playing: true, spoke: true } : { ...s, playing: false, quietSince: a.now }
     case "message": return onMessage(s, a.m, a.now)
   }
@@ -50,26 +55,48 @@ function onMessage(s: Talk, m: Message, now: number): Talk {
     case "ready":
       return { ...s, note: m.mouth ? "" : "Ears only: MOUTH isn't running, so tyger can't answer." }
     case "state": return m.state === "SPEAK" ? { ...s, speakAt: now } : s
-    case "endpoint": return { ...s, turn: true, turnAt: now, spoke: false, open: false, shown: false }
-    case "reply": {
-      const replies = s.open ? [...s.replies.slice(0, -1), { ...s.replies[s.replies.length - 1], text: m.text }]
-                             : [...s.replies, { text: m.text, links: [], task: s.task }]
-      return { ...s, replies, open: true, shown: true }
+    case "endpoint": {             // the user's turn is over: their words start the exchange on screen (none heard: none)
+      const text = (m.transcript || "").trim()
+      const log: Said[] = text ? [...s.log, { who: "user", text, acks: s.acks }] : s.log
+      return { ...s, turn: true, turnAt: now, spoke: false, open: false, log, from: text ? log.length - 1 : log.length,
+               acks: [] }
+    }
+    case "reply": {                // the text so far
+      const last = s.log[s.log.length - 1]
+      const log: Said[] = s.open && last.who === "agent" ? [...s.log.slice(0, -1), { ...last, text: m.text }]
+                                  : [...s.log, { who: "agent", text: m.text, links: [], task: s.task, cut: false }]
+      return { ...s, log, open: true }
     }
     case "links": {                // the sources a reply cited (the expert's web search): shown, never spoken
-      if (!s.open) return s
-      const last = s.replies[s.replies.length - 1], links = [...last.links]
+      const last = s.log[s.log.length - 1]
+      if (!s.open || last.who !== "agent") return s
+      const links = [...last.links]
       for (const l of m.links || [])
         if (/^https?:\/\//i.test(l.url || "") && !links.some((x) => x.url === l.url)) links.push({ label: l.label || l.url, url: l.url })
-      return { ...s, replies: [...s.replies.slice(0, -1), { ...last, links }] }
+      return { ...s, log: [...s.log.slice(0, -1), { ...last, links }] }
+    }
+    case "backchannel":            // the agent acks while the user speaks: the user's new turn takes the screen
+      return { ...s, acks: [...s.acks, m.text], from: s.acks.length ? s.from : s.log.length }
+    case "backchannel_done": {     // dropped unvoiced (the user's turn ended first): take it back, wherever it went
+      if (!m.aborted) return s
+      const drop = (acks: string[]) => { const i = acks.lastIndexOf(m.text); return i < 0 ? acks : acks.filter((_, k) => k !== i) }
+      if (s.acks.includes(m.text)) return { ...s, acks: drop(s.acks) }
+      const i = s.log.map((x) => x.who).lastIndexOf("user"), u = s.log[i]
+      return u && u.who === "user" && u.acks.includes(m.text)
+        ? { ...s, log: s.log.map((x, k) => (k === i ? { ...u, acks: drop(u.acks) } : x)) } : s
     }
     case "turn_done": {
       // after a barge the user may have finished speaking before MOUTH halted: EARS sends that turn right after this
       const pending = !!m.barged && s.turnAt > s.bargeAt
       return { ...s, turn: pending, turnAt: pending ? now : s.turnAt, open: false, task: null, spoke: false }
     }
-    case "task_done": return { ...s, turn: true, turnAt: now, spoke: false, open: false, task: m.task }   // speaks up
-    case "barge": return { ...s, turn: false, bargeAt: now }
+    case "task_done":              // a background task speaks up: a new exchange
+      return { ...s, turn: true, turnAt: now, spoke: false, open: false, task: m.task, from: s.log.length }
+    case "barge": {                // the line being said is cut off (it stays open: its last text may still come)
+      const last = s.log[s.log.length - 1]
+      const log = s.open && last.who === "agent" ? [...s.log.slice(0, -1), { ...last, cut: true }] : s.log
+      return { ...s, turn: false, bargeAt: now, log }
+    }
     default: return s
   }
 }

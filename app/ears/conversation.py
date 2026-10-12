@@ -18,7 +18,8 @@ held, no backchannel is playing, and the user has been quiet for mouth.tasks.ann
 `idle` frames). A user endpoint always wins: it starts a reply turn first and the request waits. On a grant the
 agent speaks exactly as for a reply.
 
-PRIVACY: no audio or transcript is written to disk or logs; only timings and event types.
+PRIVACY: no audio or transcript is written to disk or logs; only timings and event types. The page gets the user's
+own transcript back (on `endpoint`), to show it.
 """
 from __future__ import annotations
 import asyncio, json, logging, math, time
@@ -198,7 +199,8 @@ class Conversation:
 
     async def _on_endpoint(self, e):
         log.info("endpoint by=%s turn_s=%.2f segments=%d", e.get("by"), e.get("turn_s", 0.0), e.get("segments", 0))
-        await self.ws.send_json({"type": "endpoint", "turn_s": round(e["turn_s"], 1), "by": e.get("by")})
+        await self.ws.send_json({"type": "endpoint", "turn_s": round(e["turn_s"], 1), "by": e.get("by"),
+                                 "transcript": e["transcript"]})                # the user's words, for the page
         if self.have_mouth and e["transcript"].strip():
             if self.halting:
                 self.pending = e["transcript"]
@@ -348,7 +350,8 @@ class Conversation:
         d = json.loads(payload)
         if d.get("bc"):
             self.bc_active = False
-            await self.ws.send_json({"type": "backchannel_done", "text": d.get("text", "")})
+            await self.ws.send_json({"type": "backchannel_done", "text": d.get("text", ""),
+                                     "aborted": bool(d.get("aborted"))})          # dropped unvoiced: the turn ended first
         elif d.get("barged") or not self.speaking:      # halted: nothing left to play out
             await self._finish_turn(bool(d.get("barged")))
         else:                                           # generated; hold until the page has played it

@@ -150,7 +150,8 @@ suppression, auto gain) is on.
 - one mic button, and the characters as tabs;
 - a voice glow along the bottom ([voice-glow](https://libraries.dev/voice.html)). It rises with whoever is talking,
   you or the agent, and sweeps as one beam while the agent thinks or looks something up;
-- the reply as text with the sources it cited, and a history.
+- the exchange as text: your words, the agent's backchannels while you spoke, its reply with the sources it
+  cited; and the whole conversation in a history.
 
 It's the same WebSocket and the same audio code, so EARS doesn't change. Run it beside the stack (node ≥ 22):
 
@@ -171,7 +172,8 @@ frames are little-endian, with int16 audio:
   which the page plays but never tags.
 - **text → EARS:** `played:<id>:<samples>` when a reply's queue has drained; `reset`, `voice:<name>`,
   `set:<threshold>:<value>`.
-- **JSON → page:** `ready`, `state`, `endpoint`, `reply`, `links`, `barge`, `turn_done`, `task_done`, and a few more.
+- **JSON → page:** `ready`, `state`, `endpoint` (with the user's `transcript`), `reply`, `links`, `backchannel` /
+  `backchannel_done` (`aborted`: dropped unvoiced), `barge`, `turn_done`, `task_done`, and a few more.
 
 ## Plugins
 
@@ -255,7 +257,8 @@ tokens. Without `llm.smart` the agent answers what it knows and says plainly tha
 ## Privacy
 
 No audio or transcript is written to disk or logs. Logs carry only timings and event types (endpoint source,
-onset ms, barge, backchannel, tool name). Voice reference clips and their transcripts stay on the box.
+onset ms, barge, backchannel, tool name). Voice reference clips and their transcripts stay on the box. The page gets
+the user's own words back (each turn's transcript, on `endpoint`) to show them.
 
 **Hosted plugins send text off the box**, and only because the config names one: a hosted `reply` gets every
 turn's transcript, the conversation history and tool results; a hosted `filler` gets the user's question (tool

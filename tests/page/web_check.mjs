@@ -2,8 +2,8 @@
 // audio APIs and its cases (the worklet's 16 kHz blocks, the playback tags, the int16 frames, the `played` report only
 // once the queue drains, none after a stop, Stop -> Start without a reload), plus what's new there (reply audio
 // playing / drained, the voices' meters, the reason a conversation closed, an old socket's late close); and
-// web/lib/talk.ts, what the page
-// shows (the phases, the replies and the links they cite). Audio is synthetic (a sine, silence).
+// web/lib/talk.ts, what the page shows (the phases; the user's words, the backchannels, the replies and the links they
+// cite). Audio is synthetic (a sine, silence).
 //   node tests/page/web_check.mjs        # node >= 22.18 (runs the TypeScript as is); no npm install needed
 import vm from "vm";
 
@@ -226,28 +226,46 @@ ok(phase() === "thinking" && s.task === 7, `a background task speaks up: ${phase
 ev({ type: "ready", mouth: false });
 ok(/MOUTH/.test(s.note), `ears only: ${s.note}`);
 
-// ---- the replies and the links they cite (I-25): http(s) only, once each; a new reply starts without them ---------
+// ---- the conversation as text: the user's words, backchannels, replies and their links (I-25) ---------------------
 s = T.reduce(T.initial, { kind: "opened" });
 const NASA = "https://science.nasa.gov/mission/webb/?a=1&b=2";
+const screen = () => s.log.slice(s.from).map(x => `${x.who}:${x.text}` + (x.acks?.length ? `[${x.acks}]` : ""));
+ev({ type: "endpoint", turn_s: 2, transcript: " Any news about Webb? " });
+ok(screen().join() === "user:Any news about Webb?", `the user's words on screen: ${screen()}`);
 ev({ type: "links", links: [{ label: "early", url: "https://early.example/" }] });     // no reply yet: dropped
 ev({ type: "reply", text: "Webb found a far-off burst." });
 ev({ type: "links", links: [{ label: "science.nasa.gov", url: NASA }, { label: "bad", url: "javascript:alert(1)" },
                             { label: "", url: "https://x.example/" }] });
 ev({ type: "links", links: [{ label: "science.nasa.gov", url: NASA }] });                // cited twice: shown once
 ev({ type: "reply", text: "Webb found a far-off burst. And more." });                    // the text so far: links stay
-let r = s.replies.at(-1);
-ok(s.replies.length === 1 && r.text === "Webb found a far-off burst. And more.", `the reply's text, updated: ${r.text}`);
+let r = s.log.at(-1);
+ok(s.log.length === 2 && r.who === "agent" && r.text === "Webb found a far-off burst. And more.", `the reply, updated: ${r.text}`);
 ok(r.links.map(l => l.url).join() === `${NASA},https://x.example/`, `links, once each, http(s) only: ${r.links.map(l => l.url)}`);
 ok(r.links[1].label === "https://x.example/", "a link with no label shows its URL");
-ok(s.shown, "the reply is shown");
-ev({ type: "turn_done" }); ev({ type: "reply", text: "Next one." });
-ok(s.replies.length === 2 && s.replies[1].links.length === 0, "a new reply starts without links");
-ev({ type: "endpoint", turn_s: 1 });
-ok(!s.shown && s.replies.length === 2, "the user's next turn takes the reply off the screen; history keeps it");
+ok(screen().length === 2, `the exchange on screen: the words, then the reply: ${screen()}`);
+ev({ type: "turn_done" });
+ok(screen().length === 2, "after the turn, the exchange stays on screen");
+ev({ type: "backchannel", text: "Mm-hm." });                                             // the user speaks again
+ok(screen().length === 0 && s.acks.join() === "Mm-hm.", `a backchannel: the user's new turn takes the screen: ${screen()}`);
+ev({ type: "backchannel_done", text: "Mm-hm.", aborted: false }); ev({ type: "backchannel", text: "Right." });
+ev({ type: "endpoint", turn_s: 3, transcript: "And the rover?" });
+ok(screen().join() === "user:And the rover?[Mm-hm.,Right.]" && s.acks.length === 0, `the turn's acks go with its words: ${screen()}`);
+ev({ type: "backchannel_done", text: "Right.", aborted: true });                         // dropped unvoiced, after the endpoint
+ok(screen().join() === "user:And the rover?[Mm-hm.]", `an unvoiced backchannel is taken back: ${screen()}`);
+ev({ type: "reply", text: "Next one." });
+ok(s.log.at(-1).links.length === 0, "a new reply starts without links");
+ev({ type: "barge", yield: 0.8 }); ev({ type: "reply", text: "Next one, and" });
+ok(s.log.at(-1).cut && s.log.at(-1).text === "Next one, and", "cut off: marked, and its last text still lands");
+ev({ type: "turn_done", barged: true });
+ev({ type: "backchannel", text: "Okay." }); ev({ type: "backchannel_done", text: "Okay.", aborted: true });
+ok(s.acks.length === 0, "an unvoiced backchannel before the endpoint is taken back too");
+ev({ type: "endpoint", turn_s: 1, transcript: "" });                                     // nothing heard
+ok(screen().length === 0 && s.log.length === 4, `no words: nothing added, the screen cleared: ${screen()}`);
 ev({ type: "task_done", task: 3 }); ev({ type: "reply", text: "Your timer is done." });
-ok(s.replies[2].task === 3, "a background task's reply says which task");
+ok(screen().join() === "agent:Your timer is done." && s.log.at(-1).task === 3, `a background task speaks up: ${screen()}`);
 s = T.reduce(s, { kind: "closed", why: "" });
-ok(s.conn === "off" && s.replies.length === 3, "Stop keeps the history");
+ok(s.conn === "off" && s.log.length === 5 && screen().length === 0, "Stop keeps the history, clears the screen");
+ok(s.log.map(x => x.who).join() === "user,agent,user,agent,agent", `the history, in order: ${s.log.map(x => x.who)}`);
 
 console.log(`${checks - fails}/${checks} checks passed`);
 process.exit(fails ? 1 : 0);
