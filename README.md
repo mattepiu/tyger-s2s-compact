@@ -148,7 +148,8 @@ suppression, auto gain) is on.
 
 **The new page (a trial, `web/`).** A friendlier page with:
 - one mic button, and the characters as tabs;
-- a full-screen animation that follows the conversation (listening, thinking, looking it up, speaking);
+- a voice glow along the bottom ([voice-glow](https://libraries.dev/voice.html)). It rises with whoever is talking,
+  you or the agent, and sweeps as one beam while the agent thinks or looks something up;
 - the reply as text with the sources it cited, and a history.
 
 It's the same WebSocket and the same audio code, so EARS doesn't change. Run it beside the stack (node ≥ 22):

@@ -43,7 +43,6 @@ export interface Events {
   closed(reason: string): void        // "" unless EARS said why (busy, MOUTH gone)
   failed(why: string): void           // the mic or the audio couldn't start
   message(m: Message): void           // every JSON message from EARS
-  level(peak: number): void           // the mic's peak (0..1), every 100 ms
   playing(on: boolean): void          // reply audio started / all of it has played (backchannels aside)
 }
 
@@ -56,6 +55,10 @@ export class Conversation {
   ctx: AudioContext | null = null
   stream: MediaStream | null = null
   nodes: AudioNode[] = []
+  out: GainNode | null = null          // the replies play through it, so outMeter hears them
+  micMeter: AnalyserNode | null = null
+  outMeter: AnalyserNode | null = null
+  buf = new Float32Array(512)
   inLatency = 0
   closeReason = ""
   // Reply chunks as scheduled on the context clock: {id, t0, t1, first: its first sample in the reply}. Backchannel
@@ -63,7 +66,6 @@ export class Conversation {
   sched: Chunk[] = []
   queued: Record<number, number> = {}
   lastId = 0
-  micBlocks = 0
   nextPlay = 0
   active: Source[] = []
   replies = 0                          // reply chunks (not backchannels) scheduled and not yet played
@@ -100,7 +102,24 @@ export class Conversation {
     mic.port.onmessage = (e) => this.onMic(e.data.t, e.data.x)
     const gain = ctx.createGain(); gain.gain.value = 0   // keeps the worklet pulled by the graph, silently
     source.connect(mic); mic.connect(gain); gain.connect(ctx.destination)
-    this.nodes = [mic, source, gain]
+    const micMeter = this.micMeter = ctx.createAnalyser(), out = this.out = ctx.createGain()
+    const outMeter = this.outMeter = ctx.createAnalyser()
+    micMeter.fftSize = outMeter.fftSize = this.buf.length
+    source.connect(micMeter); out.connect(ctx.destination); out.connect(outMeter)
+    this.nodes = [mic, source, gain, micMeter, out, outMeter]
+  }
+
+  // How loud each voice is right now (RMS of the last ~10 ms): the user's at the mic, the agent's as it plays. 0 when
+  // there's no conversation. The page's glow reads it every frame.
+  meter() {
+    const rms = (a: AnalyserNode | null) => {
+      if (!a) return 0
+      a.getFloatTimeDomainData(this.buf)
+      let sum = 0
+      for (let i = 0; i < this.buf.length; i++) sum += this.buf[i] * this.buf[i]
+      return Math.sqrt(sum / this.buf.length)
+    }
+    return { mic: rms(this.micMeter), out: rms(this.outMeter) }
   }
 
   stop() {                                               // the user stopped: closed("") now, not when the socket closes
@@ -136,13 +155,7 @@ export class Conversation {
   }
 
   onMic(t: number, x: Float32Array) {
-    if (!this.open) return
-    this.ws!.send(this.micFrame(t, x))
-    if (++this.micBlocks % 5 === 0) {
-      let peak = 0
-      for (let i = 0; i < x.length; i++) { const a = Math.abs(x[i]); if (a > peak) peak = a }
-      this.on.level(peak)
-    }
+    if (this.open) this.ws!.send(this.micFrame(t, x))
   }
 
   playChunk(ab: ArrayBuffer) {                           // [int32 id][int16 samples at 24 kHz]
@@ -151,7 +164,7 @@ export class Conversation {
     const id = new DataView(ab).getInt32(0, true), pcm = new Int16Array(ab, 4)
     const b = ctx.createBuffer(1, pcm.length, WIRE_SR), ch = b.getChannelData(0)
     for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 32768
-    const s: Source = ctx.createBufferSource(); s.buffer = b; s.connect(ctx.destination)
+    const s: Source = ctx.createBufferSource(); s.buffer = b; s.connect(this.out || ctx.destination)
     const t = ctx.currentTime
     if (this.nextPlay < t) this.nextPlay = t + 0.04
     s.start(this.nextPlay)
@@ -187,6 +200,6 @@ export class Conversation {
     try { this.nodes.forEach((n) => n.disconnect()) } catch {}
     try { this.stream?.getTracks().forEach((t) => t.stop()) } catch {}
     try { this.ctx?.close() } catch {}
-    this.nodes = []; this.stream = null; this.ctx = null
+    this.nodes = []; this.stream = null; this.ctx = null; this.out = this.micMeter = this.outMeter = null
   }
 }

@@ -1,7 +1,8 @@
 // The new page's own check (web/), GPU-free and without a browser: web/lib/conversation.ts with page_check.mjs's fake
 // audio APIs and its cases (the worklet's 16 kHz blocks, the playback tags, the int16 frames, the `played` report only
 // once the queue drains, none after a stop, Stop -> Start without a reload), plus what's new there (reply audio
-// playing / drained, the reason a conversation closed, an old socket's late close); and web/lib/talk.ts, what the page
+// playing / drained, the voices' meters, the reason a conversation closed, an old socket's late close); and
+// web/lib/talk.ts, what the page
 // shows (the phases, the replies and the links they cite). Audio is synthetic (a sine, silence).
 //   node tests/page/web_check.mjs        # node >= 22.18 (runs the TypeScript as is); no npm install needed
 import vm from "vm";
@@ -20,10 +21,12 @@ G.AudioContext = class {
   constructor() { this.currentTime = 10.0; this.sampleRate = 48000; this.baseLatency = 0.01; this.outputLatency = 0.02;
     this.destination = {}; this.audioWorklet = { addModule: async () => {} }; G._ctx = this; G._sources = []; }
   createBuffer(ch, n, sr) { const d = new Float32Array(n); return { duration: n / sr, getChannelData: () => d }; }
-  createBufferSource() { const s = { connect() {}, start(t) { s.t = t; }, stop() { s.onended && s.onended(); } };
+  createBufferSource() { const s = { connect(n) { s.to = n; }, start(t) { s.t = t; }, stop() { s.onended && s.onended(); } };
     G._sources.push(s); return s; }
   createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
-  createGain() { return { gain: {}, connect() {}, disconnect() {} }; }
+  createGain() { const g = { gain: {}, to: [], connect(n) { g.to.push(n); }, disconnect() {} }; return g; }
+  createAnalyser() { const a = { fftSize: 2048, value: 0, connect() {}, disconnect() {},     // a steady signal of `value`
+    getFloatTimeDomainData(buf) { buf.fill(a.value); } }; (G._analysers ||= []).push(a); return a; }
   close() {}
 };
 Object.defineProperty(G, "navigator", { configurable: true, value: { mediaDevices: { getUserMedia: async () => ({
@@ -66,7 +69,7 @@ for (const sr of [48000, 44100]) {
 const log = [];                                       // the page's side: every event, in order
 const conv = new Conversation({
   opened: () => log.push(["opened"]), closed: why => log.push(["closed", why]), failed: why => log.push(["failed", why]),
-  message: m => log.push(["message", m.type]), level: p => log.push(["level", p]), playing: on => log.push(["playing", on]),
+  message: m => log.push(["message", m.type]), playing: on => log.push(["playing", on]),
 });
 const playing = () => log.filter(e => e[0] === "playing").map(e => e[1]);
 await conv.start();
@@ -94,9 +97,15 @@ const pcm = new Int16Array(conv.micFrame(10.0, x), 8);
 ok(pcm[0] === 16384 && pcm[1] === -32767 && pcm[2] === 32767, `int16 mic samples ${Array.from(pcm)}`);
 ok(conv.micFrame(10.0, x).byteLength === 8 + 6, "8-byte header + 2 bytes a sample");
 ws.sent.length = 0;
-for (let k = 0; k < 5; k++) conv.onMic(10.0 + k * 0.02, x);   // the mic: every block sent, its level every 5th
+for (let k = 0; k < 5; k++) conv.onMic(10.0 + k * 0.02, x);   // the mic: every block sent
 ok(ws.sent.length === 5 && ws.sent.every(b => b instanceof ArrayBuffer), `mic blocks sent: ${ws.sent.length}`);
-ok(log.filter(e => e[0] === "level").length === 1 && log.at(-1)[1] === 2.0, `the mic level, every 5th block: ${log.at(-1)}`);
+const [micA, outA] = [conv.micMeter, conv.outMeter];             // the meters: the mic's, and the reply as it plays
+micA.value = 0.1; outA.value = -0.25;
+const lv = conv.meter();
+ok(Math.abs(lv.mic - 0.1) < 1e-6 && Math.abs(lv.out - 0.25) < 1e-6, `the voices' loudness (RMS): ${JSON.stringify(lv)}`);
+ok(micA.fftSize === 512 && G._analysers.length === 2, "two meters of 512 samples");
+ok(G._sources[0].to === conv.out && conv.out.to.includes(ctx.destination) && conv.out.to.includes(outA),
+   "the replies play through the out meter to the speakers");
 
 ctx.currentTime = 10.5;                               // a backchannel: played, never tagged, not "playing"
 conv.stopPlayback(); log.length = 0;
@@ -138,6 +147,7 @@ recv(frame(1, 24000));                                // something still queued 
 conv.stop();
 ok(log.some(e => e[0] === "closed" && e[1] === ""), `Stop: closed, no reason: ${JSON.stringify(log)}`);
 ok(ws.readyState === 3, "Stop closes the socket");
+ok(JSON.stringify(conv.meter()) === '{"mic":0,"out":0}', `no conversation, no sound: ${JSON.stringify(conv.meter())}`);
 await conv.start();
 await sleep(10);
 const ctx2 = G._ctx, ws2 = G._ws;

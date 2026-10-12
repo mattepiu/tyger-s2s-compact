@@ -24,8 +24,9 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **All prompts in one file,** `config/prompts.yaml`, checked at startup.
 - **Config checks:** a typo in the config stops startup and names the key.
 - **Tuning sliders** on the page (`?nodebug` hides them), built from the turn-taking plugin's thresholds.
-- **A new page, on trial** (`web/`): one mic button and the characters as tabs. A full-screen animation follows the
-  conversation, and the reply shows as text with its sources and a history. The classic page is still at `/`.
+- **A new page, on trial** (`web/`): one mic button and the characters as tabs. A voice glow rises with whoever is
+  talking and sweeps while the agent thinks. The reply shows as text with its sources and a history. The classic
+  page is still at `/`.
 - **Tests that need no GPU,** and a check of the web page in jsdom.
 - **A routing test** (`scripts/bench/escalation.py`): 119 synthetic cases, no API cost.
 - **Measurement scripts:** smoke and load tests on the running stack, GPU parity checks, stack comparisons.

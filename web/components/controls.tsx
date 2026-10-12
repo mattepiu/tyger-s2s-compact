@@ -1,8 +1,7 @@
 "use client"
-// The bottom controls: the character tabs (the template's shape tabs: each character draws its own shape) and the mic.
-import { GLYPHS, type ShapeType } from "@/lib/shapes"
+// The bottom controls: the characters as tabs, and the mic.
 
-export type Character = { voice: string; name: string; shape: ShapeType }
+export type Character = { voice: string; name: string }
 
 export function Characters({ list, voice, onPick }: { list: Character[]; voice: string; onPick: (v: string) => void }) {
   if (list.length < 2) return null
@@ -13,22 +12,21 @@ export function Characters({ list, voice, onPick }: { list: Character[]; voice: 
         <button key={c.voice} role="tab" aria-selected={c.voice === voice} onClick={() => onPick(c.voice)}
                 className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
                   c.voice === voice ? "bg-white text-black" : "text-white/75 hover:text-white"}`}>
-          <span className="mr-1.5 text-xs" aria-hidden>{GLYPHS[c.shape]}</span>{c.name}
+          {c.name}
         </button>
       ))}
     </div>
   )
 }
 
-export function MicButton({ conn, level, onClick }: { conn: "off" | "connecting" | "on"; level: number; onClick: () => void }) {
+export function MicButton({ conn, onClick }: { conn: "off" | "connecting" | "on"; onClick: () => void }) {
   const on = conn !== "off"
   return (
     <button onClick={onClick} aria-label={on ? "Stop" : "Start talking"}
-            className={`grid size-18 place-items-center rounded-full transition-[transform,background-color,box-shadow] duration-150 ${
+            className={`grid size-18 place-items-center rounded-full transition-[transform,background-color] duration-150 ${
               on ? "border border-white/25 bg-white/10 text-white backdrop-blur-xl"
                  : "bg-white text-black shadow-[0_0_40px_rgba(255,255,255,0.25)] hover:scale-105"} ${
-              conn === "connecting" ? "animate-pulse" : ""}`}
-            style={conn === "on" ? { boxShadow: `0 0 0 ${Math.round(level * 22)}px rgba(255,255,255,0.14)` } : undefined}>
+              conn === "connecting" ? "animate-pulse" : ""}`}>
       {on ? <StopIcon /> : <MicIcon />}
     </button>
   )
