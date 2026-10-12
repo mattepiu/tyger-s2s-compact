@@ -77,8 +77,9 @@ tests/                     # GPU-free: ears/, mouth/, plugins/, the config / pro
                            #   page/ holds the pages' own checks (node): page_check.mjs (jsdom), web_check.mjs
 static/index.html          # the page: mic capture (AudioWorklet), playback, the tags, the debug sliders
 web/                       # the new page (a trial, Next.js): lib/conversation.ts = the page's audio + WebSocket code,
-                           #   lib/talk.ts = what it shows (the phases), lib/fields.ts = the ASCII backdrop's
-                           #   patterns; `npm run dev` on :3000 passes /ws to EARS
+                           #   lib/talk.ts = what it shows (the phases), components/orb.tsx = the orb; OrbKit's
+                           #   files as copied from the Agents Kit registry (orbkit-shdr-13, with their licence) in
+                           #   components/voice-agents/orbkit/; `npm run dev` on :3000 passes /ws to EARS
 run.sh, stop.sh            # start and stop the stack
 ```
 

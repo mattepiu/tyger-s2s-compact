@@ -148,9 +148,9 @@ suppression, auto gain) is on.
 
 **The new page (a trial, `web/`).** A friendlier page with:
 - one mic button, and the characters as tabs;
-- an ASCII-art backdrop, one pattern per state after the template's animations: Analyze (the first screen, and
-  thinking), Think's ripples (listening, with your voice), Deep's spiral (looking it up), Transfer's waves (speaking,
-  with the agent's voice) and Intense (a barge-in);
+- an orb in the middle ([OrbKit](https://github.com/zzzzshawn/orbkit)'s Ion, MIT, from the
+  [Agents Kit](https://agents-ui.github.io/agents-kit/voice) registry). Its state follows the conversation (idle,
+  thinking, speaking), and it reacts to your voice while you talk and to the agent's while it speaks;
 - the exchange as text: your words, the agent's backchannels while you spoke, its reply with the sources it
   cited; and the whole conversation in a history.
 

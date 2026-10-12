@@ -3,7 +3,7 @@
 // once the queue drains, none after a stop, Stop -> Start without a reload), plus what's new there (reply audio
 // playing / drained, the voices' meters, the reason a conversation closed, an old socket's late close); and
 // web/lib/talk.ts, what the page shows (the phases; the user's words, the backchannels, the replies and the links they
-// cite); and web/lib/fields.ts, the backdrop's ASCII patterns. Audio is synthetic (a sine, silence).
+// cite). Audio is synthetic (a sine, silence).
 //   node tests/page/web_check.mjs        # node >= 22.18 (runs the TypeScript as is); no npm install needed
 import vm from "vm";
 
@@ -266,33 +266,6 @@ ok(screen().join() === "agent:Your timer is done." && s.log.at(-1).task === 3, `
 s = T.reduce(s, { kind: "closed", why: "" });
 ok(s.conn === "off" && s.log.length === 5 && screen().length === 0, "Stop keeps the history, clears the screen");
 ok(s.log.map(x => x.who).join() === "user,agent,user,agent,agent", `the history, in order: ${s.log.map(x => x.who)}`);
-
-// ---- the backdrop's patterns (fields.ts): 0..1 everywhere, from t alone, moving; the voice lifts Think and Transfer --
-const F = await import("../../web/lib/fields.ts");
-const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
-for (const g of [{ cols: 180, rows: 64, aspect: 1.7 }, { cols: 34, rows: 70, aspect: 1.7 }, { cols: 1, rows: 1, aspect: 1 }]) {
-  for (const p of F.PATTERNS) {
-    const a = new Float32Array(g.cols * g.rows), b = new Float32Array(a.length), c = new Float32Array(a.length);
-    let bad = 0;
-    for (const t of [0, 0.37, 2.4, 3.0, 1234.5]) {
-      F.fill(p, g, t, 0.5, a);
-      bad += a.filter(v => !(v >= 0 && v <= 1)).length;
-    }
-    ok(bad === 0, `${p} ${g.cols}x${g.rows}: every cell 0..1 (${bad} not)`);
-    F.fill(p, g, 10, 0, a); F.fill(p, g, 10, 0, b); F.fill(p, g, 10.5, 0, c);
-    ok(a.every((v, i) => v === b[i]), `${p} ${g.cols}x${g.rows}: the same t, the same picture`);
-    if (g.cols > 1) ok(a.some((v, i) => Math.abs(v - c[i]) > 0.05), `${p}: it moves`);
-  }
-}
-{
-  const g = { cols: 120, rows: 50, aspect: 1.7 }, lo = new Float32Array(g.cols * g.rows), hi = new Float32Array(lo.length);
-  for (const p of ["think", "transfer"]) {
-    F.fill(p, g, 5, 0, lo); F.fill(p, g, 5, 1, hi);
-    ok(mean(hi) > mean(lo) * 1.2, `${p}: louder voice, brighter (${mean(lo).toFixed(3)} -> ${mean(hi).toFixed(3)})`);
-  }
-  F.fill("analyze", g, 5, 0, lo);
-  ok(lo.some(v => v >= 0.99), "analyze: its signals are drawn");
-}
 
 console.log(`${checks - fails}/${checks} checks passed`);
 process.exit(fails ? 1 : 0);

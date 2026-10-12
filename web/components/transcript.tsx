@@ -22,7 +22,7 @@ function Sources({ links }: { links: Link[] }) {
 // The agent's backchannels while the user spoke ("Ori: Mm-hm."), under the user's words.
 function Acks({ acks, name }: { acks: string[]; name: string }) {
   if (!acks.length) return null
-  return <div className="legible px-1 text-xs text-white/70"><span className="font-medium">{name}:</span> {acks.join(" ")}</div>
+  return <div className="px-1 text-xs text-white/55"><span className="font-medium">{name}:</span> {acks.join(" ")}</div>
 }
 
 function UserLine({ text, acks, name, small }: { text: string; acks: string[]; name: string; small?: boolean }) {
