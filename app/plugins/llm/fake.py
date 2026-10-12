@@ -5,18 +5,44 @@ still-looking / backchannel / the expert lead-in and still-looking lines / the s
 `smart_b` once a tool result is in) / a background task on the smart model (`task`, `task_b`; by default it calls
 finish_task) / phase B (a tool result present) / the main reply, and streams the scripted text for that kind a
 few characters at a time, polling stop_flag between items like the real engine loop. `reply` and `smart` may contain
-Hermes <tool_call>s, which go through the same splitting, naming (tool_start) and parsing as a local plugin's calls. For tests of hosted
-behaviour, `fail` maps a request kind to an LLMError kind raised for it (after `fail_after` items), and `refuse`
-lists kinds answered with a refusal. Every request is recorded in `calls` (kind, messages); nothing is logged.
+tool calls in Hermes JSON, its own call format (HermesCalls, below), which go through the same splitting, naming
+(tool_start) and parsing as a local plugin's calls. For tests of hosted behaviour, `fail` maps a request kind to an
+LLMError kind raised for it (after `fail_after` items), and `refuse` lists kinds answered with a refusal. Every
+request is recorded in `calls` (kind, messages); nothing of a request is logged.
 """
 from __future__ import annotations
-import threading, time
+import json, logging, re, threading, time
 from dataclasses import dataclass, field
 
 from app.plugins.base import LLMError, LLMPlugin
 from app.plugins.options import PluginOptions
-from app.plugins.llm.calls import split_speakable, parse_calls, new_call_id, tool_start, names_tool
+from app.plugins.llm.calls import CallFormat, split_speakable, new_call_id, tool_start, names_tool
 
+log = logging.getLogger("llm")
+
+
+class HermesCalls(CallFormat):
+    """Hermes JSON: <tool_call>{"name": ..., "arguments": {...}}</tool_call>."""
+    tag = "<tool_call>"
+    name = re.compile(r'\s*\{\s*"name"\s*:\s*"([^"\\]+)"')       # the closing quote seen
+    CALL = re.compile(r"<tool_call>(.*?)</tool_call>", re.S)
+
+    def parse(self, raw):
+        """A block that doesn't parse (or never closes: cut off) is dropped, logged by kind only, never its text."""
+        out = []
+        for m in self.CALL.finditer(raw):
+            try:
+                c = json.loads(m.group(1).strip())
+            except Exception:
+                c = None
+            if not isinstance(c, dict) or not c.get("name"):
+                log.warning("unparseable tool call dropped")
+                continue
+            out.append({"name": c["name"], "arguments": c.get("arguments") or {}})
+        return out
+
+
+HERMES = HermesCalls()
 KINDS = ("reply", "phase_b", "leadin", "still", "ack", "expert_leadin", "expert_still", "smart", "smart_b", "task",
          "task_b", "task_failed")
 FINISH_CALL = ('<tool_call>\n{"name": "finish_task", "arguments": {"summary": "About your task: it is done, and it '
@@ -110,11 +136,11 @@ class FakeLLM(LLMPlugin):
                 if started:
                     continue
                 if not saw_tool:
-                    speak, saw_tool = split_speakable(raw)
+                    speak, saw_tool = split_speakable(raw, HERMES)
                     if len(speak) > said:
                         yield ("text", speak[said:]); said = len(speak)
                 if saw_tool and getattr(self, "emit_tool_start", True):
-                    started = tool_start(raw) if names_tool(tools) else {"name": None}
+                    started = tool_start(raw, HERMES) if names_tool(tools) else {"name": None}
                     if started:
                         yield ("tool_start", started)
             if stop_flag and stop_flag():
@@ -122,7 +148,7 @@ class FakeLLM(LLMPlugin):
             if not saw_tool and len(raw) > said:
                 yield ("text", raw[said:])
             if saw_tool:
-                calls = parse_calls(raw, "hermes_json")
+                calls = HERMES.parse(raw)
                 if not started and getattr(self, "emit_tool_start", True):
                     yield ("tool_start", {"name": calls[0]["name"] if calls else None})
                 yield ("tool_calls", [{"id": new_call_id(), **c} for c in calls], None)

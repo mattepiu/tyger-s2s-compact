@@ -1,136 +1,67 @@
-"""Text-level helpers for models that write tool calls into their text: splitting the speakable part off at a call's
-opening tag, and parsing the two call formats in use.
+"""What every tool-call format shares. A model that writes its tool calls into its text declares a CallFormat: the
+tag a call opens with, the pattern of the tool's name right after it, parse(), and an optional repair, normalize().
+Each format lives with its model: Gemma 4's in llm/local/gemma4/calls.py, Hermes JSON (the fake LLM's) in fake.py.
 
-  * Gemma 4 (gemma-4-e4b): <|tool_call>call:NAME{key:<|"|>text<|"|>,n:3}<tool_call|> (special tokens: decode them).
-    Gemma sometimes drops the markers; gemma_normalize puts them back for the offered tools.
-  * Hermes JSON (the fake LLM): <tool_call>{"name": ..., "arguments": {...}}</tool_call>
-
-Each format's calls open with their own tag (TAGS), passed to the splitting / naming helpers. check_arguments /
-flag_invalid: the one check of a call's arguments against the offered tool's schema (the hosted plugins run it on
-every call).
+The helpers here take the format object, so nothing in this module names a model:
+  * split_speakable: the speakable text before a call's tag (a trailing partial tag is held back until it resolves);
+  * tool_start: the tool named early, as soon as its name has decoded;
+  * new_call_id: tool-call ids;
+  * check_arguments / flag_invalid: the one check of a call's arguments against the offered tool's schema (the
+    hosted plugins run it on every call; their APIs return structured calls, so they need no format).
 """
 from __future__ import annotations
-import json, logging, re, uuid
-
-log = logging.getLogger("llm")
-TAG = "<tool_call>"
-GEMMA_TAG, GEMMA_Q = "<|tool_call>", '<|"|>'
-TAGS = {"hermes_json": TAG, "gemma4": GEMMA_TAG}      # the tag a format's calls open with
-GCALL = re.compile(r"<\|tool_call>call:([\w.-]+)\{(.*?)\}(?:<tool_call\|>|<turn\|>|$)", re.S)
-TCALL = re.compile(r"<tool_call>(.*?)</tool_call>", re.S)
+import re, uuid
+from abc import ABC, abstractmethod
 
 
-def _hold_back(text: str, tags) -> int:
-    """Length of a trailing partial prefix of any of `tags` (to hold back until it resolves)."""
-    for k in range(min(max(len(t) for t in tags) - 1, len(text)), 0, -1):
-        if any(t.startswith(text[-k:]) for t in tags):
+class CallFormat(ABC):
+    """How a model writes its tool calls into its text."""
+    tag: str                     # a call opens with it
+    name: re.Pattern             # the tool's name right after the tag: group 1
+
+    @abstractmethod
+    def parse(self, raw: str) -> list[dict]:
+        """[{"name", "arguments"}] for each call in `raw`."""
+
+    def normalize(self, raw: str, names, final: bool = False) -> str:
+        """`raw` with the model's malformed calls rewritten into the tagged form (`names`: the offered tools).
+        Mid-stream it may hold back a trailing word that could still start a call; final=True (the stream ended)
+        holds nothing back. No repair by default."""
+        return raw
+
+
+def _hold_back(text: str, tag: str) -> int:
+    """Length of a trailing partial prefix of `tag` (to hold back until it resolves)."""
+    for k in range(min(len(tag) - 1, len(text)), 0, -1):
+        if tag.startswith(text[-k:]):
             return k
     return 0
 
 
-def split_speakable(raw: str, tag: str = TAG):
-    """(speakable_prefix, saw_tool_call) for the raw model text so far. A trailing partial "<tool_c" is held
-    back until it resolves; text from the first call `tag` on is never speakable."""
-    i = raw.find(tag)
+def split_speakable(raw: str, fmt: CallFormat):
+    """(speakable_prefix, saw_tool_call) for the raw model text so far. A trailing partial tag ("<tool_c") is held
+    back until it resolves; text from the first call tag on is never speakable."""
+    i = raw.find(fmt.tag)
     if i >= 0:
         return raw[:i], True
-    k = _hold_back(raw, (tag,))
+    k = _hold_back(raw, fmt.tag)
     return (raw[:-k] if k else raw), False
 
 
-def _hermes(body):
-    try:
-        c = json.loads(body)
-    except Exception:
-        return None
-    return c if isinstance(c, dict) else None
-
-
-def _gemma_value(v: str):
-    v = v.strip()
-    if v.startswith(GEMMA_Q) and v.endswith(GEMMA_Q) and len(v) >= 2 * len(GEMMA_Q):
-        return v[len(GEMMA_Q):-len(GEMMA_Q)]
-    try:
-        return json.loads(v)                       # numbers, true / false, null
-    except Exception:
-        return v
-
-
-def _gemma_args(body: str) -> dict:
-    """key:value pairs, comma-separated; string values are wrapped in <|"|> and may contain commas or colons.
-    Flat values only (every tool here takes strings); a nested {...} value stays a string."""
-    out = {}; pos = 0
-    while pos < len(body):
-        colon = body.find(":", pos)
-        if colon < 0:
-            break
-        key = body[pos:colon].strip().strip(",").strip()
-        rest = body[colon + 1:]
-        if rest.startswith(GEMMA_Q):
-            end = rest.find(GEMMA_Q, len(GEMMA_Q))
-            end = len(rest) if end < 0 else end + len(GEMMA_Q)
-        else:
-            end = rest.find(",")
-            end = len(rest) if end < 0 else end
-        if key:
-            out[key] = _gemma_value(rest[:end])
-        pos = colon + 1 + end + 1
-    return out
-
-
-def gemma_normalize(raw: str, names, final: bool = False) -> str:
-    """Gemma 4 sometimes writes a call without its markers: a bare `NAME{...}` or `call:NAME{...}` as plain text
-    (seen for set_reminder / send_message). For the offered tool `names`, rewrite those into the tagged form so
-    they split, name and parse like any call, and are never spoken. Mid-stream (not `final`), a trailing word that
-    could still become `NAME{` or `call:` is held back until it resolves."""
-    if not names:
-        return raw
-    alt = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
-    out = re.sub(r"(?<![\w|>:])(?:call:)?(" + alt + r")\{", lambda m: GEMMA_TAG + "call:" + m.group(1) + "{", raw)
-    out = out.replace(GEMMA_TAG + "call:" + GEMMA_TAG + "call:", GEMMA_TAG + "call:")      # already tagged
-    out = re.sub(r"(" + re.escape(GEMMA_TAG) + r"call:)(?:" + re.escape(GEMMA_TAG) + r"call:)+", r"\1", out)
-    if final or GEMMA_TAG in out:
-        return out
-    m = re.search(r"(?:^|(?<=[\s.,!?;]))[\w:]+$", out)              # the trailing word, if it starts a call
-    if m and any((t + "{").startswith(m.group(0)) or ("call:" + t + "{").startswith(m.group(0)) for t in names):
-        return out[:m.start()]
-    return out
-
-
-def parse_calls(raw: str, fmt: str):
-    """[{"name", "arguments"}] for each call block in raw, read in `fmt` (a TAGS key); a Hermes block that doesn't
-    parse (or never closes: cut off) is dropped (logged by kind only, never its text)."""
-    if fmt == "gemma4":
-        return [{"name": m.group(1), "arguments": _gemma_args(m.group(2))} for m in GCALL.finditer(raw)]
-    if fmt != "hermes_json":
-        raise ValueError(f"unknown tool-call format {fmt!r}")
-    out = []
-    for m in TCALL.finditer(raw):
-        c = _hermes(m.group(1).strip())
-        if c is None or not c.get("name"):
-            log.warning("unparseable tool call dropped")
-            continue
-        out.append({"name": c["name"], "arguments": c.get("arguments") or {}})
-    return out
-
-
-# the first call's name, complete: Hermes {"name": "x" (closing quote seen) or Gemma call:x{ (after its tag)
-_NAME = (re.compile(r'\s*\{\s*"name"\s*:\s*"([^"\\]+)"'), re.compile(r"\s*call:([\w.-]+)\{"))
 NAME_WAIT = 64          # characters after the tag; a call that hasn't named its tool by then starts unnamed
 
 
-def tool_start(raw: str, tag: str = TAG):
-    """The ("tool_start") payload for raw text that has a call `tag`: {"name": ...} once the first call's name
-    has decoded (every format names the tool first), {"name": None} if NAME_WAIT characters past the tag still
-    don't name one, else None (wait for more text)."""
-    i = raw.find(tag)
+def tool_start(raw: str, fmt: CallFormat):
+    """The ("tool_start") payload for raw text that has a call tag: {"name": ...} once the first call's name has
+    decoded (every format names the tool first), {"name": None} if NAME_WAIT characters past the tag still don't
+    name one, else None (wait for more text)."""
+    i = raw.find(fmt.tag)
     if i < 0:
         return None
-    body = raw[i + len(tag):]
-    for rx in _NAME:
-        m = rx.match(body)
-        if m:
-            return {"name": m.group(1)}
+    body = raw[i + len(fmt.tag):]
+    m = fmt.name.match(body)
+    if m:
+        return {"name": m.group(1)}
     return {"name": None} if len(body) >= NAME_WAIT else None
 
 

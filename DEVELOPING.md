@@ -40,12 +40,15 @@ app/
     base.py                #   LLMPlugin, TTSPlugin, EarsPlugin: ABC bases with defaults; Threshold, Slider
     options.py             #   PluginOptions: a plugin's config block, typed, checked at load
     llm/
-      calls.py             #   splitting speech from calls, parsing them (Gemma 4, Hermes JSON), check_arguments
-      fake.py
-      local/               #   in-process vLLM models
+      calls.py             #   CallFormat, and what every format shares: speech split from a call at its tag, the
+                           #     tool named early (tool_start), call ids, check_arguments / flag_invalid
+      fake.py              #   the fake LLM, with its own call format (Hermes JSON)
+      local/               #   in-process vLLM models, a folder each
         vllm_base.py       #     VLLMChatPlugin: an in-process vLLM AsyncLLM (pinned KV, abort by request id)
-        gemma4/plugin.py   #     gemma-4-e4b, the responder
-      hosted/              #   hosted APIs
+        gemma4/
+          plugin.py        #       gemma-4-e4b, the responder
+          calls.py         #       Gemma 4's call format: its tag, parsing, the repair of dropped markers
+      hosted/              #   hosted APIs, a module each, with its own stream parser
         base.py            #     HostedLLM: key, timeouts, concurrency, errors, the debug-log guard
         openai_responses.py  #   openai-responses, the smart model
         anthropic.py       #     anthropic, its alternative
@@ -268,14 +271,24 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Run & rea
     - `("refusal", category)`.
 - **Lazy imports.** A plugin imports vllm, vllm-omni or an SDK in its constructor, so EARS and the tests can import
   plugin classes cheaply. `test_plugins.py` checks it.
-- **The local LLM** (`VLLMChatPlugin` + `local/gemma4/plugin.py`) is Gemma 4 E4B:
+- **Call formats.** A local model writes its tool calls into its text, each model in its own way. Its plugin
+  declares that format (`calls`, a `CallFormat` from the model's own `calls.py`):
+  - the tag a call opens with;
+  - the pattern of the tool's name right after the tag;
+  - `parse(raw)`;
+  - an optional repair, `normalize`.
+
+  The shared helpers in `llm/calls.py` take the format object: speech is cut at the tag (a partial tag is held
+  back), and `tool_start` names the tool as soon as its name has decoded. `VLLMChatPlugin` has no default format.
+  Hosted APIs return structured calls, so they need none.
+- **The local LLM** (`VLLMChatPlugin` + `local/gemma4/`) is Gemma 4 E4B:
   - FP8 at load (`quantization: fp8`);
   - text only (`language_model_only`: the vision and audio towers aren't loaded);
   - thinking off.
 
   Its calls are written in special tokens (`<|tool_call>call:NAME{…}<tool_call|>`), so it decodes with
-  `skip_special_tokens=False`. When it drops the markers and writes a bare `set_reminder{…}`, that counts as a call
-  to the offered tool, and is never spoken.
+  `skip_special_tokens=False`. When it drops the markers and writes a bare `set_reminder{…}`, its format's
+  `normalize` makes that a call to the offered tool, and it is never spoken.
 - **The hosted LLMs** share `HostedLLM`:
   - the key from the variable `api_key_env` names;
   - short timeouts, `max_retries` 1, a concurrency cap;
@@ -379,6 +392,42 @@ llm:
   reply: {plugin: echo, prefix: "I heard"}
 ```
 
+**A new local model** is a folder in `app/plugins/llm/local/`: its plugin, its call format, and one registry line.
+The format is whatever the model writes. This one is Hermes JSON (`<tool_call>{"name": …, "arguments": …}`):
+
+```python
+# app/plugins/llm/local/mymodel/calls.py
+import json, re
+from app.plugins.llm.calls import CallFormat
+
+
+class MyModelCalls(CallFormat):
+    tag = "<tool_call>"                                          # a call opens with it
+    name = re.compile(r'\s*\{\s*"name"\s*:\s*"([^"\\]+)"')      # the tool's name right after the tag
+
+    def parse(self, raw):
+        return [json.loads(m) for m in re.findall(r"<tool_call>(.*?)</tool_call>", raw, re.S)]
+```
+
+```python
+# app/plugins/llm/local/mymodel/plugin.py
+from app.plugins.llm.local.vllm_base import VLLMChatPlugin
+from app.plugins.llm.local.mymodel.calls import MyModelCalls
+
+
+class MyModel(VLLMChatPlugin):
+    default_model = "org/my-model"
+    calls = MyModelCalls()
+```
+
+```python
+# app/plugins/__init__.py, in REGISTRY["llm"]
+"my-model": "app.plugins.llm.local.mymodel.plugin:MyModel",
+```
+
+**A new hosted API** is a module in `app/plugins/llm/hosted/` that subclasses `HostedLLM`, with its own stream
+parser, as `openai_responses.py` and `anthropic.py` have. It needs no call format: the API returns structured calls.
+
 What the base gives you, and what is yours to write:
 - **Options.** The constructor `(conf, ctx)` turns the block into `self.opts`. It sets `self.name`, the instance
   name, and `self.eloop`, MOUTH's asyncio loop.
@@ -392,7 +441,9 @@ What the base gives you, and what is yours to write:
 - **LLM.**
   - `stream()` yields the neutral events above.
   - It polls `stop_flag`, and raises `LLMError` for a failed request (MOUTH speaks an apology).
-  - Local vLLM models subclass `VLLMChatPlugin` and override only its hooks, as `local/gemma4/plugin.py` does.
+  - Local vLLM models subclass `VLLMChatPlugin`, declare their `calls`, and override only the hooks they need
+    (`default_model`, `engine_kwargs`, `template_kwargs`, `sampling`), as `local/gemma4/plugin.py` does. A plugin
+    without `calls` can't be built.
   - Hosted APIs subclass `HostedLLM`, as `hosted/openai_responses.py` and `hosted/anthropic.py` do.
 - **TTS.**
   - Set `out_sr` and `caps`.
@@ -406,7 +457,8 @@ What the base gives you, and what is yours to write:
   - Write `open_session(thresholds)`, `close`, `feed` (one hop in, events out: FRAME, ENDPOINT, BARGE with
     `onset_s`, BACKCHANNEL), and `full` / `active`.
 - **Tests.** Add a run to `tests/plugins/test_contract.py` (`llm_suite`, `tts_suite` or `ears_suite`). The fakes in
-  `app/plugins/*/fake.py` are the smallest complete plugin of each kind.
+  `app/plugins/*/fake.py` are the smallest complete plugin of each kind. A new call format gets its own test file,
+  like `tests/plugins/test_calls_gemma4.py`.
 
 ### Adding a tool
 
@@ -477,7 +529,9 @@ own web search.
   tests/ears/test_rules.py              the turn rules: endpoint, backchannel, barge-in
   tests/plugins/test_plugins.py         base classes, light imports, off-rate TTS, thresholds
   tests/plugins/test_contract.py        the plugin contract on the fakes (TYGER_CONTRACT_LOCAL=1: the real plugins too)
-  tests/plugins/test_llm_parse.py       speech split from calls, the call formats
+  tests/plugins/test_llm_calls.py       what every call format shares, on a toy format; the local plugin base
+  tests/plugins/test_calls_gemma4.py    Gemma 4's call format and gemma-4-e4b's stream on it
+  tests/plugins/test_calls_hermes.py    Hermes JSON, the fake LLM's call format
   tests/plugins/test_hosted_openai_responses.py   openai-responses on stubbed streams
   tests/plugins/test_hosted_anthropic.py          anthropic on stubbed streams
   ```

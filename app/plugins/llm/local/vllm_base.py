@@ -1,21 +1,23 @@
 """In-process chat LLM on a vLLM AsyncLLM engine (no server, no HTTP), on MOUTH's EngineLoop. The base of the local
-plugins (gemma-4-e4b, local/gemma4/), which override only the hooks: default_model, tool_format, engine_kwargs,
-template_kwargs, sampling, normalize_calls.
+plugins (gemma-4-e4b, local/gemma4/). A local plugin declares the call format its model writes (`calls`, a
+CallFormat from its own calls.py; there is no default) and overrides only the other hooks: default_model,
+engine_kwargs, template_kwargs, sampling.
 
 stream(messages, tools=...) yields ("text", delta) for speakable text as it decodes; ("tool_start", {"name": ...})
-once the format's call tag (TAGS) has appeared: with ask_expert offered, only after the tool's name has decoded (a
-few tokens; the arguments are still decoding) so MOUTH can pick a lead-in that fits the tool, otherwise at the bare
-tag ({"name": None}); then at most one ("tool_calls", [{"id", "name", "arguments"}], None) at the end. Text from the
+once the format's call tag has appeared: with ask_expert offered, only after the tool's name has decoded (a few
+tokens; the arguments are still decoding) so MOUTH can pick a lead-in that fits the tool, otherwise at the bare tag
+({"name": None}); then at most one ("tool_calls", [{"id", "name", "arguments"}], None) at the end. Text from the
 first call tag on is never yielded as speech (a trailing partial tag is held back until it resolves). The KV budget
 is pinned (kv_cache_gib), so GPU memory doesn't depend on what else is loaded.
 """
 from __future__ import annotations
 import asyncio, threading, uuid, logging
+from abc import abstractmethod
 from dataclasses import dataclass
 
 from app.plugins.base import LLMPlugin
 from app.plugins.options import PluginOptions
-from app.plugins.llm.calls import split_speakable, parse_calls, new_call_id, tool_start, TAGS, names_tool
+from app.plugins.llm.calls import CallFormat, split_speakable, new_call_id, tool_start, names_tool
 
 log = logging.getLogger("llm")
 
@@ -36,7 +38,11 @@ def to_template_messages(messages):
 
 class VLLMChatPlugin(LLMPlugin):
     default_model: str = ""
-    tool_format: str = "hermes_json"            # calls.TAGS key: the call format the model writes
+
+    @property
+    @abstractmethod
+    def calls(self) -> CallFormat:
+        """The call format the model writes. A plugin sets it as a class attribute: calls = GemmaCalls()."""
 
     @dataclass(frozen=True, kw_only=True)
     class Options(PluginOptions):
@@ -84,12 +90,6 @@ class VLLMChatPlugin(LLMPlugin):
         return SamplingParams(max_tokens=int(max_new), output_kind=RequestOutputKind.DELTA,
                               temperature=self.temperature)
 
-    def normalize_calls(self, text: str, names, final: bool = False) -> str:
-        """Text with the model's malformed calls rewritten into its tagged format (`names`: the offered tools).
-        Mid-stream it may hold back a trailing word that could still start a call; final=True (the stream ended)
-        holds nothing back."""
-        return text
-
     # ---- LLMPlugin ----
     def stream(self, messages, tools=None, max_new=192, stop_flag=None):
         with self._tok_lock:      # sessions call this from several threads; HF fast tokenizers aren't re-entrant
@@ -104,31 +104,32 @@ class VLLMChatPlugin(LLMPlugin):
                 if out.outputs and out.outputs[0].text:
                     yield out.outputs[0].text
 
+        fmt = self.calls
         raw, said, saw_tool, started = "", 0, False, None
         names = [t["function"]["name"] for t in tools or []]
         wait_name = names_tool(tools)
-        visible_now = lambda final=False: self.normalize_calls(raw, names, final)  # noqa: E731
+        visible_now = lambda final=False: fmt.normalize(raw, names, final)  # noqa: E731
         for d in self.eloop.iterate(deltas, abort=lambda: self.engine.abort(rid), stop_flag=stop_flag):
             raw += d
             if started:
                 continue
             if not saw_tool:
-                speak, saw_tool = split_speakable(visible_now(), TAGS[self.tool_format])
+                speak, saw_tool = split_speakable(visible_now(), fmt)
                 if len(speak) > said:
                     yield ("text", speak[said:]); said = len(speak)
             if saw_tool:                  # the call's arguments are still decoding; the caller can start a filler
-                started = tool_start(visible_now(), TAGS[self.tool_format]) if wait_name else {"name": None}
+                started = tool_start(visible_now(), fmt) if wait_name else {"name": None}
                 if started:
                     yield ("tool_start", started)
         if stop_flag and stop_flag():
             return
         visible = visible_now(final=True)
         if not saw_tool:              # flush a held-back "<..." that wasn't a tag; a call that shows up only in
-            speak, saw_tool = split_speakable(visible, TAGS[self.tool_format])   # this final pass is still a call
+            speak, saw_tool = split_speakable(visible, fmt)           # this final pass is still a call
             if len(speak) > said:
                 yield ("text", speak[said:])
         if saw_tool:
-            calls = parse_calls(visible, self.tool_format)
+            calls = fmt.parse(visible)
             if not started:               # ended before the name decoded (a cut-off or garbled call)
                 yield ("tool_start", {"name": calls[0]["name"] if calls else None})
             yield ("tool_calls", [{"id": new_call_id(), **c} for c in calls], None)

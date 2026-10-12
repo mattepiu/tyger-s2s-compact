@@ -1,6 +1,7 @@
 """Driving MOUTH's Session and EARS's Conversation without a GPU (tests only). FakeLLM / FakeTTS are the `fake`
-plugins (app/plugins/*/fake.py); FakeMouth carries the attributes Session reads from Mouth. For EARS: FakePage is
-the browser's side of the WebSocket, behaving like static/index.html, and MouthServer a TCP server standing in for
+plugins (app/plugins/*/fake.py); FakeMouth carries the attributes Session reads from Mouth. For the LLM plugins'
+call formats: stream_speakable and scripted_stream feed a model's text in small deltas. For EARS: FakePage is the
+browser's side of the WebSocket, behaving like static/index.html, and MouthServer a TCP server standing in for
 MOUTH. Test text and audio are synthetic.
 """
 import os, sys, asyncio, json, threading, time
@@ -108,6 +109,38 @@ def run_turn(sess, transcript, stop_at=None):
         if stop_at and stop_at(kind, n_audio):
             stop.set()
     return evs, stop
+
+
+# ---- LLM plugins: a call format's text, streamed --------------------------------------------------------------
+def stream_speakable(raw, fmt, step=2):
+    """What a plugin would speak of `raw` in call format `fmt`, fed in `step`-character deltas: (spoken, saw a
+    call). Checks that nothing spoken is ever taken back."""
+    from app.plugins.llm.calls import split_speakable
+    said, buf, saw = "", "", False
+    for i in range(0, len(raw), step):
+        buf += raw[i:i + step]
+        if saw:
+            continue
+        speak, saw = split_speakable(buf, fmt)
+        assert speak.startswith(said), (speak, said)
+        if len(speak) > len(said):
+            said = speak
+    if not saw:
+        said = buf
+    return said, saw
+
+
+def scripted_stream(plugin_cls, raw, tools=None, step=3):
+    """A local plugin's (VLLMChatPlugin) stream without an engine: the model's raw text arrives in `step`-character
+    deltas. Returns the events."""
+    p = plugin_cls.__new__(plugin_cls)
+    p._tok_lock = threading.Lock(); p.max_tokens = None
+    p.tok = type("Tok", (), {"apply_chat_template": lambda self, *a, **k: "prompt"})()
+    p.sampling = lambda max_new: None
+    p.engine = type("Engine", (), {"abort": lambda self, rid: None})()
+    p.eloop = type("Loop", (), {"iterate": lambda self, gen, abort=None, stop_flag=None:
+                                iter([raw[i:i + step] for i in range(0, len(raw), step)])})()
+    return list(p.stream([{"role": "user", "content": "x"}], tools=tools))
 
 
 # ---- EARS: the page and MOUTH around a Conversation -----------------------------------------------------------
