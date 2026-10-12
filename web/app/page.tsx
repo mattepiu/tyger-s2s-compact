@@ -106,7 +106,7 @@ export default function Page() {
         </header>
 
         <section className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center-safe gap-4 px-4 pb-56 pt-16">
-          <Orb phase={phase} meter={meter} small={exchange} />
+          <Orb phase={phase} voice={voice} meter={meter} small={exchange} />
           <h1 className={`text-center font-bold transition-[font-size] duration-300 ${
                 exchange ? "text-2xl md:text-4xl" : "text-4xl md:text-6xl"}`}>
             <AnimatedText key={label} text={label} />

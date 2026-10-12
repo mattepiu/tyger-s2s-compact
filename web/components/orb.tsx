@@ -1,7 +1,8 @@
 "use client"
 // The orb in the middle of the page: OrbKit's Ion (from the Agents Kit registry, MIT; the files and their notices are
 // in components/voice-agents/orbkit). Its three states follow the conversation. While the user talks their voice drives
-// its input, while the agent talks the agent's voice drives its output; otherwise it makes up its own motion.
+// its input, while the agent talks the agent's voice drives its output; otherwise it makes up its own motion. Each
+// character has its own colours (the orb glides from one to the next when the pick changes).
 import { useEffect, useState } from "react"
 import type { OrbState } from "@/components/voice-agents/orbkit/core"
 import { Shdr13 } from "@/components/voice-agents/orbkit/shdr-13"
@@ -15,6 +16,16 @@ const STATES: Record<Phase, OrbState> = {
 const GAIN = 5 * 3.1          // voice RMS -> 0..1
 const SIZE = 300              // px, at full size
 const SMALL = 0.5             // its scale while text is on screen
+const PARAMS = { coreGain: 0 }  // no glowing nucleus: it read as a red dot in the middle
+
+// By voice: the filaments' colour near the middle (inner) and at the glass (arc).
+type Colors = { inner: string; arc: string }
+const COLORS: Record<string, Colors> = {
+  ori: { inner: "#a78bfa", arc: "#5a5cff" },      // violet
+  mike: { inner: "#67e8f9", arc: "#0e8fd6" },     // cyan
+  andrew: { inner: "#fcd34d", arc: "#f05a14" },   // amber
+}
+const OTHER = COLORS.ori
 
 type Volumes = { input?: number; output?: number }
 
@@ -33,13 +44,15 @@ function useVolumes(phase: Phase, meter: () => { mic: number; out: number }) {
   return vol
 }
 
-export function Orb({ phase, meter, small }: { phase: Phase; meter: () => { mic: number; out: number }; small: boolean }) {
+export function Orb({ phase, voice, meter, small }:
+    { phase: Phase; voice: string; meter: () => { mic: number; out: number }; small: boolean }) {
   const volumes = useVolumes(phase, meter)
   const k = small ? SMALL : 1
   return (   // the box shrinks with the orb, so the text below moves up with it
     <div className="flex justify-center transition-[height] duration-500 ease-out" style={{ height: SIZE * k }}>
       <div className="origin-top transition-transform duration-500 ease-out" style={{ transform: `scale(${k})` }}>
-        <Shdr13 size={SIZE} state={STATES[phase]} volumes={volumes} ariaLabel={`tyger is ${STATES[phase]}`} />
+        <Shdr13 size={SIZE} state={STATES[phase]} volumes={volumes} params={PARAMS} colors={COLORS[voice] || OTHER}
+                ariaLabel={`tyger is ${STATES[phase]}`} />
       </div>
     </div>
   )

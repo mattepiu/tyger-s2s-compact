@@ -150,7 +150,8 @@ suppression, auto gain) is on.
 - one mic button, and the characters as tabs;
 - an orb in the middle ([OrbKit](https://github.com/zzzzshawn/orbkit)'s Ion, MIT, from the
   [Agents Kit](https://agents-ui.github.io/agents-kit/voice) registry). Its state follows the conversation (idle,
-  thinking, speaking), and it reacts to your voice while you talk and to the agent's while it speaks;
+  thinking, speaking), and it reacts to your voice while you talk and to the agent's while it speaks. Each
+  character has its own colours;
 - the exchange as text: your words, the agent's backchannels while you spoke, its reply with the sources it
   cited; and the whole conversation in a history.
 
