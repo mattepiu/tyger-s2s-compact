@@ -118,6 +118,7 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Run & rea
 | `A` | MOUTH → EARS | reply audio |
 | `K` | MOUTH → EARS | backchannel audio, kept apart from `A` |
 | `X` | MOUTH → EARS | the text of the reply, or of a backchannel (`bc`), for the page |
+| `L` | MOUTH → EARS | links the reply cites (`label`, `url`), for the page |
 | `D` | MOUTH → EARS | done: a turn (`barged`), a backchannel (`bc`) or an announcement (`proactive`) |
 | `F` | MOUTH → EARS | a finished task asks for the floor |
 
@@ -268,7 +269,9 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Run & rea
     - `("text", delta)`;
     - `("tool_start", {"name"})`;
     - `("tool_calls", calls, native)`, once at the end;
-    - `("refusal", category)`.
+    - `("refusal", category)`;
+    - `("links", [{"label", "url"}])`: sources the text cited, cut out of it. Only `openai-responses` sends them
+      (its web search's citations, I-25). MOUTH shows them on the page and never speaks them.
 - **Lazy imports.** A plugin imports vllm, vllm-omni or an SDK in its constructor, so EARS and the tests can import
   plugin classes cheaply. `test_plugins.py` checks it.
 - **Call formats.** A local model writes its tool calls into its text, each model in its own way. Its plugin
@@ -547,11 +550,11 @@ own web search.
   tests/plugins/test_llm_calls.py       what every call format shares, on a toy format; the local plugin base
   tests/plugins/test_calls_gemma4.py    Gemma 4's call format and gemma-4-e4b's stream on it
   tests/plugins/test_calls_hermes.py    Hermes JSON, the fake LLM's call format
-  tests/plugins/test_hosted_openai_responses.py   openai-responses on stubbed streams
+  tests/plugins/test_hosted_openai_responses.py   openai-responses on stubbed streams; citations cut from the text
   tests/plugins/test_hosted_anthropic.py          anthropic on stubbed streams
   ```
 - **The page's own check** (node ≥ 18): `cd tests/page && npm install && node page_check.mjs`. It covers the mic
-  worklet, the tags, the int16 frames, the played report and Stop → Start.
+  worklet, the tags, the int16 frames, the played report, Stop → Start, the voice picker and a reply's links.
 - **The whole stack on the fakes:** `CONFIG=config/fake.yaml ./run.sh`, no GPU and no downloads.
 - **GPU checks, with the stack stopped:**
   - `TYGER_CONTRACT_LOCAL=1 .venv/bin/python tests/plugins/test_contract.py`. It aborts at exit after passing (I-15).

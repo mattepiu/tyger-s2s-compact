@@ -312,8 +312,8 @@ class Conversation:
             pass
 
     async def _pump_mouth(self):
-        handlers = {b"A": self._on_reply_audio, b"K": self._on_bc_audio, b"X": self._on_text, b"D": self._on_done,
-                    b"F": self._on_floor_request}
+        handlers = {b"A": self._on_reply_audio, b"K": self._on_bc_audio, b"X": self._on_text, b"L": self._on_links,
+                    b"D": self._on_done, b"F": self._on_floor_request}
         try:
             while True:
                 kind, payload = await async_recv_msg(self.reader)
@@ -340,6 +340,9 @@ class Conversation:
     async def _on_text(self, payload):
         d = json.loads(payload)
         await self.ws.send_json({"type": "backchannel" if d.get("bc") else "reply", "text": d["text"]})
+
+    async def _on_links(self, payload):
+        await self.ws.send_json({"type": "links", "links": json.loads(payload)["links"]})
 
     async def _on_done(self, payload):
         d = json.loads(payload)

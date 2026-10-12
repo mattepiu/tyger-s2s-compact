@@ -1,8 +1,8 @@
 // The page's own check (I-17), GPU-free and without a browser: static/index.html in jsdom, with fake audio APIs.
 // The mic worklet's 16 kHz resampling and block times; the playback tags around chunks, the lead-in and a
 // backchannel; the int16 frames; the `played` report only once the queue drains (after the output latency), none
-// after a stop; and Stop -> Start without a reload (EARS counts reply ids from 1 on each connection). Audio is
-// synthetic (a sine, silence).
+// after a stop; Stop -> Start without a reload (EARS counts reply ids from 1 on each connection); the voice picker;
+// and the links a reply cites. Audio is synthetic (a sine, silence).
 //   cd tests/page && npm install && node page_check.mjs [path/to/index.html]     # needs node >= 18
 import { JSDOM } from "jsdom";
 import fs from "fs";
@@ -161,6 +161,30 @@ for (const query of ["", "?nodebug"]) {
   ok(P._ws.sent.includes("voice:" + sel.value), `the picked voice is sent at the start ${at}: ${P._ws.sent}`);
   sel.value = "andrew"; sel.dispatchEvent(new P.Event("change"));
   ok(P._ws.sent.at(-1) === "voice:andrew", `picking a voice sends voice:<name> ${at}: ${P._ws.sent}`);
+}
+
+// ---- the links a reply cites (I-25): under it, http(s) only, as text; a new reply starts without them -----------
+{
+  const P = await pickerPage(""), turns = P.document.getElementById("turns");
+  const ev = m => P.eval("onEvent")({ data: JSON.stringify(m) });
+  const NASA = "https://science.nasa.gov/mission/webb/?a=1&b=2";
+  ev({ type: "links", links: [{ label: "early", url: "https://early.example/" }] });     // no reply yet: dropped
+  ev({ type: "reply", text: "Webb found a far-off burst." });
+  ev({ type: "links", links: [{ label: "science.nasa.gov", url: NASA }, { label: "bad", url: "javascript:alert(1)" },
+                              { label: "<b>x</b>", url: "https://x.example/" }] });
+  ev({ type: "links", links: [{ label: "science.nasa.gov", url: NASA }] });              // cited twice: shown once
+  ev({ type: "reply", text: "Webb found a far-off burst. And more." });                  // the text so far: links stay
+  const a = [...turns.querySelectorAll(".turn.asst .src a")];
+  ok(a.length === 2 && a[0].href === NASA && a[0].textContent === "science.nasa.gov",
+     `the reply's links, once each, http(s) only: ${a.map(x => x.href)}`);
+  ok(a[0]?.target === "_blank" && a[0]?.rel.includes("noopener"), `a link opens apart from the page: ${a[0]?.target}`);
+  ok(a[1]?.textContent === "<b>x</b>" && !turns.querySelector(".src b"), "a label is text, never markup");
+  ok(!turns.innerHTML.includes("javascript:") && !turns.innerHTML.includes("early"), "no script link, no stray link");
+  ok(turns.querySelector(".turn.asst .txt").textContent === "Webb found a far-off burst. And more.",
+     "the text stays the text");
+  ev({ type: "turn_done" }); ev({ type: "reply", text: "Next one." });
+  ok(turns.querySelectorAll(".turn.asst").length === 2 && !turns.firstElementChild.querySelector(".src"),
+     "a new reply starts without links");
 }
 
 console.log(`${checks - fails}/${checks} checks passed`);

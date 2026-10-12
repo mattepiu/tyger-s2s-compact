@@ -8,7 +8,8 @@ over real TCP. Covers what test_floor.py and test_second_ear.py don't:
     user's start there: tests/ears/test_rules.py), and none when MOUTH's barged D arrives, so the user's speech since
     the barge survives it (I-02);
   * MOUTH's D after the page has played the reply ends the turn at once; a D before it, followed by a barge in the
-    tail, closes the turn on the spot (no B: MOUTH has nothing left to stop).
+    tail, closes the turn on the spot (no B: MOUTH has nothing left to stop);
+  * MOUTH's L (the links a reply cites) reaches the page after the reply's text.
 Audio is synthetic (zeros / a tone).
 Run: .venv/bin/python tests/ears/test_conversation.py
 """
@@ -190,6 +191,20 @@ def test_d_before_the_end_then_a_barge_in_the_tail_closes_the_turn():
         assert waiter.done() and conv.done_task is None             # the playback timeout is gone with the turn
         page.push(speech(2)); page.push(silence(2)); await settle()  # their turn goes straight out, not held
         assert mouth.kinds() == [b"T", b"T"] and conv.pending is None
+        await stop(page, task)
+    run(go())
+
+
+# ---- the links a reply cites (I-25) ----------------------------------------------------------------------------
+def test_links_reach_the_page():
+    async def go():
+        page, mouth, conv, task, calls, ears = await start()
+        await user_turn(page, mouth)
+        link = {"label": "science.nasa.gov", "url": "https://science.nasa.gov/mission/webb/"}
+        await mouth.send(b"X", {"text": "Webb found a far-off burst."}); await mouth.send(b"L", {"links": [link]})
+        await settle()
+        assert {"type": "links", "links": [link]} in page.sent
+        assert page.types().index("reply") < page.types().index("links"), page.types()
         await stop(page, task)
     run(go())
 

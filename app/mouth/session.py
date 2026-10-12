@@ -123,6 +123,8 @@ class Session:
                             t_aud = time.perf_counter() - t0
                             log.info("onset: first-text %.0fms first-audio %.0fms", (t_txt or 0) * 1e3, t_aud * 1e3)
                         self.send(b"A", val.tobytes())
+                    elif kind == "links":
+                        self.send(b"L", {"links": val})
                     elif kind == "done":
                         self.send(b"D", {"text": val, "barged": self.turn_stop.is_set(), **extra})
             except Exception as e:

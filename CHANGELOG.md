@@ -13,7 +13,8 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **Plugins:** the LLM, the TTS and the turn-taking model are chosen in `config/default.yaml`.
 - **An expert:** the local model hands hard questions to a hosted model (`ask_expert`), and its answer streams
   straight to the voice.
-- **Live facts** (weather, news, prices) through the expert's web search.
+- **Live facts** (weather, news, prices) through the expert's web search. Its sources show as links under the
+  answer on the page and are never read out.
 - **Background tasks:** research that takes minutes runs while you keep talking, and the agent tells you the result
   at the next pause.
 - **Interrupted lookups carry on:** cut in before hearing an answer, and it's still found and told to you later.

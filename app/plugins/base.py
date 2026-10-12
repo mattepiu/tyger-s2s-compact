@@ -11,6 +11,8 @@ Neutral formats, owned by MOUTH:
       ("tool_start", {"name": str | None})          the model committed to a tool call (MOUTH starts the filler)
       ("tool_calls", [{"id", "name", "arguments"}], native)   once, at the end
       ("refusal", category | None)                  the model declined (hosted plugins only)
+      ("links", [{"label", "url"}])                 sources the text cited, cut out of it (openai-responses'
+                                                    web search): for the page, never spoken
     A failed request raises LLMError. A tool call whose arguments don't fit its schema carries "error": MOUTH
     returns that as the tool's result and never runs it.
 

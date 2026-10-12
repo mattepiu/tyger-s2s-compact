@@ -13,7 +13,6 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
 |---|---|---|---|---|
 | I-20 | smart | medium | open | The expert calls `get_current_time` before most answers; once an empty answer, once a "Dummy" reminder |
 | I-21 | smart | low | open | The expert writes unit symbols ("19°C") and digits into speech |
-| I-25 | smart | medium | open | The expert's web-search answers can end with a citation link, spoken as a URL |
 | I-18 | EARS | medium | accepted for now | With a clean mic, an "mm-hm" in the agent's pause barges |
 | I-24 | tests | low | open | `test_barged_round.py` is timing-based and failed once under CPU load |
 | I-09 | EARS | low | check on the stack | A lost MOUTH ends the conversation on the fakes; not checked on the real stack |
@@ -71,17 +70,6 @@ failed the routing gate, so it isn't in the reply or smart prompts.
 routed, so the reply model's gate doesn't apply. Or normalise them in MOUTH before the TTS.
 
 **Verify:** the weather questions of the live check, with the user's OK.
-
-### I-25 — The expert's web-search answers can end with a citation link (medium, confirmed)
-**What happens** (the probes of 2026-10-12): a news answer ended with
-`([science.nasa.gov](https://science.nasa.gov/mission/webb/latestnews/?utm_source=openai))`. The chunker's
-`say_clean` keeps the words, so the TTS would read "science.nasa.gov https science.nasa.gov mission webb latestnews
-utm source openai". OpenAI's web search writes its citations inline in the text.
-
-**Fix options:** drop a markdown link and a bare URL in `say_clean`, or in `openai-responses`' stream parser
-(the response's `url_citation` annotations give their spans, but only at the end of the stream).
-
-**Verify:** a test of `say_clean` on that line; then news questions as plugin-level probes, with the user's OK.
 
 ---
 

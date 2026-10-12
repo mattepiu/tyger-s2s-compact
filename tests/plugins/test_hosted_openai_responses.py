@@ -67,13 +67,13 @@ def test_tools_flattened_with_web_search():
 # ---- the stream parser --------------------------------------------------------------------------------------
 def test_text_with_searches_in_between():
     evs = parse([SEARCH, text("It's 14 degrees "), text("and cloudy in Oslo."), DONE])
-    assert evs == [("text", "It's 14 degrees "), ("text", "and cloudy in Oslo.")]
+    assert evs == [("text", "It's 14 degrees"), ("text", " and cloudy in Oslo.")]   # a trailing space waits
 
 
 def test_function_call_named_at_once_and_parsed():
     evs = parse([text("One moment. "), call_added("get_current_time"),
                  call_done("get_current_time", '{"timezone": "Asia/Tokyo"}'), DONE])
-    assert evs[:2] == [("text", "One moment. "), ("tool_start", {"name": "get_current_time"})]
+    assert evs[:2] == [("text", "One moment."), ("tool_start", {"name": "get_current_time"})]
     kind, calls, native = evs[2]
     assert kind == "tool_calls" and native is None and len(calls) == 1
     assert calls[0]["name"] == "get_current_time" and calls[0]["arguments"] == {"timezone": "Asia/Tokyo"}
@@ -86,6 +86,71 @@ def test_bad_arguments_flagged_and_cut_off_call_not_run():
     cut = {"type": "response.incomplete", "response": {"incomplete_details": {"reason": "max_output_tokens"}}}
     evs = parse([call_added("get_current_time"), call_done("get_current_time", '{"timezone": "Eu'), cut])
     assert evs == [("tool_start", {"name": "get_current_time"}), ("tool_calls", [], None)]
+
+
+# ---- citations (I-25): cut out of the text, sent as links -----------------------------------------------------
+NASA = "https://science.nasa.gov/mission/webb/latestnews/?utm_source=openai"
+NEWS = ("NASA also just posted new Webb images. If you want, I can give you the three most interesting Webb stories. "
+        f"([science.nasa.gov]({NASA}))")                 # the end of a live news answer (the probes of 2026-10-12)
+
+
+def deltas(s, n):
+    return [text(s[i:i + n]) for i in range(0, len(s), n)]
+
+
+def said(evs):
+    return "".join(e[1] for e in evs if e[0] == "text")
+
+
+def links(evs):
+    return [x for e in evs if e[0] == "links" for x in e[1]]
+
+
+def test_citation_cut_from_the_text_at_any_split():
+    for n in (1, 2, 3, 5, 7, 16, len(NEWS)):
+        evs = parse(deltas(NEWS, n) + [DONE])
+        assert said(evs) == NEWS[:NEWS.index(" ([")], (n, said(evs))
+        assert links(evs) == [{"label": "science.nasa.gov", "url": NASA}], (n, links(evs))
+
+
+def test_citations_mid_sentence_grouped_and_bare():
+    wiki = "https://en.wikipedia.org/wiki/Mercury_(planet)?utm_source=openai"
+    s = (f"It's 23 degrees in Madrid ([weather.com](https://weather.com/x?a=1&b=2)), and dry. Mercury is small "
+         f"([a.org](https://a.org/1), [en.wikipedia.org]({wiki})). See [nasa.gov](https://nasa.gov).")
+    evs = parse(deltas(s, 4) + [DONE])
+    assert said(evs) == "It's 23 degrees in Madrid, and dry. Mercury is small. See.", said(evs)
+    assert [x["url"] for x in links(evs)] == ["https://weather.com/x?a=1&b=2", "https://a.org/1", wiki,
+                                              "https://nasa.gov"]
+
+
+def test_brackets_that_are_not_citations_pass_unchanged():
+    s = "It's mild (about 18 degrees) [roughly], and (see [the map]) a link [x](ftp://no) stays."
+    evs = parse(deltas(s, 3) + [DONE])
+    assert said(evs) == s and links(evs) == []
+    p = ResponsesStreamParser()
+    assert p.feed(text("mild (")) == [("text", "mild")]           # "(" at the end: a citation may follow
+    assert p.feed(text("about 18)")) == [("text", " (about 18)")]   # not one: passed on at once
+    assert p.feed(text(" so [")) == [("text", " so")]
+    assert p.feed(text("laughs] ok")) == [("text", " [laughs] ok")]
+
+
+def test_an_unclosed_bracket_holds_only_so_long():
+    s = "A stray [ bracket, then a long answer. " + "More words here. " * 40
+    evs = parse(deltas(s, 5))                         # no DONE yet: it is released before the end
+    assert said(evs) == s[:len(said(evs))] and len(said(evs)) > len(s) - 50
+    evs = parse([text("One [\nTwo.")])
+    assert said(evs) == "One [\nTwo."
+
+
+def test_the_end_of_a_response():
+    cut = {"type": "response.incomplete", "response": {"incomplete_details": {"reason": "max_output_tokens"}}}
+    evs = parse(deltas("The news is in. ([science.nasa.gov](https://science.na", 4) + [cut])
+    assert said(evs) == "The news is in." and links(evs) == []   # a link cut off mid-way is never spoken
+    evs = parse(deltas("I'd say [maybe", 4) + [DONE])
+    assert said(evs) == "I'd say [maybe"                          # anything else held is
+    evs = parse([text("Let me check ("), call_added("get_current_time"),
+                 call_done("get_current_time", '{"timezone": "Asia/Tokyo"}'), DONE])
+    assert [e[0] for e in evs] == ["text", "text", "tool_start", "tool_calls"] and said(evs) == "Let me check ("
 
 
 def test_refusal_and_failure():

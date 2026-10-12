@@ -16,6 +16,11 @@ search is billed on top of the tokens.
     against the offered schema: calls.flag_invalid; IDs are this plugin's own). A refusal -> ("refusal",
     "refusal"). A response cut off by max_output_tokens never runs a call cut off with it. response.failed / an
     error event -> LLMError.
+  * Citations (I-25): the web search writes each one into the text as a markdown link in parentheses,
+    "([science.nasa.gov](https://science.nasa.gov/...))". The url_citation annotations only point at that span;
+    the text still holds it, and it streams first. So Citations cuts it out of the text as it streams (held back
+    until it closes) and the links go out as a ("links", ...) event: shown on the page, never spoken or kept in
+    history.
   * History: neutral messages -> Responses input items: {role, content} messages; an assistant tool call ->
     function_call items {call_id, name, arguments}; a tool result -> function_call_output {call_id, output}.
   * Reasoning: `reasoning_effort` -> reasoning.effort (None: the model's default). Thinking is never read.
@@ -23,7 +28,7 @@ search is billed on top of the tokens.
   * Abort: when stop_flag turns true the stream is closed (tokens already generated are still billed).
 """
 from __future__ import annotations
-import json, logging
+import json, logging, re
 from dataclasses import dataclass
 
 from app.plugins.base import LLMError
@@ -63,6 +68,70 @@ def to_responses_tools(tools, web_search=False):
     return out + ([{"type": "web_search"}] if web_search else [])
 
 
+_URL = r"https?://[^\s()]*(?:\([^\s()]*\)[^\s()]*)*"         # parentheses inside a URL come in pairs
+_LINK = rf"\[[^\[\]\n]*\]\({_URL}\)"
+LINK = re.compile(rf"\[([^\[\]\n]*)\]\(({_URL})\)")
+CITATION = re.compile(rf"\s*(?:\(\s*{_LINK}(?:\s*[,;]?\s*{_LINK})*\s*\)|{_LINK})")   # in parentheses, or bare
+_OPEN = re.compile(r"\[|\((?=\[|\Z)")                       # where one may start: "[", "([", or "(" at the end
+HOLD_MAX = 500                                               # chars: longer than this, it isn't a citation
+
+
+def _group_end(s, i):
+    """The index just past the bracket group opening at s[i], a markdown link's "(url)" after its "]" included.
+    None if s ends before it closes; -1 if it can't be a citation (a newline, or longer than HOLD_MAX)."""
+    depth = 0
+    for j in range(i, len(s)):
+        c = s[j]
+        if c == "\n" or j - i > HOLD_MAX:
+            return -1
+        if c in "([":
+            depth += 1
+        elif c in ")]":
+            depth -= 1
+            if depth == 0:
+                if c == "]" and j + 1 == len(s):
+                    return None                              # its "(url)" may be next
+                if c == "]" and s[j + 1] == "(":
+                    continue
+                return j + 1
+    return None
+
+
+class Citations:
+    """Cuts the web search's citations out of streamed text. feed(delta) -> (text to pass on, links cut out, each
+    {"label", "url"}); text from where a citation may start is held back until it closes (or can't be one), and so
+    is trailing whitespace, which goes with a citation that follows it. flush() -> what is still held at the end; ""
+    if it is only whitespace, or a link cut off mid-way."""
+    def __init__(self):
+        self.held = ""
+
+    def feed(self, delta):
+        s = self.held + delta; out = []; links = []
+        while (m := _OPEN.search(s)) is not None:
+            i = m.start(); start = len(s[:i].rstrip())       # the whitespace before a citation goes with it
+            end = _group_end(s, i)
+            if end is None:                                  # still open: hold it
+                break
+            if end < 0:                                      # not a citation: pass its opening on, look further
+                out.append(s[:i + 1]); s = s[i + 1:]
+                continue
+            seg = s[start:end]
+            if CITATION.fullmatch(seg):
+                out.append(s[:start])
+                links += [{"label": label, "url": url} for label, url in LINK.findall(seg)]
+            else:
+                out.append(s[:end])
+            s = s[end:]
+        start = len(s.rstrip()) if m is None else start      # trailing whitespace: a citation may come next
+        out.append(s[:start]); s = s[start:]
+        self.held = s
+        return "".join(out), links
+
+    def flush(self):
+        rest, self.held = self.held, ""
+        return "" if "](" in rest or not rest.strip() else rest
+
+
 class ResponsesStreamParser:
     """Responses stream events -> neutral LLM events. Pure (no I/O), so it is tested on synthetic event sequences.
     feed(event) and finish() return lists of events."""
@@ -70,16 +139,22 @@ class ResponsesStreamParser:
         self.tools = tools
         self.started = False; self.calls = []; self.refused = False; self.cut_off = False; self.searches = 0
         self.done = False
+        self.cites = Citations(); self.cited = 0
 
     def feed(self, ev):
         t = _get(ev, "type"); out = []
         if t == "response.output_text.delta":
             d = _get(ev, "delta")
             if d:
-                out.append(("text", d))
+                text, links = self.cites.feed(d)
+                out += [("text", text)] if text else []
+                out += [("links", links)] if links else []
+                self.cited += len(links)
         elif t == "response.output_item.added":
             item = _get(ev, "item")
             if _get(item, "type") == "function_call" and not self.started:
+                rest = self.cites.flush()
+                out += [("text", rest)] if rest else []
                 self.started = True; out.append(("tool_start", {"name": _get(item, "name")}))
         elif t == "response.output_item.done":
             item = _get(ev, "item"); kind = _get(item, "type")
@@ -100,12 +175,15 @@ class ResponsesStreamParser:
 
     def finish(self):
         if self.searches:
-            log.info("smart model web searches: %d", self.searches)   # a count only, never the queries
+            log.info("smart model web searches: %d, citations cut from the text: %d", self.searches,
+                     self.cited)                      # counts only, never the queries or the links
         if self.refused and not self.calls:
             return [("refusal", "refusal")]
+        rest = self.cites.flush()
+        out = [("text", rest)] if rest else []
         if not self.calls:
-            return []
-        out = [] if self.started else [("tool_start", {"name": self.calls[0][0]})]
+            return out
+        out += [] if self.started else [("tool_start", {"name": self.calls[0][0]})]
         if self.cut_off:                              # cut off mid-call: never run a truncated call
             log.warning("tool call cut off at max_output_tokens; not run")
             return out + [("tool_calls", [], None)]

@@ -156,7 +156,7 @@ frames are little-endian, with int16 audio:
   which the page plays but never tags.
 - **text → EARS:** `played:<id>:<samples>` when a reply's queue has drained; `reset`, `voice:<name>`,
   `set:<threshold>:<value>`.
-- **JSON → page:** `ready`, `state`, `endpoint`, `reply`, `barge`, `turn_done`, `task_done`, and a few more.
+- **JSON → page:** `ready`, `state`, `endpoint`, `reply`, `links`, `barge`, `turn_done`, `task_done`, and a few more.
 
 ## Plugins
 
@@ -198,7 +198,8 @@ calling a tool, so easy turns pay nothing extra:
   smart model looks up with OpenAI's web search (`openai-responses`, `web_search: true`). The lead-in fits ("let me
   think about that", "let me pull up the Lisbon forecast"), the smart
   request starts the moment the call is read, and its answer streams straight to the voice (live: answer audio at
-  ~1.0–1.3 s, under the lead-in). Follow-ups on the same topic go to it too.
+  ~1.0–1.3 s, under the lead-in). Follow-ups on the same topic go to it too. The web search's citations are cut
+  out of the answer: they show as links under it on the page and are never read out.
 - **`start_task`** for work that takes minutes: research, comparing many options, a multi-day plan, a long draft.
   The local model says it'll look into it and the conversation carries on. The task runs on the smart model in the
   background (its own web searches, `mouth.tasks.max_steps` rounds, `max_wall_s`). When it finishes, EARS gives it

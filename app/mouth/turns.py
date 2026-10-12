@@ -1,5 +1,6 @@
 """The agent's turns. Every turn is a generator of MOUTH events, consumed by the session's turn worker:
-("text", the reply text so far), ("audio", a 24 kHz chunk), then one ("done", final text).
+("text", the reply text so far), ("audio", a 24 kHz chunk), ("links", sources the text cited, for the page), then
+one ("done", final text).
 
 Turn holds what every kind of turn shares: its Speaker (this reply's audio book-keeping), speaking an LLM event
 stream chunk by chunk, MOUTH's own spoken lines, fillers over tool latency, and remembering the turn. The kinds:
@@ -69,6 +70,8 @@ class Turn:
                     yield from self.speaker.say(chunk, self.voice, self.stop)
             elif kind == "tool_calls":
                 calls, native = val, ev[2]
+            elif kind == "links":                        # already cut out of the text: the page shows them
+                yield ("links", val)
             if self.stop():
                 return content, calls, native, None, False
         if not calls and not self.stop():

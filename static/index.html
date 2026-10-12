@@ -48,6 +48,8 @@
   .turn.asst{border-color:var(--speak);background:rgba(88,166,255,.07)}
   .turn .meta{color:var(--speak);font-size:11px;margin-bottom:2px}
   .turn .txt{font-size:14.5px}
+  .turn .src{font-size:12px;margin-top:4px;color:var(--mut);overflow-wrap:anywhere}
+  .turn .src a{color:var(--speak)}
   .empty{color:var(--mut);font-style:italic}
   [hidden]{display:none!important}
 </style>
@@ -209,7 +211,7 @@ async function start(){
   running=true; $('start').disabled=true; $('stop').disabled=false;
 }
 
-let nextPlay=0, replyDiv=null, active=[], taskTag='', closeReason='';
+let nextPlay=0, replyDiv=null, replyTxt='', replyLinks=[], active=[], taskTag='', closeReason='';
 function playChunk(ab){ if(!ctx)return;               // [int32 id][int16 samples at 24 kHz]
   const id=new DataView(ab).getInt32(0, true), pcm=new Int16Array(ab, 4);
   const b=ctx.createBuffer(1,pcm.length,WIRE_SR), ch=b.getChannelData(0);
@@ -227,8 +229,17 @@ function playChunk(ab){ if(!ctx)return;               // [int32 id][int16 sample
 function stopPlayback(){ active.forEach(s=>{ s.stopped=true; try{s.stop();}catch(e){} }); active=[]; nextPlay=0; sched=[]; }
 function resetPlayback(){ stopPlayback(); queued={}; lastId=0; }   // EARS counts reply ids from 1 on each connection
 function showReply(txt){ const box=$('turns'); const e=box.querySelector('.empty'); if(e)e.remove();
-  if(!replyDiv){ replyDiv=document.createElement('div'); replyDiv.className='turn asst'; box.prepend(replyDiv); }
-  replyDiv.innerHTML=`<div class="meta">tyger${taskTag}</div><div class="txt">${escapeHtml(txt)}</div>`; }
+  if(!replyDiv){ replyDiv=document.createElement('div'); replyDiv.className='turn asst'; box.prepend(replyDiv);
+    replyLinks=[]; }
+  replyTxt=txt;
+  const src=replyLinks.map(l=>
+    `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(l.label||l.url)}</a>`);
+  replyDiv.innerHTML=`<div class="meta">tyger${taskTag}</div><div class="txt">${escapeHtml(txt)}</div>`+
+    (src.length?`<div class="src">${src.join(' · ')}</div>`:''); }
+// the sources a reply cited (the expert's web search): shown under it, never spoken; http(s) links only
+function addLinks(links){ if(!replyDiv) return;
+  for(const l of links||[]) if(/^https?:\/\//i.test(l.url||'') && !replyLinks.some(x=>x.url===l.url)) replyLinks.push(l);
+  showReply(replyTxt); }
 function onEvent(ev){
   const m=JSON.parse(ev.data);
   if(m.type==='busy'){ setStatus('busy — someone else is talking; try again shortly',false); return; }
@@ -247,6 +258,7 @@ function onEvent(ev){
   else if(m.type==='threshold'){ setThresholdUI(m.attr,m.value); }
   else if(m.type==='endpoint'){ stopPlayback(); replyDiv=null; }  // never let a new reply overlap an old one
   else if(m.type==='reply'){ setState('SPEAK'); showReply(m.text); }
+  else if(m.type==='links'){ addLinks(m.links); }
   else if(m.type==='turn_done'){ setState('idle'); replyDiv=null; taskTag=''; }
   else if(m.type==='task_done'){ replyDiv=null; taskTag=` · task #${m.task} done`; }  // a background task speaks up
   else if(m.type==='barge'){ stopPlayback(); flashBarge(); setState('LISTENING'); }

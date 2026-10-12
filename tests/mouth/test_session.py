@@ -31,7 +31,7 @@ def read_until(peer, pred, timeout=5.0):
         kind, p = recv_msg(peer)
         if kind is None:
             return got
-        if kind in (b"X", b"D"):
+        if kind in (b"X", b"L", b"D"):
             p = json.loads(p)
         got.append((kind, p, time.perf_counter()))
         if pred(kind, p):
@@ -412,6 +412,30 @@ def test_expert_turn_answered_by_smart():
     run_turn(s, "and if I doubled it?")                 # the follow-up sees the escalation in history
     follow = [c[1] for c in llm.calls if c[0] == "reply"][-1]
     assert any(x.get("tool_calls") and x["tool_calls"][0]["id"] == first_id for x in follow)
+
+
+def test_expert_links_go_to_the_page_not_the_voice():
+    """The smart model's links (openai-responses cuts its web citations out of the text, I-25) go out as an L frame
+    for the page; the voice and history get the text only."""
+    link = {"label": "science.nasa.gov", "url": "https://science.nasa.gov/mission/webb/latestnews/"}
+
+    class Citing(FakeLLM):
+        def stream(self, messages, tools=None, max_new=192, stop_flag=None):
+            yield from super().stream(messages, tools, max_new, stop_flag)
+            yield ("links", [link])
+    m = FakeMouth(FakeLLM(reply=ASK), FakeTTS(n=2), smart=Citing())
+    a, peer = socket.socketpair()
+    s = M.Session(m, a)
+    threading.Thread(target=s.run, daemon=True).start()
+    send_msg(peer, b"T", {"transcript": "any news about the Webb telescope?"})
+    got = read_until(peer, lambda k, p: k == b"D")
+    kinds_ = [k for k, _, _ in got]
+    assert kinds_.count(b"L") == 1 and kinds_.index(b"L") > kinds_.index(b"X"), kinds_
+    assert next(p for k, p, _ in got if k == b"L") == {"links": [link]}
+    assert got[-1][1]["text"].endswith(m.llms["smart"].smart) and "nasa" not in got[-1][1]["text"]
+    assert not any("nasa" in r for r in m.tts.requests), m.tts.requests
+    assert s.history.messages[-1] == {"role": "assistant", "content": m.llms["smart"].smart}
+    peer.close()
 
 
 def test_smart_request_starts_under_the_leadin():
