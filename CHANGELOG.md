@@ -26,8 +26,8 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **Tuning sliders** on the page (`?nodebug` hides them), built from the turn-taking plugin's thresholds.
 - **A new page, on trial** (`web/`): one mic button and the characters as tabs. An orb in the middle (OrbKit's Ion)
   follows the conversation and the voices, in each character's own colours. The exchange shows as text: your words
-  as you say them, the agent's backchannels, its reply with its sources. A history holds the whole conversation. The
-  classic page is still at `/`.
+  as you say them, each of the agent's backchannels beside them for a moment, its reply with its sources. A history
+  holds the whole conversation. The classic page is still at `/`.
 - **Tests that need no GPU,** and a check of the web page in jsdom.
 - **A routing test** (`scripts/bench/escalation.py`): 119 synthetic cases, no API cost.
 - **Measurement scripts:** smoke and load tests on the running stack, GPU parity checks, stack comparisons.
