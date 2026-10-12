@@ -146,6 +146,20 @@ The page shows the live tuning sliders (endpoint τ / debounce, barge, backchann
 `?nodebug` hides them for a clean demo. The voice picker shows either way. Browser DSP (echo cancellation, noise
 suppression, auto gain) is on.
 
+**The new page (a trial, `web/`).** A friendlier page with:
+- one mic button, and the characters as tabs;
+- a full-screen animation that follows the conversation (listening, thinking, looking it up, speaking);
+- the reply as text with the sources it cited, and a history.
+
+It's the same WebSocket and the same audio code, so EARS doesn't change. Run it beside the stack (node ≥ 22):
+
+```bash
+cd web && npm install && npm run dev   # http://localhost:3000; /ws and /voices pass through to EARS on :7860
+```
+
+Forward port 3000 the same way as 7860. The classic page, with the meters and the sliders, is one click away from it
+("Classic view").
+
 **The page's WebSocket** (`/ws`; for a client of your own; `app/ears/playback.py` has the details). All binary
 frames are little-endian, with int16 audio:
 - **mic → EARS:** `[int32 reply id][int32 reply sample, or -1][int16 mic samples at 16 kHz]`. The tag is the reply
