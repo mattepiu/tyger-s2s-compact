@@ -1,15 +1,16 @@
 "use client"
 // tyger's page: talk, and see what it's doing. The conversation (lib/conversation.ts) is the classic page's
-// (static/index.html), its protocol unchanged; this page shows it differently: a voice glow along the bottom that
-// rises with whoever is talking and sweeps while the agent thinks, the phase as a word (lib/talk.ts), the exchange as
-// text (the user's words, the agent's backchannels and reply, the sources it cited) and all of it in the history, the
+// (static/index.html), its protocol unchanged; this page shows it differently: an ASCII-art backdrop, one pattern per
+// phase (the template's animation states; lib/talk.ts has the phases), the phase as a word, the exchange as text (the
+// user's words, the agent's backchannels and reply, the sources it cited) and all of it in the history, the
 // characters, one mic button. The classic page, with the turn-taking meters and the live tuning, is one link away.
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
 import { AnimatedText } from "@/components/animated-text"
 import { Characters, MicButton, type Character } from "@/components/controls"
-import { Glow } from "@/components/glow"
+import { Backdrop } from "@/components/backdrop"
 import { Exchange, History } from "@/components/transcript"
 import { Conversation } from "@/lib/conversation"
+import type { Pattern } from "@/lib/fields"
 import { initial, phaseOf, reduce, type Phase } from "@/lib/talk"
 
 const LABELS: Record<Phase, string> = {
@@ -20,6 +21,16 @@ const LABELS: Record<Phase, string> = {
   lookup: "Looking it up",     // a tool or the expert, after a filler line
   speaking: "",                // the character's name
   barge: "Go ahead",
+}
+// The backdrop's pattern in each phase, after the template's animation states
+const PATTERNS: Record<Phase, Pattern> = {
+  off: "analyze",              // the first screen
+  connecting: "connect",
+  listening: "think",          // ripples, with the user's voice
+  thinking: "analyze",
+  lookup: "deep",
+  speaking: "transfer",        // waves, with the agent's voice
+  barge: "intense",
 }
 const CLASSIC = process.env.NEXT_PUBLIC_CLASSIC || "/"
 
@@ -94,9 +105,9 @@ export default function Page() {
 
   return (
     <>
-      <Glow meter={meter} thinking={phase === "thinking" || phase === "lookup"} />
+      <Backdrop pattern={PATTERNS[phase]} meter={meter} />
       <main className="relative z-10 h-dvh w-full overflow-hidden text-white">
-        <header className="absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-2 px-4 pt-[max(1rem,env(safe-area-inset-top))] sm:px-6">
+        <header className="legible absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-2 px-4 pt-[max(1rem,env(safe-area-inset-top))] sm:px-6">
           <span className="text-sm font-semibold tracking-wide text-white/80">tyger</span>
           <nav className="flex items-center gap-1 text-sm">
             <button onClick={() => setHistory(true)} className="rounded-full px-3 py-1.5 text-white/70 hover:bg-white/10 hover:text-white">
@@ -107,11 +118,11 @@ export default function Page() {
         </header>
 
         <section className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-6 px-4 pb-56 pt-20">
-          <h1 className={`text-center font-bold transition-[font-size] duration-300 ${
+          <h1 className={`legible text-center font-bold transition-[font-size] duration-300 ${
                 exchange ? "text-3xl md:text-5xl" : "text-5xl md:text-7xl"}`}>
             <AnimatedText key={label} text={label} />
           </h1>
-          {phase === "off" && <p className="text-white/60">Tap the mic to start</p>}
+          {phase === "off" && <p className="legible text-white/75">Tap the mic to start</p>}
           {exchange && (
             <div className="pointer-events-auto flex w-full justify-center">
               <Exchange items={shown} from={talk.from} acks={talk.acks} open={talk.open} name={name} />

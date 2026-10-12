@@ -148,8 +148,9 @@ suppression, auto gain) is on.
 
 **The new page (a trial, `web/`).** A friendlier page with:
 - one mic button, and the characters as tabs;
-- a voice glow along the bottom ([voice-glow](https://libraries.dev/voice.html)). It rises with whoever is talking,
-  you or the agent, and sweeps as one beam while the agent thinks or looks something up;
+- an ASCII-art backdrop, one pattern per state after the template's animations: Analyze (the first screen, and
+  thinking), Think's ripples (listening, with your voice), Deep's spiral (looking it up), Transfer's waves (speaking,
+  with the agent's voice) and Intense (a barge-in);
 - the exchange as text: your words, the agent's backchannels while you spoke, its reply with the sources it
   cited; and the whole conversation in a history.
 
