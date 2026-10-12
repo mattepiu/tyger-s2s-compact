@@ -74,10 +74,11 @@ def test_page_busy_page_and_voices():
         async with TestClient(TestServer(ears.application())) as client:
             assert (await client.get("/")).status == 200
             v = await (await client.get("/voices")).json()
-            assert set(v) == {"voices", "voice"}
+            assert v == {"voices": ["fake"], "voice": "fake", "labels": {"fake": "Ori (fake)"}}   # the picker
             ws1 = await client.ws_connect("/ws")
             ready = await ws1.receive_json()
             assert ready["type"] == "ready" and ready["mouth"] is False and ready["hop_ms"] == 320
+            assert ready["voices"] == v["voices"] and ready["labels"] == v["labels"]
             assert [x["name"] for x in ready["sliders"]] == ["endpoint_silence_frames"]   # the plugin's own spec
             assert ready["thresholds"] == {"endpoint_silence_frames": 6}
             assert (await client.get("/")).status == 503                    # the one slot is taken

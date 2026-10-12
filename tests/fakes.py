@@ -14,7 +14,7 @@ from app import mouth as M  # noqa: E402
 from app.ears.playback import AUDIO_HEADER, BACKCHANNEL_ID, LEAD_IN_S, MIC_HEADER, to_pcm16  # noqa: E402
 from app.wire import async_send_msg, async_recv_msg  # noqa: E402
 from app.tools import registry as T  # noqa: E402
-from app.prompts import default_prompts  # noqa: E402
+from app.prompts import Characters, default_prompts  # noqa: E402
 from app.tools import build_tools  # noqa: E402
 from app.plugins.llm.fake import FakeLLM  # noqa: E402
 from app.plugins.tts.fake import FakeTTS  # noqa: E402
@@ -43,13 +43,17 @@ def slow_tools(seconds, result=None):
 class FakeMouth:
     """`smart`: a FakeLLM for the smart role, which turns escalation on (ask_expert offered), as an llm.smart block
     does in Mouth; `tasks`: a mouth.tasks dict, which with `smart` turns background tasks on. `slots`: share one
-    TaskSlots between FakeMouths to test the global cap."""
+    TaskSlots between FakeMouths to test the global cap. `voices`: the config's voices block (character,
+    characters); the voices that exist are VOICES."""
+    VOICES = ("fake", "alt", "new")
+
     def __init__(self, llm=None, tts=None, smart=None, context_turns=4, max_steps=3, tasks=None, slots=None,
-                 first_chunk="sentence"):
+                 first_chunk="sentence", voices=None):
         self.llm = llm or FakeLLM(); self.tts = tts or FakeTTS()
         self.max_gen = 192; self.history_turns = 8; self.bc_min_words = 4; self.bc_max_new = 12
         self.temperature = 0.7; self.sr = self.tts.out_sr; self.first_chunk = first_chunk
         self.prompts = {"reply": PROMPTS, "filler": PROMPTS}
+        self.characters = Characters({"voices": voices or {}}, PROMPTS)
         self.llms = {"reply": self.llm, "filler": self.llm}
         self.expert = smart is not None
         self.context_turns, self.max_steps = context_turns, max_steps
@@ -66,7 +70,8 @@ class FakeMouth:
         return "fake", None
 
     def voice(self, name):
-        return None
+        """A handle for a voice that exists (the fake TTS ignores it), else None, like Mouth.voice."""
+        return name if name in self.VOICES else None
 
 
 class FakeConn:

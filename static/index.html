@@ -86,7 +86,8 @@
 
 <script>
 const TARGET_SR = 16000, WIRE_SR = 24000, BLOCK = 320;   // mic blocks of 20 ms at 16 kHz; replies at 24 kHz
-// Tuning sliders + voice picker are shown by DEFAULT (V2 live tuning). Append ?nodebug for a clean end-user demo.
+// Tuning sliders are shown by DEFAULT (V2 live tuning). Append ?nodebug for a clean end-user demo. The voice picker
+// shows for everyone: each voice speaks as its own character.
 const DEBUG = !new URLSearchParams(location.search).has('nodebug');
 let ws, ctx, source, micNode, gain, stream, running=false, inLatency=0;
 const $ = id => document.getElementById(id);
@@ -127,14 +128,14 @@ if(DEBUG){ $('tune').hidden=false; }
 function applyVoice(){ const v=$('voice').value; try{localStorage.setItem('tyger_voice',v);}catch(e){}
   if(ws&&ws.readyState===1) ws.send('voice:'+v); }
 $('voice').onchange=applyVoice;
-function populateVoices(list, cur){ const sel=$('voice'); if(!list||!list.length) return;
+function populateVoices(list, cur, labels){ const sel=$('voice'); if(!list||!list.length) return;
   let saved=null; try{saved=localStorage.getItem('tyger_voice');}catch(e){}
   const want=(saved && list.includes(saved)) ? saved : (cur||list[0]);
-  sel.innerHTML=''; list.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent='voice: '+v;
-    if(v===want)o.selected=true; sel.appendChild(o); });
-  if(DEBUG) sel.hidden=false; }
+  sel.innerHTML=''; list.forEach(v=>{ const o=document.createElement('option'); o.value=v;
+    o.textContent=(labels&&labels[v])||v; if(v===want)o.selected=true; sel.appendChild(o); });   // "Ori (ori)"
+  sel.hidden=false; }
 // populate the picker on page load (before Start) so a pick is shown + remembered even without the WS
-if(DEBUG){ fetch('/voices').then(r=>r.json()).then(d=>populateVoices(d.voices,d.voice)).catch(()=>{}); }
+fetch('/voices').then(r=>r.json()).then(d=>populateVoices(d.voices,d.voice,d.labels)).catch(()=>{});
 
 // The mic and the agent's voice share one AudioContext clock (I-17), so every mic block can say which reply sample
 // the user was hearing when it was captured. The worklet resamples the mic to 16 kHz, continuously across render
@@ -236,7 +237,7 @@ function onEvent(ev){
       (ctx?` · audio latency ${Math.round(1000*latency())}ms`:'');
     // always send the picked voice at session start: the MOUTH keeps its voice across sessions, so comparing
     // against EARS's config default (m.voice) could leave it on a stale voice while the picker shows another
-    if(m.voices && m.voices.length && DEBUG){ populateVoices(m.voices, m.voice);
+    if(m.voices && m.voices.length){ populateVoices(m.voices, m.voice, m.labels);
       if($('voice').value) applyVoice(); }
     buildTuning(m.sliders, m.thresholds); }   // built even when hidden (?nodebug): the meters' marks still show
   else if(m.type==='state'){ setState(m.state);

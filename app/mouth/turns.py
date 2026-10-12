@@ -24,7 +24,8 @@ MAX_STILL = 2              # at most this many "still looking" lines per tool tu
 class Turn:
     def __init__(self, session, stop_flag):
         self.session = session; self.m = session.m; self.stop = stop_flag
-        self.voice = session.voice               # one voice per turn: a switch applies to the next one
+        self.voice = session.voice               # one voice per turn, and its character: a switch applies to the
+        self.character = session.character       #   next one
         self.speaker = Speaker(self.m.tts, self.m.sr)
 
     def run(self):

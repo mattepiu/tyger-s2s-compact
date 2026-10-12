@@ -1,5 +1,6 @@
-"""EarsApp: the web app on one port. The page, the voice list, and a WebSocket per conversation, each a Conversation
-on the shared EARS plugin. Visitors beyond the plugin's capacity (server.max_sessions) get a "busy" page."""
+"""EarsApp: the web app on one port. The page, the voice list (each voice labelled with its character), and a
+WebSocket per conversation, each a Conversation on the shared EARS plugin. Visitors beyond the plugin's capacity
+(server.max_sessions) get a "busy" page."""
 from __future__ import annotations
 import logging
 from pathlib import Path
@@ -8,6 +9,7 @@ from aiohttp import web
 
 from app.ears.conversation import Conversation
 from app.plugins import plugin_class
+from app.prompts import Characters, load_prompts
 
 log = logging.getLogger("ears")
 STATIC = Path(__file__).resolve().parents[2] / "static"
@@ -26,7 +28,12 @@ def list_voices(cfg):
 class EarsApp:
     def __init__(self, cfg, ears):
         self.cfg = cfg; self.ears = ears              # ears: the EARS plugin (app/plugins/base.py EarsPlugin)
+        self.characters = Characters(cfg, load_prompts(cfg))      # the picker's labels: "Ori (ori)"
         self.voices, self.default_voice = list_voices(cfg)
+
+    def labels(self):
+        """{voice: its picker entry, the character's name then the voice}."""
+        return {v: self.characters.label(v) for v in self.voices}
 
     def application(self):
         app = web.Application()
@@ -45,7 +52,7 @@ class EarsApp:
             self.voices, self.default_voice = list_voices(self.cfg)
         except Exception as e:
             log.warning("voice re-discovery failed: %s", e)
-        return web.json_response({"voices": self.voices, "voice": self.default_voice})
+        return web.json_response({"voices": self.voices, "voice": self.default_voice, "labels": self.labels()})
 
     async def websocket(self, request):
         ws = web.WebSocketResponse(max_msg_size=0)
@@ -56,7 +63,8 @@ class EarsApp:
             await ws.close()
             return ws
         try:
-            await Conversation(ws, self.ears, session, self.cfg, self.voices, self.default_voice).run()
+            await Conversation(ws, self.ears, session, self.cfg, self.voices, self.default_voice,
+                               self.labels()).run()
         finally:
             self.ears.close(session)
         return ws

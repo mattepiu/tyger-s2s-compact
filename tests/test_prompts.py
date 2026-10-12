@@ -48,6 +48,64 @@ def test_reply_shots_checked():
     expect_error(d, "reply_shots")
 
 
+def test_persona_checked():
+    d = copy.deepcopy(P.d); d["persona"]["characters"] = {}
+    expect_error(d, "persona.characters")
+    d = copy.deepcopy(P.d); del d["persona"]["characters"]["ori"]["name"]
+    expect_error(d, "persona.characters.ori", "{name, text}")
+
+
+def test_character_opens_every_reply_and_smart_prompt():
+    """Every reply system prompt (each mode) and the smart model's open with the character's lines, then the
+    prompt as it was; one character at a time; Ori is the first character, the default."""
+    from app.mouth.messages import reply_prefix, smart_messages
+    assert P.characters()[0] == "ori" and P.character_name("ori") == "Ori"
+    assert len(P.characters()) >= 2, "a second character, to hear a voice switch"
+    for c in P.characters():
+        text = P.d["persona"]["characters"][c]["text"]
+        systems = {("system", "voice_tools"): reply_prefix(P, c, False)[0]["content"],
+                   ("escalation", "system"): reply_prefix(P, c, True)[0]["content"],
+                   ("tasks", "reply_system"): reply_prefix(P, c, True, True)[0]["content"],
+                   ("smart", "system"): smart_messages(P, c, [], "what's new?", "What's new?")[0]["content"]}
+        for (section, key), s in systems.items():
+            assert s == text + "\n\n" + P.text(section, key), (c, section, key)
+            others = [P.d["persona"]["characters"][o]["text"] for o in P.characters() if o != c]
+            assert not any(o in s for o in others), (c, section, key)
+
+
+def test_characters_by_voice():
+    """voices.character is every voice's; voices.characters the exceptions; an unlisted voice (a clip added later
+    too) gets the default; a character the prompts file lacks stops start-up with the key named."""
+    from app.config import ConfigError
+    from app.prompts import Characters
+    ch = Characters({"voices": {"character": "ori", "characters": {"mike": "mike"}}}, P)
+    assert (ch.of("mike"), ch.of("ori"), ch.of("added-later")) == ("mike", "ori", "ori")
+    assert ch.label("mike") == "Mike (mike)" and ch.label("ref") == "Ori (ref)"
+    assert Characters({"voices": {}}, P).default == "ori"                   # unset: the file's first character
+    for voices, key in (({"character": "nobody"}, "`voices.character: nobody`"),
+                        ({"characters": {"mike": "mikey"}}, "`voices.characters.mike: mikey`")):
+        try:
+            Characters({"voices": voices}, P)
+        except ConfigError as e:
+            assert key in str(e) and "ori" in str(e), str(e)
+        else:
+            raise AssertionError(f"accepted {voices}")
+
+
+def test_missing_character_stops_mouth_start():
+    """MOUTH checks the mapping right after the prompts, before it loads any engine."""
+    from app.config import ConfigError, ROOT, load_config
+    from app.mouth.service import Mouth
+    cfg = load_config(str(ROOT / "config/fake.yaml"))
+    cfg["voices"]["characters"] = {"fake": "nobody"}
+    try:
+        Mouth(cfg)
+    except ConfigError as e:
+        assert "`voices.characters.fake: nobody`" in str(e), str(e)
+    else:
+        raise AssertionError("MOUTH started with a voice mapped to a character that doesn't exist")
+
+
 def expect_error(d, *needles):
     try:
         Prompts(d)

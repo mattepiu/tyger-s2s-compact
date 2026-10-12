@@ -70,7 +70,7 @@ class ReplyTurn(Turn):
     def _reply(self):
         m, s, t = self.m, self.session, self.transcript
         status = s.tasks.status_block() if s.tasks is not None else ""   # tasks: a note on this message only
-        msgs = reply_prefix(m.prompts["reply"], m.expert, m.tasks_on) + s.history.messages + \
+        msgs = reply_prefix(m.prompts["reply"], self.character, m.expert, m.tasks_on) + s.history.messages + \
             [{"role": "user", "content": with_status(status, t)}]
         events = m.llms["reply"].stream(msgs, tools=m.tools, max_new=m.max_gen, stop_flag=self._stop_before_call)
         content, calls, native, started, refused = yield from self.speak_stream(events)
@@ -239,8 +239,8 @@ class ReplyTurn(Turn):
         the reply model's restated question, the other tools' results, and finished tasks' full results."""
         m, s = self.m, self.session
         others = [(c["name"], r) for c, r in zip(rnd.calls, rnd.results) if c["name"] != EXPERT]
-        rnd.next_msgs = smart_messages(m.prompts["smart"], s.history.recent(m.context_turns), self.transcript,
-                                       (ask.get("arguments") or {}).get("question"), others)
+        rnd.next_msgs = smart_messages(m.prompts["smart"], self.character, s.history.recent(m.context_turns),
+                                       self.transcript, (ask.get("arguments") or {}).get("question"), others)
         done = s.tasks.done_results() if s.tasks is not None else []
         if done:                                            # deeper follow-ups on a task get its full result
             rnd.next_msgs[-1]["content"] += m.prompts["smart"].fill(

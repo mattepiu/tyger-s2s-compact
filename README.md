@@ -90,9 +90,14 @@ Never commit `.env`.
 Put one or more reference `.wav` clips in `voices/` (`voices.dir` in `config/default.yaml`; gitignored). The stem is the
 voice name; `voices.default` picks the active one (falls back to the first clip). Optionally add
 `voices/<name>.txt` with the clip's exact transcript: VoxCPM2 then clones from audio + transcript (better
-quality, uses the whole clip); without it the clip is trimmed to `tts.ref_max_s` (10 s). `?debug=1` in the
-browser shows a voice picker. **Reference clips and transcripts are personal data: keep them on the box, and
-never commit, upload, or redistribute them.**
+quality, uses the whole clip); without it the clip is trimmed to `tts.ref_max_s` (10 s). **Reference clips and
+transcripts are personal data: keep them on the box, and never commit, upload, or redistribute them.**
+
+**Each voice can have its own character.** A character is a few lines on who the agent is: its name, personality
+and humour (`persona.characters` in `config/prompts.yaml`). Ori is the default character; Mike and Andrew are drafts
+to rewrite. `voices.character` gives every voice its character, and `voices.characters` maps a voice to another
+one (`mike: mike`). The page's voice picker shows for everyone, each voice labelled with its character
+("Ori (ori)"). Picking another voice switches the character from the next turn, and the conversation goes on.
 
 ### 4. Configure
 
@@ -115,10 +120,10 @@ Paths inside a config are relative to the repo root. `CONFIG=<file> ./run.sh` ru
   experiment. Keep few-shot examples synthetic: the file is committed.
 - **Endpoint thresholds** (`ears.ep_thr` etc.) ship at the training-time defaults and have **not** been
   retuned on a live browser mic — offline thresholds have been seen to run ~2× too high on real mic signal.
-  Expect to tune these live with `?debug=1`, then freeze the values back into `config/default.yaml`.
+  Expect to tune these live with the page's sliders, then freeze the values back into `config/default.yaml`.
 - **Backchannels** are always **contextual LLM acks**: a short reaction the LLM generates from the running
   ASR partial ("oh nice", "wow, really?"). When you've said too little to react to (`mouth.bc_min_words`),
-  it uses a neutral "mm-hm". How *often* they fire is EARS's `ears.bc_thr` (slider under `?debug=1`).
+  it uses a neutral "mm-hm". How *often* they fire is EARS's `ears.bc_thr` (a slider on the page).
 
 ## Run & reach it
 
@@ -137,8 +142,9 @@ Browsers only allow the mic over **HTTPS or localhost**, so either:
 - **HTTPS** behind a reverse proxy (e.g. Caddy: `tyger.example.com { reverse_proxy localhost:7860 }`). The
   page upgrades the WebSocket to `wss` automatically when served over HTTPS.
 
-`?debug=1` reveals the live tuning sliders (endpoint τ / debounce, barge, backchannel) and the voice picker.
-Browser DSP (echo cancellation, noise suppression, auto gain) is on.
+The page shows the live tuning sliders (endpoint τ / debounce, barge, backchannel) while they're being tuned (O-01);
+`?nodebug` hides them for a clean demo. The voice picker shows either way. Browser DSP (echo cancellation, noise
+suppression, auto gain) is on.
 
 **The page's WebSocket** (`/ws`; for a client of your own; `app/ears/playback.py` has the details). All binary
 frames are little-endian, with int16 audio:

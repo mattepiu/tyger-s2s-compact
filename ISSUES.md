@@ -12,7 +12,8 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
 | ID | Area | Severity | Status | One line |
 |---|---|---|---|---|
 | I-20 | smart | medium | open | The expert calls `get_current_time` before most answers; once an empty answer, once a "Dummy" reminder |
-| I-21 | smart | low | open | The expert writes unit symbols ("19°C") into speech |
+| I-21 | smart | low | open | The expert writes unit symbols ("19°C") and digits into speech |
+| I-25 | smart | medium | open | The expert's web-search answers can end with a citation link, spoken as a URL |
 | I-18 | EARS | medium | accepted for now | With a clean mic, an "mm-hm" in the agent's pause barges |
 | I-24 | tests | low | open | `test_barged_round.py` is timing-based and failed once under CPU load |
 | I-09 | EARS | low | check on the stack | A lost MOUTH ends the conversation on the fakes; not checked on the real stack |
@@ -31,8 +32,9 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
 
 ## The expert (`smart`)
 
-Both were found by the live check of `openai-responses` on 2026-10-11 (`gpt-5.4-mini`, web search on, synthetic
-questions). A live run against OpenAI needs the user's OK each time.
+Found by the live check of `openai-responses` on 2026-10-11 and the plugin-level probes of 2026-10-12, with the
+characters (`gpt-5.4-mini`, web search on, synthetic questions, 10 requests). A live run against OpenAI needs the
+user's OK each time.
 
 ### I-20 — The expert calls `get_current_time` before most answers (medium, confirmed)
 **What happens** (`gpt-5.4-mini`, `reasoning_effort: low`):
@@ -40,6 +42,8 @@ questions). A live run against OpenAI needs the user's OK each time.
   trip before the answer.
 - Once it looped through four `get_current_time` rounds and then gave an empty answer.
 - Once it called `set_reminder` with the text "Dummy" for a savings question.
+- The probes of 2026-10-12: one `get_current_time` round before each of the 5 weather answers (they name the date),
+  none before the 5 others. No empty answers, no action calls.
 
 **Where:** `app/plugins/llm/hosted/openai_responses.py`, and the smart model's tools: `Mouth.smart_tools` in
 `app/mouth/service.py` gives it every tool except the ones MOUTH answers itself.
@@ -58,10 +62,26 @@ answers, no action calls.
 
 ### I-21 — The expert writes unit symbols into speech (low, confirmed)
 **What happens:** weather answers said "19°C, or 66°F" (4 of 6), though the smart prompt asks for spoken words only.
+The probes of 2026-10-12, with Ori's or Mike's lines first: "23°C", "25°C, or 77°F" in 3 of 5 weather answers,
+digits in all 5 ("October 13, 2026"), and in a savings answer ("7 percent", "104 thousand"). The chunker turns
+"25°C" into "25 C". The user's full Ori prompt had a "write out and normalize" rule that might have helped; it
+failed the routing gate, so it isn't in the reply or smart prompts.
 
-**Fix:** spell units out in the smart prompt, with an example ("nineteen degrees Celsius").
+**Fix:** spell units and numbers out in the smart prompt, with an example ("nineteen degrees Celsius"); it isn't
+routed, so the reply model's gate doesn't apply. Or normalise them in MOUTH before the TTS.
 
 **Verify:** the weather questions of the live check, with the user's OK.
+
+### I-25 — The expert's web-search answers can end with a citation link (medium, confirmed)
+**What happens** (the probes of 2026-10-12): a news answer ended with
+`([science.nasa.gov](https://science.nasa.gov/mission/webb/latestnews/?utm_source=openai))`. The chunker's
+`say_clean` keeps the words, so the TTS would read "science.nasa.gov https science.nasa.gov mission webb latestnews
+utm source openai". OpenAI's web search writes its citations inline in the text.
+
+**Fix options:** drop a markdown link and a bare URL in `say_clean`, or in `openai-responses`' stream parser
+(the response's `url_citation` annotations give their spans, but only at the end of the stream).
+
+**Verify:** a test of `say_clean` on that line; then news questions as plugin-level probes, with the user's OK.
 
 ---
 
@@ -150,7 +170,8 @@ faster than real time or in huge frames, and list voice names at `/voices`.
 ### O-01 — The endpoint thresholds were never tuned live (needs the user)
 `ep_thr` 0.9146 and `ep_deb` 2 ship at the training defaults; offline thresholds ran ~2× high on a live mic.
 `barge_thr` was set to 0.4 live on 2026-10-10. It's the biggest risk to how the product feels.
-- The user drives the mic with `?debug=1`; a slider change is logged (`threshold <name> = <value>`).
+- The user drives the mic with the page's sliders (shown unless `?nodebug`); a slider change is logged
+  (`threshold <name> = <value>`).
 - Target: end of speech → endpoint from ~600–775 ms p50 to ≤ 450 ms (p90 ≤ 550), with no more endpoints inside
   utterances.
 - Afterwards, freeze the values into `config/default.yaml` and re-run `scripts/stack/load_ears.py`.

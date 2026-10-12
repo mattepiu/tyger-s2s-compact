@@ -22,12 +22,15 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **`fake` plugins** and `config/fake.yaml`: the whole stack runs on a CPU, with no downloads.
 - **All prompts in one file,** `config/prompts.yaml`, checked at startup.
 - **Config checks:** a typo in the config stops startup and names the key.
-- **Tuning sliders** under `?debug=1`, built from the turn-taking plugin's thresholds.
+- **Tuning sliders** on the page (`?nodebug` hides them), built from the turn-taking plugin's thresholds.
 - **Tests that need no GPU,** and a check of the web page in jsdom.
 - **A routing test** (`scripts/bench/escalation.py`): 119 synthetic cases, no API cost.
 - **Measurement scripts:** smoke and load tests on the running stack, GPU parity checks, stack comparisons.
 
 ### Changed
+- **The agent is Ori,** a warm, witty character with a chill vibe; the expert answers in the same voice.
+- **Each voice can have its own character:** picking a voice on the page switches who you're talking to, and the
+  picker shows for everyone.
 - **English only:** the agent answers in English, whatever language it hears.
 - **Responder: Gemma 4 E4B,** FP8 at load, replaces Qwen3-4B, for reliable tool calls.
 - **TTS: VoxCPM2** replaces MOSS-TTS-Realtime: first audio per request ~480 → ~80 ms.

@@ -1,7 +1,7 @@
-"""Session: one conversation = one EARS connection. It holds the conversation's state (history, voice, recent
-backchannel acks, background tasks), reads the wire, and runs two workers: turns (ReplyTurn, AnnouncementTurn,
-SayTurn) and backchannels, so a backchannel is generated while a turn is (their own engine requests). Several
-Sessions run at once on the shared engines. Barge-in (B) stops the current turn only.
+"""Session: one conversation = one EARS connection. It holds the conversation's state (history, the voice and so
+its character, recent backchannel acks, background tasks), reads the wire, and runs two workers: turns (ReplyTurn,
+AnnouncementTurn, SayTurn) and backchannels, so a backchannel is generated while a turn is (their own engine
+requests). Several Sessions run at once on the shared engines. Barge-in (B) stops the current turn only.
 """
 from __future__ import annotations
 import json, logging, queue, threading, time
@@ -46,14 +46,20 @@ class Session:
         except OSError:                                # EARS went away mid-stream -> stop this session
             self.closed.set(); self.turn_stop.set()
 
+    @property
+    def character(self):
+        """The character the current voice speaks as (config voices.character / voices.characters)."""
+        return self.m.characters.of(self.voice_name)
+
     def set_voice(self, name):
+        """The page picked another voice: the next turn speaks with it, as its character. History stays."""
         if name == self.voice_name:
             return
         v = self.m.voice(name)
         if v is None:
             log.warning("voice '%s' not found (keeping %s)", name, self.voice_name); return
         self.voice_name, self.voice = name, v
-        log.info("voice -> %s", name)
+        log.info("voice -> %s (character %s)", name, self.character)
 
     # ---- what the workers run: generators of MOUTH events ----
     def stream_turn(self, transcript, stop_flag):

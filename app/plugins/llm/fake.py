@@ -108,7 +108,8 @@ class FakeLLM(LLMPlugin):
         for kind, section in (("leadin", "tool_leadin"), ("ack", "backchannel"), ("still", "still_looking"),
                               ("expert_leadin", "expert_leadin"), ("expert_still", "expert_still"),
                               ("smart", "smart"), ("task", "tasks"), ("task_failed", "task_failed")):
-            if sys_txt.startswith(self.prompts.text(section, "system")):     # + appended hints (backchannel)
+            if self.prompts.text(section, "system") in sys_txt:     # after the character (smart); before
+                # appended hints (backchannel)
                 return kind + "_b" if kind in ("smart", "task") and tool_result else kind
         return "phase_b" if tool_result else "reply"
 

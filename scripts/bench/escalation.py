@@ -5,9 +5,9 @@ synthetic set in scripts/bench/escalation_set.yaml?
 Routes: local (no call), tool (any lookup / action, cancel_task included), expert (ask_expert), background
 (start_task). A case may list `also` routes that count as right too (planning: answered now by the expert, or
 researched as a task). The decision is the reply model's alone, so only that model runs: no smart model, no
-remote calls, no cost. Each case is sent exactly as MOUTH would send it (messages.reply_prefix for the mode, then the
-case's history, then the user turn, with the case's `status` note in front as MOUTH prepends it), at the model's
-configured temperature, `--samples` times. The mode follows config/default.yaml (tasks on if mouth.tasks.enabled);
+remote calls, no cost. Each case is sent exactly as MOUTH would send it (messages.reply_prefix for the mode and the
+character, then the case's history, then the user turn, with the case's `status` note in front as MOUTH prepends
+it), at the model's configured temperature, `--samples` times. The mode follows config/default.yaml (tasks on if mouth.tasks.enabled);
 --no-tasks / --no-expert evaluate the prompts without them (cases needing the missing route are skipped). Needs the
 GPU free (stop run.sh). Prints routes and rates; the set is synthetic, so misrouted cases are listed with their text.
 
@@ -18,6 +18,7 @@ real), and scores that answer's speech the same way.
 
   .venv/bin/python scripts/bench/escalation.py [--samples 8] [--no-expert] [--opt temperature=0.5] [--plugin NAME]
       [--split heldout] [--prompts config/prompts.yaml,/path/candidate.yaml]   several prompt files: one model load
+      [--character ori]   the character the reply prompts open with (default: the config's default)
 """
 import sys, re, json, argparse, logging, collections
 from concurrent.futures import ThreadPoolExecutor
@@ -29,7 +30,7 @@ from app.config import load_config, repo_path
 from app.runtime.event_loop import EngineLoop
 from app.plugins import plugin_class
 from app.plugins.base import PluginContext
-from app.prompts import load_prompts
+from app.prompts import Characters, load_prompts
 from app.tools import build_tools, execute_tool, EXPERT, START, CANCEL
 from app.mouth.messages import reply_prefix, turns_messages, round_messages, with_status
 
@@ -96,9 +97,9 @@ def right(case, got):
     return got == case["route"] or got in case.get("also", [])
 
 
-def evaluate(llm, p, cases, samples, max_new, workers, expert=True, tasks=False):
+def evaluate(llm, p, character, cases, samples, max_new, workers, expert=True, tasks=False):
     tools = build_tools(p, expert=expert, tasks=tasks)
-    prefix = reply_prefix(p, expert, tasks)
+    prefix = reply_prefix(p, character, expert, tasks)
     jobs = [(c, k) for c in cases for k in range(samples)]
 
     def run(job):
@@ -172,6 +173,7 @@ def main():
                     "ask_expert); expert cases are skipped")
     ap.add_argument("--no-tasks", action="store_true", help="the prompt and tools without background tasks, "
                     "even if config/default.yaml has them on; background cases are skipped")
+    ap.add_argument("--character", default=None, help="default: the config's default character (voices.character)")
     ap.add_argument("--opt", action="append", default=[], help="override a reply-block option, e.g. "
                     "gpu_memory_utilization=0.8 (YAML value)")
     a = ap.parse_args()
@@ -193,10 +195,12 @@ def main():
     for pf in (a.prompts.split(",") if a.prompts else [cfg["mouth"].get("prompts") or "config/prompts.yaml"]):
         cfg["mouth"]["prompts"] = str(repo_path(pf))
         p = load_prompts(cfg)
-        results = evaluate(llm, p, cases, a.samples, int(cfg["mouth"].get("max_gen", 192)),
+        character = a.character or Characters(cfg, p).default
+        results = evaluate(llm, p, character, cases, a.samples, int(cfg["mouth"].get("max_gen", 192)),
                            int(block.get("max_num_seqs", 8)), expert=expert, tasks=tasks)
         mode = "tasks" if tasks else "expert" if expert else "no expert"
-        title = f"{name}, prompts {Path(pf).name} ({mode}), split {a.split}, {len(cases)} cases x {a.samples}"
+        title = (f"{name}, prompts {Path(pf).name}, character {character} ({mode}), split {a.split}, "
+                 f"{len(cases)} cases x {a.samples}")
         out[pf] = report(results, title)
         for split in SPLITS if a.split == "all" else ():
             part = [r for r in results if r[0]["split"] == split]

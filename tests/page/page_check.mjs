@@ -139,5 +139,29 @@ W._sources[0].onended();
 await sleep(40);
 ok(W._ws.sent.includes("played:1:2400"), `the new reply 1's report counts only its own samples: ${W._ws.sent.filter(m => typeof m === "string")}`);
 
+// ---- the voice picker: shown for everyone (each voice is a character), the sliders only in debug ---------------
+const VOICES = { voices: ["andrew", "ori"], voice: "ori", labels: { andrew: "Andrew (andrew)", ori: "Ori (ori)" } };
+async function pickerPage(query) {
+  const d = new JSDOM(html, { runScripts: "dangerously", url: "http://localhost:7860/" + query,
+    beforeParse(W) {
+      W.fetch = async () => ({ json: async () => VOICES });
+      W.WebSocket = class { constructor() { this.readyState = 1; this.sent = []; W._ws = this; } send(x) { this.sent.push(x); } close() {} };
+    } });
+  await sleep(20);
+  return d.window;
+}
+for (const query of ["", "?nodebug"]) {
+  const P = await pickerPage(query), sel = P.document.getElementById("voice"), at = query || "(no query)";
+  ok(!sel.hidden, `the voice picker shows ${at}`);
+  ok([...sel.options].map(o => o.textContent).join() === "Andrew (andrew),Ori (ori)",
+     `entries name the character, then the voice ${at}: ${[...sel.options].map(o => o.textContent)}`);
+  ok(P.document.getElementById("tune").hidden === (query === "?nodebug"), `the sliders show only in debug ${at}`);
+  P.eval("ws = new WebSocket('ws://localhost:7860/ws')");
+  P.eval("onEvent")({ data: JSON.stringify({ type: "ready", hop_ms: 320, sr: 16000, mouth: true, sliders: [], thresholds: {}, ...VOICES }) });
+  ok(P._ws.sent.includes("voice:" + sel.value), `the picked voice is sent at the start ${at}: ${P._ws.sent}`);
+  sel.value = "andrew"; sel.dispatchEvent(new P.Event("change"));
+  ok(P._ws.sent.at(-1) === "voice:andrew", `picking a voice sends voice:<name> ${at}: ${P._ws.sent}`);
+}
+
 console.log(`${checks - fails}/${checks} checks passed`);
 process.exit(fails ? 1 : 0);

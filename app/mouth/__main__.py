@@ -37,7 +37,7 @@ class Server:
     def _serve(self, conn):
         n = self._count(+1)
         s = Session(self.m, conn)
-        log.info("session start (active=%d, voice=%s)", n, s.voice_name)
+        log.info("session start (active=%d, voice=%s, character=%s)", n, s.voice_name, s.character)
         try:
             s.run()
         except Exception as e:

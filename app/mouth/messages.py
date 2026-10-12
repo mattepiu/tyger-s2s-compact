@@ -66,13 +66,14 @@ def turns_messages(p, turns, id_prefix="shot"):
     return msgs
 
 
-def reply_prefix(p, expert, tasks=False):
-    """The reply request before the conversation: the system prompt, the few-shot turns (reply_shots: local answers
-    and lookups), with escalation on the hand-off turns (escalation.shots), with tasks on the start_task turns
-    (tasks.shots), as earlier turns in the neutral format. A fixed prefix, so it stays cached."""
-    system = p.text("tasks", "reply_system") if tasks else \
-        p.text("escalation", "system") if expert else p.text("system", "voice_tools")
-    msgs = [{"role": "system", "content": system}] + turns_messages(p, p.turns("reply_shots"), "rshot")
+def reply_prefix(p, character, expert, tasks=False):
+    """The reply request before the conversation: the system prompt (the character's lines, then the mode's
+    prompt), the few-shot turns (reply_shots: local answers and lookups), with escalation on the hand-off turns
+    (escalation.shots), with tasks on the start_task turns (tasks.shots), as earlier turns in the neutral format. A
+    fixed prefix per character, so it stays cached."""
+    rules = ("tasks", "reply_system") if tasks else ("escalation", "system") if expert else ("system", "voice_tools")
+    msgs = [{"role": "system", "content": p.system(character, *rules)}] + \
+        turns_messages(p, p.turns("reply_shots"), "rshot")
     msgs += turns_messages(p, p.turns("escalation")) if expert else []
     return msgs + (turns_messages(p, p.turns("tasks"), "tshot") if tasks else [])
 
@@ -90,15 +91,17 @@ def plain_context(turns):
             if x["role"] in ("user", "assistant") and not x.get("tool_calls") and x.get("content")]
 
 
-def smart_messages(p, turns, transcript, question, others=()):
-    """The smart model's request for an escalated turn: its system prompt, the given recent turns as plain text
-    (tool calls and results dropped: provider-neutral, and less leaves the box), then the user's words with the
-    reply model's restated question as a note, plus what other tools called in the same turn returned."""
+def smart_messages(p, character, turns, transcript, question, others=()):
+    """The smart model's request for an escalated turn: its system prompt (the character's lines, then the smart
+    model's prompt: its answer is spoken in the same voice), the given recent turns as plain text (tool calls and
+    results dropped: provider-neutral, and less leaves the box), then the user's words with the reply model's
+    restated question as a note, plus what other tools called in the same turn returned."""
     ctx = plain_context(turns)
     user = p.fill("smart", "user", transcript=transcript, question=question or transcript)
     if others:
         user += p.fill("smart", "results", results="; ".join(f"{n}: {compact_result(r)}" for n, r in others))
-    return [{"role": "system", "content": p.text("smart", "system")}] + ctx + [{"role": "user", "content": user}]
+    return [{"role": "system", "content": p.system(character, "smart", "system")}] + ctx + \
+        [{"role": "user", "content": user}]
 
 
 def round_messages(content, calls, native, results, compact=False):

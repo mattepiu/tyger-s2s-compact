@@ -36,9 +36,10 @@ FRAME_MS = 80                                   # one FRAME event per 80 ms of u
 
 
 class Conversation:
-    def __init__(self, ws, ears, session, cfg, voices=(), default_voice=None):
+    def __init__(self, ws, ears, session, cfg, voices=(), default_voice=None, labels=None):
         self.ws = ws; self.ears = ears; self.session = session; self.cfg = cfg
         self.voices = list(voices); self.default_voice = default_voice
+        self.labels = labels or {}                       # voice -> its picker entry, e.g. "Ori (ori)"
         self.hop_n = ears.hop_samples
         tasks = (cfg.get("mouth") or {}).get("tasks", {})
         self.floor_frames = math.ceil(float(tasks.get("announce_after_silence_ms", 1200)) / FRAME_MS)
@@ -92,10 +93,11 @@ class Conversation:
             log.warning("no MOUTH: %s", e)
 
     def _ready_message(self):
-        """The page's start-up info: audio format, MOUTH there or not, voices, and the plugin's tunable thresholds
-        (their sliders and this conversation's values: the page builds its tuning panel from them)."""
+        """The page's start-up info: audio format, MOUTH there or not, voices (with their characters' labels), and
+        the plugin's tunable thresholds (their sliders and this conversation's values: the page builds its tuning
+        panel from them)."""
         return {"type": "ready", "hop_ms": int(self.hop_n / self.ears.sr * 1e3), "sr": self.ears.sr,
-                "mouth": self.have_mouth, "voices": self.voices, "voice": self.default_voice,
+                "mouth": self.have_mouth, "voices": self.voices, "voice": self.default_voice, "labels": self.labels,
                 "thresholds": self.ears.thresholds(self.session),
                 "sliders": [t.slider_spec() for t in self.ears.THRESHOLDS if t.slider is not None]}
 

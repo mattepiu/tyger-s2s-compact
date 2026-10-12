@@ -1,6 +1,7 @@
 """Mouth: what every conversation shares. The model plugins (LLM roles, TTS) on one engine loop, the prompts per
-role, the tool lists, and the turn settings from config. Built once at MOUTH start-up, in an order that matters
-(prompts first, then the TTS, then the LLMs, then warm-ups); per-conversation state lives in Session.
+role and the character per voice, the tool lists, and the turn settings from config. Built once at MOUTH start-up,
+in an order that matters (prompts first, then the TTS, then the LLMs, then warm-ups); per-conversation state lives
+in Session.
 """
 from __future__ import annotations
 import logging
@@ -9,7 +10,7 @@ from app.config import llm_roles
 from app.runtime.event_loop import EngineLoop
 from app.mouth.messages import reply_prefix
 from app.plugins import build_llms, build_tts
-from app.prompts import load_prompts
+from app.prompts import Characters, load_prompts
 from app.mouth.tasks import TaskSlots
 from app.tools import build_tools
 
@@ -34,8 +35,10 @@ class Mouth:
         self.context_turns = int(esc.get("context_turns", 4))     # history turns sent along with an escalated turn
         self.max_steps = int(esc.get("max_steps", 3))             # the smart model's own tool rounds per turn
         self.cfg = cfg
-        # prompts first: a bad config/prompts.yaml stops start-up before minutes of engine loading
+        # prompts first: a bad config/prompts.yaml, or a voice mapped to a character it lacks, stops start-up before
+        # minutes of engine loading
         prompts = load_prompts(cfg)
+        self.characters = Characters(cfg, prompts)                 # voice -> the character it speaks as
         self.prompts = {role: prompts for role in roles}           # role -> Prompts: one file for every role
         self.tools = build_tools(self.prompts["reply"], expert=self.expert, tasks=self.tasks_on)
         self.smart_tools = build_tools(self.prompts["smart"]) if self.expert else None   # lookups, no ask_expert
@@ -55,9 +58,11 @@ class Mouth:
         self.tts.warmup(voice)
         for llm in {id(x): x for x in self.llms.values()}.values():
             llm.warmup()
-        # first request with the tools prompt is cold (~490 ms to first token vs ~55 ms after) -> pay it here
+        # first request with the tools prompt is cold (~490 ms to first token vs ~55 ms after) -> pay it here, for the
+        # default voice's character
         p = self.prompts["reply"]
-        warm = reply_prefix(p, self.expert, self.tasks_on) + [{"role": "user", "content": p.text("warmup", "user")}]
+        warm = reply_prefix(p, self.characters.of(default), self.expert, self.tasks_on) + \
+            [{"role": "user", "content": p.text("warmup", "user")}]
         for _ in self.llms["reply"].stream(warm, tools=self.tools, max_new=8):
             pass
 

@@ -1,9 +1,12 @@
 """Prompts: every piece of text MOUTH sends to an LLM lives in config/prompts.yaml (DEVELOPING.md -> "Prompts").
 
 Read once at MOUTH start and validated: required keys present, each template's placeholders exactly the ones the
-code passes, shots a list of [user, assistant] pairs, tool descriptions only for tools and parameters that exist.
-An invalid file stops start-up with the key named. Every LLM role reads the same file (mouth.prompts). Not reloaded
-live: restart MOUTH after editing.
+code passes, shots a list of [user, assistant] pairs, tool descriptions only for tools and parameters that exist,
+the characters. An invalid file stops start-up with the key named. Every LLM role reads the same file
+(mouth.prompts). Not reloaded live: restart MOUTH after editing.
+
+The reply and smart system prompts open with a character, a few lines on who the agent is (one per voice:
+Characters), then the prompt itself (Prompts.system).
 """
 from __future__ import annotations
 from pathlib import Path
@@ -45,6 +48,9 @@ TEXTS = [("system", "voice_tools"), ("tool_leadin", "system"), ("still_looking",
          ("tasks", "cap_global"), ("tasks", "unknown_task"), ("tasks", "continued"), ("tasks", "result_pending"),
          ("task_failed", "system")]
 SHOTS = ["tool_leadin", "still_looking", "backchannel", "expert_leadin", "expert_still", "task_failed"]
+# the system prompts that open with the character (Prompts.system): the reply prompt of each mode, and the smart
+# model's (the expert answers in the same voice)
+PERSONA_SYSTEMS = [("system", "voice_tools"), ("escalation", "system"), ("tasks", "reply_system"), ("smart", "system")]
 
 
 class PromptError(ValueError):
@@ -115,6 +121,12 @@ class Prompts:
                     and isinstance(t["call"].get("arguments"), dict)) for t in ts):
             self._fail("tasks.shots", "must be a list of {user, reply} or {user, call: {name: start_task|cancel_task, "
                                       "arguments}, result, answer} turns")
+        chars = self._get("persona", "characters")
+        if not isinstance(chars, dict) or not chars:
+            self._fail("persona.characters", "must map each character's key to its {name, text}")
+        for key, c in chars.items():
+            if not isinstance(c, dict) or set(c) != {"name", "text"} or not all(isinstance(v, str) for v in c.values()):
+                self._fail(f"persona.characters.{key}", "must be {name, text}: the picker's name and the character")
         tools = self.d.get("tools")
         if not isinstance(tools, dict):
             self._fail("tools", "is missing")
@@ -132,6 +144,18 @@ class Prompts:
 
     def text(self, section, key) -> str:
         return self.d[section][key]
+
+    def characters(self) -> list[str]:
+        """The characters' keys, in file order."""
+        return list(self.d["persona"]["characters"])
+
+    def character_name(self, character) -> str:
+        return self.d["persona"]["characters"][character]["name"]
+
+    def system(self, character, section, key) -> str:
+        """A system prompt that opens with the character (PERSONA_SYSTEMS): its lines, then the prompt."""
+        assert (section, key) in PERSONA_SYSTEMS, (section, key)
+        return self.d["persona"]["characters"][character]["text"] + "\n\n" + self.d[section][key]
 
     def shots(self, section) -> list[tuple[str, str]]:
         return [tuple(p) for p in self.d[section]["shots"]]
@@ -151,6 +175,33 @@ class Prompts:
 
     def tool_text(self) -> dict:
         return self.d["tools"]
+
+
+class Characters:
+    """Which character each voice speaks as: config `voices.character` for every voice (unset: the prompts file's
+    first character) and `voices.characters` for the exceptions ({voice name: character}). Each is checked against
+    the prompts file's persona.characters, so a character that doesn't exist stops start-up with the key named. A
+    voice that isn't listed (a clip added later included) gets the default."""
+    def __init__(self, cfg: dict, prompts: Prompts):
+        from app.config import ConfigError
+        v = cfg.get("voices") or {}
+        known = prompts.characters()
+        self.prompts = prompts
+        self.default = v.get("character") or known[0]
+        self.by_voice = dict(v.get("characters") or {})
+        for key, character in [("voices.character", self.default)] + \
+                [(f"voices.characters.{voice}", c) for voice, c in self.by_voice.items()]:
+            if character not in known:
+                raise ConfigError(f"`{key}: {character}` is not a character in {prompts.source} "
+                                  f"(persona.characters: {', '.join(known)})")
+
+    def of(self, voice) -> str:
+        """The character `voice` speaks as."""
+        return self.by_voice.get(voice, self.default)
+
+    def label(self, voice) -> str:
+        """The voice picker's entry: the character's name, then the voice."""
+        return f"{self.prompts.character_name(self.of(voice))} ({voice})"
 
 
 def _read(path: Path) -> dict:

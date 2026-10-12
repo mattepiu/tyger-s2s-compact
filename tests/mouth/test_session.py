@@ -344,17 +344,48 @@ def test_no_expert_without_smart():
     s, m = make_session(FakeLLM())
     run_turn(s, "hello")
     msgs = s.m.llm.calls[0][1]
-    assert msgs[0]["content"] == PROMPTS.text("system", "voice_tools") and msgs[-1]["content"] == "hello"
-    assert msgs[:-1] == reply_prefix(PROMPTS, False)                # system + the lookup few-shot turns
+    ori = m.characters.default
+    assert msgs[0]["content"] == PROMPTS.system(ori, "system", "voice_tools") and msgs[-1]["content"] == "hello"
+    assert msgs[:-1] == reply_prefix(PROMPTS, ori, False)           # system + the lookup few-shot turns
     assert not any(c["name"] == "ask_expert" for x in msgs if x.get("tool_calls") for c in x["tool_calls"])
     assert "ask_expert" not in [t["function"]["name"] for t in m.tools]
+
+
+def persona_of(msgs):
+    """The character whose text opens a request's system prompt."""
+    return next(c for c in PROMPTS.characters() if msgs[0]["content"].startswith(PROMPTS.d["persona"]["characters"][c]["text"]))
+
+
+def test_voice_switch_changes_the_character_next_turn():
+    """The page picks another voice (V): the next turn's reply and expert requests open with that voice's character
+    (voices.characters), and the conversation's history stays."""
+    llm, smart = FakeLLM(), FakeLLM()
+    s, m = make_session(llm, FakeTTS(n=2), smart=smart, voices={"character": "ori", "characters": {"alt": "mike"}})
+    run_turn(s, "hello there")
+    assert persona_of(llm.calls[-1][1]) == "ori"
+    s._dispatch(b"V", json.dumps({"voice": "alt"}).encode())
+    assert s.voice_name == "alt" and s.character == "mike"
+    llm.text["reply"] = ASK                                        # this turn escalates: the expert speaks as Mike too
+    run_turn(s, "and how much would that be?")
+    reply = next(msgs for kind, msgs in llm.calls if kind == "reply" and msgs[-1]["content"].startswith("and how"))
+    assert persona_of(reply) == "mike" and persona_of(smart.calls[-1][1]) == "mike"
+    assert any(x["role"] == "user" and x["content"] == "hello there" for x in reply), "history kept"
+
+
+def test_unlisted_voice_gets_the_default_character():
+    llm = FakeLLM()
+    s, m = make_session(llm, voices={"character": "ori", "characters": {"alt": "mike"}})
+    s.set_voice("alt"); run_turn(s, "hi")
+    assert persona_of(llm.calls[-1][1]) == "mike"
+    s.set_voice("new"); run_turn(s, "hi again")                    # a voice with no entry: the default character
+    assert s.character == "ori" and persona_of(llm.calls[-1][1]) == "ori"
 
 
 def test_expert_prompt_has_shots_and_tool():
     s, m = make_session(FakeLLM(), smart=FakeLLM())
     run_turn(s, "hello")
     msgs = s.m.llm.calls[0][1]
-    assert msgs[0]["content"] == PROMPTS.text("escalation", "system")
+    assert msgs[0]["content"] == PROMPTS.system(m.characters.default, "escalation", "system")
     calls = [c for x in msgs if x.get("tool_calls") for c in x["tool_calls"]]
     asks = [c for c in calls if c["name"] == "ask_expert"]
     assert asks and len(asks) < len(calls) and msgs[-1]["content"] == "hello"   # lookup shots come first
@@ -372,7 +403,7 @@ def test_expert_turn_answered_by_smart():
     assert "phase_b" not in kinds(llm), "the reply model must not answer an escalated turn"
     assert kinds(smart) == ["smart"]
     req = smart.calls[0][1]
-    assert req[0]["content"] == PROMPTS.text("smart", "system")
+    assert req[0]["content"] == PROMPTS.system(m.characters.default, "smart", "system")
     assert req[-1]["content"].startswith("what do I get from 200") and "index fund" in req[-1]["content"]
     assert evs[-1][1].endswith(smart.smart) and evs[-1][1].startswith(llm.expert_leadin)
     assert [h["role"] for h in s.history.messages] == ["user", "assistant", "tool", "assistant"]

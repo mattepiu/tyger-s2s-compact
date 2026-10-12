@@ -315,6 +315,21 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Run & rea
 - **Checked at start.** Templates use `string.Template` (`$name`). The loader checks the keys, the placeholders and
   the shot shapes at MOUTH start, and a bad file stops startup with the key named. The file is read once, so restart
   MOUTH after editing.
+- **Characters.** The reply system prompts (`system.voice_tools`, `escalation.system`, `tasks.reply_system`) and
+  the smart model's (`smart.system`) open with a character: a few lines on who the agent is, its name, maker and
+  manner (`persona.characters` in `config/prompts.yaml`). Then comes the prompt as it was (`Prompts.system`).
+  - Ori is the default, from the user's Ori prompt. Mike and Andrew are drafts for the user to rewrite.
+  - The expert's answers are spoken in the same voice, so the smart prompt gets the character too. The fillers
+    (lead-ins, still-looking lines, backchannels) and the background task's prompt don't.
+  - The user's full Ori prompt (2026-10-12: a long style base, opinions, "extremely knowledgeable") was measured
+    first and failed the routing gate: 17.4% missed escalations, 12.5% with Ori-style few-shot lines. E4B then
+    answered explanations, advice and code itself. A few lines before the old prompt keep routing where it was.
+- **The character follows the voice.** Config `voices.character` is every voice's character, and
+  `voices.characters` maps a voice to another one. A voice that isn't listed gets the default. A character that
+  isn't in the prompts file stops startup with the key named (`Characters`, checked in both processes). When the
+  page picks another voice (`voice:<name>` → `V`), the next turn speaks as that voice's character, and history
+  stays. The picker labels each voice with its character, e.g. "Ori (ori)".
+- **The few-shot turns are shared** by every character, so their style carries into each one.
 - **Few-shot turns, not quoted examples.** Small models copy a quoted example word for word. Qwen3-4B said "Sure,
   let me check that for you." on every tool turn, and the first backchannel prompt's 'mm-hm' nearly every time.
 - **English only.** Every prompt asks for English, and every few-shot turn is in English.
@@ -571,6 +586,11 @@ own web search.
   stubbed): `.venv/bin/python scripts/bench/escalation.py --samples 8`, with and without `--no-expert`. It covers
   local, tool, expert and background routes on 119 synthetic English cases, plus spoken markup. The gate for any
   prompt or model change: at most 10% missed escalations, and no regression in tool calls or spoken markup.
+  `--character NAME` routes with another character's persona (default: the config's).
+- **Style** (stack stopped, no hosted calls): `.venv/bin/python scripts/bench/style.py --samples 3`, with
+  `--prompts a.yaml,b.yaml` to compare prompt files and `--character NAME`. It counts, over 36 synthetic
+  conversational turns, the local replies with markup (digits, symbols, emoji, parentheticals or action lines), with
+  more than three sentences, and with a disfluency or filler word, and prints a few to read.
 - **The expert, live:** `scripts/stack/barged_round.py` (cut in on the expert's lead-in) calls OpenAI, so it needs the
   user's OK each run. For escalation without OpenAI, give a config copy an `llm.smart` block with `plugin: fake`.
 - **A fake stack next to the real one:** copy `config/fake.yaml` with ports 7861 / 8771, start it with
