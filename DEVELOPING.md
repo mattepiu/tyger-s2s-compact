@@ -71,6 +71,7 @@ config/
   engines/voxcpm2.yaml     # vLLM-Omni's engine config for VoxCPM2
 scripts/
   stack/                   # against the running stack: smoke, load tests, the simulated page, the cut-in check
+  web/                     # the new page against the running stack, in headless Chromium (live_check.mjs)
   validate/                # GPU parity checks of EARS (the stack stopped); reference.py is the plain reference
   bench/                   # measurements, and the routing eval (escalation.py + escalation_set.yaml)
 tests/                     # GPU-free: ears/, mouth/, plugins/, the config / prompts / tools tests, fakes.py;
@@ -593,6 +594,12 @@ own web search.
 
   The scripts talk to EARS through a simulated page (`scripts/stack/page.py`). Compare with the last row of
   "Benchmarks" below for the same card.
+- **The new page, live** (any config; the stack and `cd web && npm run dev` running): once,
+  `cd scripts/web && npm install && npx playwright install --with-deps chromium`; then
+  `node scripts/web/live_check.mjs`. One real spoken turn through the page in headless Chromium (load_ears's
+  utterance, made by MOUTH's TTS, as the mic) with the Tuning panel open. It checks the words as spoken, the
+  transcript, the reply's text and audio, the `played` report, a slider's round trip to EARS and the meters, and
+  logs message types and lengths only.
 - **Comparing two stacks:** `scripts/bench/stack.sh TAG CONFIG STACK_LOG` runs the same sequence each time, and
   `scripts/bench/summary.py TAG [TAG...]` lines the runs up. `llm_weights.py` gives the LLM's GPU memory per module
   and its decode speed; `tts_voice.py` the cloned voice's first audio per request.
