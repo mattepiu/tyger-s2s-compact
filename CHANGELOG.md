@@ -41,7 +41,8 @@ Everything since the imported v1 baseline. It becomes the first release.
   to end yet.
 - **A Cloudflare Tunnel from the container** (README → "RunPod + Cloudflare"): with `CLOUDFLARE_TUNNEL_TOKEN` set,
   `run.sh` starts `cloudflared` (in the image) once EARS is up, and Cloudflare serves your hostname over HTTPS and
-  `wss`, with no open port. The README walks through RunPod and a Next.js app on Cloudflare Workers.
+  `wss`, with no open port. The README walks through RunPod, a Next.js app on Cloudflare Workers, and a Cloudflare
+  rule that limits how often one IP starts conversations.
 - **Tests that need no GPU,** and a check of the web page in jsdom.
 - **A routing test** (`scripts/bench/escalation.py`): 119 synthetic cases, no API cost.
 - **Measurement scripts:** smoke and load tests on the running stack, GPU parity checks, stack comparisons.

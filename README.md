@@ -456,9 +456,31 @@ export async function POST() {
 }
 ```
 
-**A per-IP cap,** if you want one (I-11 left it out): a Cloudflare rate-limiting rule on the hostname (Security →
-WAF → Rate limiting rules), e.g. on the path `/ws`. It limits how often an IP starts conversations, not how many it
-holds at once; the token stays the gate.
+**6. A per-IP limit,** with a Cloudflare rate limiting rule on your domain. Each conversation opens `/ws` once (its
+WebSocket messages don't count), so the rule counts the conversations an IP starts. In the dashboard: Security → WAF
+→ Rate limiting rules → Create rule.
+
+| Setting | Pro plan and up | Free plan |
+|---|---|---|
+| If incoming requests match | URI Path equals `/ws`, and Hostname equals `tyger.example.com` | URI Path equals `/ws` (no Hostname field) |
+| With the same characteristics | IP | IP |
+| When rate exceeds | 3 requests per 1 minute | 2 requests per 10 seconds (its only period) |
+| Then take action | Block | Block |
+| For duration | 10 minutes | 10 seconds (its only duration) |
+
+The Free plan's rule only stops bursts. Pro counts over up to 1 minute and blocks for up to 1 hour; Business, up to
+10 minutes and 1 day.
+
+Check it from a shell: the request past the limit gets Cloudflare's `429` instead of EARS's `401`.
+
+```bash
+for i in 1 2 3 4; do curl -s -o /dev/null -w '%{http_code}\n' https://tyger.example.com/ws; done
+```
+
+In the browser, a blocked start fails like a refused token: the client says "Can't reach tyger, or it refused the
+token." The rule limits how often an IP starts conversations, not how many it holds at once, and people behind one
+address (an office, a mobile carrier) share its limit. The token stays the gate: for a per-user limit, have your
+token route refuse a user who got a token a moment ago.
 
 ## Plugins
 
@@ -561,8 +583,9 @@ for that data.
 - **Up to 4 conversations** per GPU (`server.max_sessions`); more visitors get a busy page. On a healthy 5090, 4
   conversations keep EARS real time (hop lag p50 47–87 / p90 124–170 ms on two boxes).
 - **A conversation ends after 3 minutes** by default (`TYGER_MAX_SESSION_S`, 0 for no limit).
-- **No per-user or per-IP cap:** whoever holds tokens (or reaches a server without a secret) can take all 4 slots.
-  Your app's backend decides who gets a token.
+- **No per-user cap in the server:** whoever holds tokens (or reaches a server without a secret) can take all 4
+  slots. Your app's backend decides who gets a token, and a Cloudflare rule limits how often one IP starts
+  conversations ("RunPod + Cloudflare", step 6).
 - **English only:** every prompt asks for English, so the agent answers in English whatever language it hears.
 - `set_reminder` / `send_message` are **placeholders** — the model says they aren't connected yet.
 - The user waits **~0.8–1.0 s** from the end of their speech to the first reply audio at 1 conversation and
