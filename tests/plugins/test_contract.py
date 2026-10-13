@@ -187,8 +187,10 @@ def ears_suite(ears, speech):
             for e in evs:
                 if e["kind"] == "ENDPOINT" and ep is None:
                     ep = e
+                if e["kind"] == "PARTIAL":                      # optional: the user's words so far, for the page
+                    assert isinstance(e.get("text"), str), e
     asyncio.run(run())
-    assert set(kinds) <= {"FRAME", "ENDPOINT", "BARGE", "BACKCHANNEL"} and "FRAME" in kinds
+    assert set(kinds) <= {"FRAME", "ENDPOINT", "BARGE", "BACKCHANNEL", "PARTIAL"} and "FRAME" in kinds, set(kinds)
     assert ep is not None and isinstance(ep.get("transcript"), str) and "turn_s" in ep and "by" in ep, ep
     s.reset()
     ears.close(s)

@@ -517,7 +517,8 @@ What the base gives you, and what is yours to write:
   - Declare the tunable thresholds as `THRESHOLDS`, each a `Threshold` with an optional `Slider`. The base reads
     their defaults from config, and the page builds its sliders from them.
   - Write `open_session(thresholds)`, `close`, `feed` (one hop in, events out: FRAME, ENDPOINT, BARGE with
-    `onset_s`, BACKCHANNEL), and `full` / `active`.
+    `onset_s`, BACKCHANNEL, and optionally PARTIAL with the user's words so far, for the page), and `full` /
+    `active`.
 - **Tests.** Add a run to `tests/plugins/test_contract.py` (`llm_suite`, `tts_suite` or `ears_suite`). The fakes in
   `app/plugins/*/fake.py` are the smallest complete plugin of each kind. A new call format gets its own test file,
   like `tests/plugins/test_calls_gemma4.py`.
