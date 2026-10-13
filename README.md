@@ -373,6 +373,20 @@ token with the container's `TYGER_API_SECRET`, as your app's backend would, so i
 `scripts/stack/load_ears.py`. On 2026-10-13 it passed on the default config (one turn went to OpenAI), without
 OpenAI, and in API mode.
 
+**Push it** to a private Docker Hub repository, `<DOCKER_USER>/tyger-s2s-vllm`, for RunPod. The image holds the
+clips, so the repository must be private. Create it as Private first (hub.docker.com → Repositories → Create
+repository): a push to a repository that doesn't exist yet creates it with the account's default visibility, public
+unless changed.
+
+```bash
+DOCKER_USER=<your Docker Hub user>
+docker login -u "$DOCKER_USER"                    # password: a Docker Hub access token with Read & Write
+TAG=$(git rev-parse --short HEAD)                 # one tag per build, so a pod pulls exactly this build
+docker tag tyger-v1 "$DOCKER_USER/tyger-s2s-vllm:$TAG"
+docker push "$DOCKER_USER/tyger-s2s-vllm:$TAG"    # ~8.4 GB
+docker logout                                     # login leaves the token in ~/.docker/config.json
+```
+
 ## RunPod + Cloudflare
 
 The image on a RunPod GPU Pod, your app on Cloudflare Workers (Next.js through OpenNext), and a Cloudflare Tunnel
@@ -396,21 +410,18 @@ command it shows; later, on the tunnel's page under "Install and run a connector
 your hostname. If it leaks, refresh it on the tunnel's page. The public hostname adds a CNAME to your zone: if
 Terraform manages the zone's DNS, keep that name out of its records.
 
-**2. The image.** Build it as in "Docker", with your clips in `voices/`, and push it to a **private** registry
-(the image holds the clips). On an Apple Silicon Mac, build for the pod's CPU:
+**2. The image.** Build it as in "Docker", with your clips in `voices/`, and push it to the **private**
+`<DOCKER_USER>/tyger-s2s-vllm` ("Docker" → "Push it"). On an Apple Silicon Mac, build for the pod's CPU:
+`docker build --platform linux/amd64 -t tyger-v1 .`, then tag and push the same way.
 
-```bash
-docker build --platform linux/amd64 -t <registry>/tyger-v1:<tag> .
-docker push <registry>/tyger-v1:<tag>
-```
-
-Give RunPod the registry's credentials (Settings → Container Registry Auth). Without OpenAI, put a config without
-`llm.smart` and `mouth.tasks` in `config/` before the build (e.g. `config/local.yaml`), and set `CONFIG` to it below.
+Give RunPod the credentials to pull it (Settings → Container Registry Auth): your Docker Hub user and an access token
+of its own, read-only. Without OpenAI, put a config without `llm.smart` and `mouth.tasks` in `config/` before the
+build (e.g. `config/local.yaml`), and set `CONFIG` to it below.
 
 **3. The pod** (Pods → Deploy):
 - an RTX 5090 on Secure Cloud, on a host with CUDA 13 (the CUDA filter; a driver ≥ 590), in a region near your
   users: every turn crosses that distance;
-- your image; a container disk of ~30 GB (the image is ~17 GB unpacked, 8.4 GB to pull) and a volume disk of
+- your image, `<DOCKER_USER>/tyger-s2s-vllm:<tag>`; a container disk of ~30 GB (the image is ~17 GB unpacked, 8.4 GB to pull) and a volume disk of
   ~60 GB at `/workspace`, the pod's own (no network volume): the models, ~25 GB, and the compiled kernels;
 - **no exposed ports**: remove the template's defaults, the tunnel needs none;
 - these env vars, the secrets as RunPod secrets (Secrets; in the env as `{{ RUNPOD_SECRET_<name> }}`):
