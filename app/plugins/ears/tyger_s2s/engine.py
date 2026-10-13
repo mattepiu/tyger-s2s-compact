@@ -17,7 +17,7 @@ class S2SEngine(EarsEngine):
         nemotron, proc, turn_taker, config = load(bundle_dir)
         asr = NemotronAsr(nemotron, proc, device=device, max_batch=slots, cuda_graph=cuda_graph)
         head = GruBatch(turn_taker, slots, device)
-        log.info("EARS engine: %d slots, TYGER S2S bundle %s (nemotron %s, GRU %dx%d)", slots,
+        log.info("EARS engine: %d slots, TYGER S2S bundle %s (nemotron %s, GRU %dx%d), RNN-T CUDA graph=%s", slots,
                  config["weights_sha256"][:8], config["frontend"]["revision"][:8],
-                 turn_taker.core.num_layers, turn_taker.core.hidden_size)
+                 turn_taker.core.num_layers, turn_taker.core.hidden_size, asr.rnnt.graph is not None)
         self._start(asr, head, slots, device)

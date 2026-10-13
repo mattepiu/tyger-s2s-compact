@@ -20,7 +20,7 @@ ears:                      # turn-taking: nemotron ASR + a GRU turn-taker that r
   revision: e35bfa541ac7c8b2fb0e31c2157a525cf35a11a1
   ep_thr: 0.915            # p_end threshold (the bundle's default 0.91; user, 2026-10-13: 0.915)
   ep_deb: 2                # debounce frames (80 ms each)
-  barge_thr: 0.5           # yield threshold (the bundle's default)
+  barge_thr: 0.4           # yield threshold (the bundle's default 0.5; user, 2026-10-13, live: 0.4 works better)
   barge_deb: 2
   bc_thr: 0.4              # the bundle's default
   bc_deb: 2
