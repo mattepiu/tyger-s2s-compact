@@ -1,5 +1,6 @@
-# The build context is only what the Dockerfile copies. Everything else stays out, above all .env (secrets),
-# voices/ (personal data) and the 9 GB .venv. When the Dockerfile copies something new, add it here.
+# The build context is only what the Dockerfile copies. Everything else stays out, above all .env (secrets) and the
+# 9 GB .venv. voices/ goes in (the clips are baked into the image: keep the image in a private registry). When the
+# Dockerfile copies something new, add it here.
 *
 !requirements.txt
 !app
@@ -8,6 +9,7 @@
 !scripts
 scripts/*
 !scripts/stack
+!voices
 !run.sh
 !stop.sh
 **/__pycache__

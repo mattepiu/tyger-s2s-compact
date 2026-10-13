@@ -152,9 +152,12 @@ side (2026-10-13). The API-mode settings (pages, session limit) and the token's 
 for that reason (README → "API mode"); the Dockerfile's header shows them.
 
 The steps (README → "Docker"):
-1. Build the image.
-2. Run it with the GPU, `--ipc=host`, `.env`, the voices mount and the three volumes.
+1. Build the image, with the clips in `voices/` (they go into it).
+2. Run it with the GPU, `--ipc=host`, `.env` and the three volumes.
 3. Run the smoke test inside it: `docker exec tyger .venv/bin/python scripts/stack/smoke.py`.
+
+The target is a RunPod GPU Pod behind a Cloudflare Tunnel (README → "RunPod + Cloudflare", 2026-10-13), not run
+there yet either. Open on RunPod: whether the pod's `/dev/shm` is big enough for vLLM without `--ipc=host`.
 
 ### O-03 — `main` is over 130 commits behind `plugins` (needs the user)
 All work since 2026-10-02 is on `plugins`. `main` is an ancestor of it (a fast-forward), and `voxcpm2` and

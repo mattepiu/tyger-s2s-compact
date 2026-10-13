@@ -36,8 +36,12 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **Your app's backend can hand the browser a short-lived token, so only your app can open a conversation**
   (`TYGER_API_SECRET`).
 - **Docker instructions** (README → "Docker"): the run command with its volumes and shared memory, API mode, a
-  config without OpenAI, the smoke test inside the container; and a `.dockerignore` that keeps `.env` and voice clips
-  out of the build. The image hasn't been built end to end yet.
+  config without OpenAI, the smoke test inside the container; and a `.dockerignore` that keeps `.env` out of the
+  build. The voice clips go into the image, so it goes to a private registry only. The image hasn't been built end
+  to end yet.
+- **A Cloudflare Tunnel from the container** (README → "RunPod + Cloudflare"): with `CLOUDFLARE_TUNNEL_TOKEN` set,
+  `run.sh` starts `cloudflared` (in the image) once EARS is up, and Cloudflare serves your hostname over HTTPS and
+  `wss`, with no open port. The README walks through RunPod and a Next.js app on Cloudflare Workers.
 - **Tests that need no GPU,** and a check of the web page in jsdom.
 - **A routing test** (`scripts/bench/escalation.py`): 119 synthetic cases, no API cost.
 - **Measurement scripts:** smoke and load tests on the running stack, GPU parity checks, stack comparisons.

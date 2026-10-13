@@ -93,7 +93,8 @@ Put one or more reference `.wav` clips in `voices/` (`voices.dir` in `config/def
 voice name; `voices.default` picks the active one (falls back to the first clip). Optionally add
 `voices/<name>.txt` with the clip's exact transcript: VoxCPM2 then clones from audio + transcript (better
 quality, uses the whole clip); without it the clip is trimmed to `tts.ref_max_s` (10 s). **Reference clips and
-transcripts are personal data: keep them on the box, and never commit, upload, or redistribute them.**
+transcripts are personal data: keep them on the box, and never commit, upload, or redistribute them.** The one
+exception is the Docker image, which carries them: it goes to a private registry only ("Docker").
 
 **Each voice has its own character.** A character is a few lines on who the agent is: its name, personality and
 humour (`persona.characters` in `config/prompts.yaml`). There are four, one per voice: **Mira** (the default) and
@@ -146,8 +147,9 @@ first warmup ~2 min, Gemma's torch.compile + CUDA-graph capture ~1.5 min), which
 Browsers only allow the mic over **HTTPS or localhost**, so either:
 
 - **SSH port-forward** (simplest): `ssh -L 7860:localhost:7860 <box>`, then open `http://localhost:7860`.
-- **HTTPS** behind a reverse proxy (e.g. Caddy: `tyger.example.com { reverse_proxy localhost:7860 }`). The
-  page upgrades the WebSocket to `wss` automatically when served over HTTPS.
+- **HTTPS** behind a reverse proxy (e.g. Caddy: `tyger.example.com { reverse_proxy localhost:7860 }`), or a
+  Cloudflare Tunnel (`CLOUDFLARE_TUNNEL_TOKEN`: "RunPod + Cloudflare"). The page upgrades the WebSocket to `wss`
+  automatically when served over HTTPS.
 
 **The page** (`/`, built from `web/`):
 - one mic button, and the characters as tabs;
@@ -270,7 +272,8 @@ right (DEVELOPING.md → "The 2nd ear"). An app that plays the audio another way
 context) breaks them, and barge-in then takes the agent's own echo for the user cutting in.
 
 **HTTPS.** Browsers give the mic only to pages on HTTPS (or localhost), and an HTTPS page can only open `wss://`, so
-put the server behind TLS too (e.g. Caddy: `tyger.example.com { reverse_proxy localhost:7860 }`).
+put the server behind TLS too (e.g. Caddy: `tyger.example.com { reverse_proxy localhost:7860 }`, or a Cloudflare
+Tunnel: "RunPod + Cloudflare" below).
 
 **The token, from your backend.** A Next.js route handler that checks your app's own session, then signs a token with
 [`jose`](https://github.com/panva/jose) (`npm install jose`). The secret is a server-only env var with the same value
@@ -315,20 +318,19 @@ export async function POST() {
 
 ## Docker
 
-The image (`Dockerfile`) holds the code and the venv. The models, the compiled kernels and your voice clips stay
-outside it, in volumes and a mount. **It hasn't been built end to end yet** (the GPU boxes so far are themselves
-containers, with no Docker daemon: ISSUES.md O-02), so the first build is the test.
+The image (`Dockerfile`) holds the code, the venv and your voice clips. The models and the compiled kernels stay
+outside it, in volumes. **It hasn't been built end to end yet** (the GPU boxes so far are themselves containers, with
+no Docker daemon: ISSUES.md O-02), so the first build is the test.
 
 **The host:** an NVIDIA GPU like the stack's (an RTX 5090, 32 GB), a driver ≥ 590 (the image's torch is built for
 CUDA 13), Docker with the NVIDIA Container Toolkit (for `--gpus`), and ~40 GB of disk for the image (~10 GB) and the
 models (~25 GB).
 
 ```bash
-docker build -t tyger-v1 .
+docker build -t tyger-v1 .     # voices/ must hold your clips: they go into the image
 docker run -d --name tyger --restart unless-stopped \
   --gpus all --ipc=host -p 7860:7860 \
   --env-file .env \
-  -v "$PWD/voices":/app/voices:ro \
   -v tyger-hf:/hf -v tyger-cache:/root/.cache -v tyger-triton:/root/.triton \
   tyger-v1
 docker logs -f tyger           # ready at "EARS ready"
@@ -339,8 +341,10 @@ docker logs -f tyger           # ready at "EARS ready"
   API-mode settings can go there too: `TYGER_PAGES`, `TYGER_MAX_SESSION_S`, `TYGER_API_SECRET`.
 - **`--ipc=host`:** vLLM's processes pass data through shared memory, and Docker's default `/dev/shm` is 64 MB.
   `--shm-size=8g` works too.
-- **`voices/`:** your clips (`mira.wav`, `aria.wav`, `kai.wav`, `rex.wav`), read-only. They never go into the image:
-  `.dockerignore` keeps them, `.env` and the local `.venv` out of the build.
+- **`voices/`:** your clips (`mira.wav`, `aria.wav`, `kai.wav`, `rex.wav`, with any `.txt` transcripts) go into the
+  image, from the build machine's `voices/`. Until voices come from a database, a new clip means a new build. **The
+  clips are personal data, so the image is too: push it to a private registry only.** `.dockerignore` keeps `.env`
+  and the local `.venv` out of the build.
 - **The volumes:** `/hf` holds the models, downloaded on the first start. `/root/.cache` and `/root/.triton` hold
   the compiled kernels and the vLLM compile cache. Without them, every new container downloads and compiles again.
 - **`--restart unless-stopped`:** on a slow link, the first start's download can outlast `run.sh`'s 15-minute wait
@@ -350,7 +354,8 @@ docker logs -f tyger           # ready at "EARS ready"
 
 **API mode** (another app calls it, "API mode" above): put `TYGER_PAGES=false` and `TYGER_API_SECRET` in `.env`.
 The app's page is on HTTPS, so it needs `wss://`: put a TLS proxy in front, and publish the port to it only, e.g.
-`-p 127.0.0.1:7860:7860` with Caddy on the host. With the pages on, the image serves the classic page at `/`: the
+`-p 127.0.0.1:7860:7860` with Caddy on the host. Or let the container start a Cloudflare Tunnel, and publish no port
+at all ("RunPod + Cloudflare" below). With the pages on, the image serves the classic page at `/`: the
 new page's build needs Node, which the image doesn't have.
 
 **Without OpenAI:** mount a copy of `config/default.yaml` without `llm.smart` and `mouth.tasks`, and point `CONFIG`
@@ -360,6 +365,100 @@ agent says it can't check live facts.
 **Check it:** `docker exec tyger .venv/bin/python scripts/stack/smoke.py` (add `--config config/local.yaml` with
 your own config). It runs a few turns through MOUTH, a barge-in, and speech through EARS. It runs inside the
 container because MOUTH listens there only. With `smart` on, a turn could reach OpenAI.
+
+## RunPod + Cloudflare
+
+The image on a RunPod GPU Pod, your app on Cloudflare Workers (Next.js through OpenNext), and a Cloudflare Tunnel
+from the pod to your own hostname:
+
+```
+browser ── https ──> your app (Cloudflare Workers): signs a token for a signed-in user
+   └────── wss://tyger.example.com/ws?token=… ──> Cloudflare ── tunnel ──> cloudflared in the pod ──> EARS :7860
+```
+
+**Why a tunnel.** `cloudflared` runs in the pod and connects out to Cloudflare, which serves your hostname over HTTPS
+and `wss`, with its own certificate. The pod exposes no port, and the hostname stays the same when the pod restarts
+or moves. RunPod's own options don't fit: its HTTPS proxy cuts connections after 100 s (a conversation can last
+180 s), and its TCP ports have no TLS and change when the pod resets. The browser talks to the tunnel directly, not
+through your Worker. **It hasn't run on RunPod yet** (O-02): the first deploy is the test.
+
+**1. The tunnel,** once, in the Cloudflare dashboard (your domain on Cloudflare): Zero Trust → Networks → Tunnels →
+Create a tunnel → Cloudflared. Name it (`tyger`), copy its token (the long string in the install command it shows),
+and add a public hostname: `tyger.example.com`, service type `HTTP`, URL `localhost:7860`. The token is a secret:
+whoever holds it can serve your hostname.
+
+**2. The image.** Build it as in "Docker", with your clips in `voices/`, and push it to a **private** registry
+(the image holds the clips). On an Apple Silicon Mac, build for the pod's CPU:
+
+```bash
+docker build --platform linux/amd64 -t <registry>/tyger-v1:<tag> .
+docker push <registry>/tyger-v1:<tag>
+```
+
+Give RunPod the registry's credentials (Settings → Container Registry Auth). Without OpenAI, put a config without
+`llm.smart` and `mouth.tasks` in `config/` before the build (e.g. `config/local.yaml`), and set `CONFIG` to it below.
+
+**3. The pod** (Pods → Deploy):
+- an RTX 5090 on Secure Cloud, on a host with CUDA 13 (the CUDA filter; a driver ≥ 590), in a region near your
+  users: every turn crosses that distance;
+- your image; a container disk of ~30 GB (the image is ~10 GB) and a volume of ~60 GB at `/workspace` (the models,
+  ~25 GB, and the compiled kernels);
+- **no exposed ports**: remove the template's defaults, the tunnel needs none;
+- these env vars, the secrets as RunPod secrets (Secrets; in the env as `{{ RUNPOD_SECRET_<name> }}`):
+
+| Env var | Value |
+|---|---|
+| `CLOUDFLARE_TUNNEL_TOKEN` | the tunnel's token (a secret). `run.sh` starts `cloudflared` with it once EARS is up |
+| `TYGER_API_SECRET` | the tokens' secret (a secret), the same value as your Worker's |
+| `HF_TOKEN` | for the private heads release (a secret) |
+| `OPENAI_API_KEY` | for the default config's `smart` model (a secret); or `CONFIG=config/local.yaml` without it |
+| `TYGER_PAGES` | `false` |
+| `HF_HOME` | `/workspace/.hf_home`: the models, on the volume |
+| `XDG_CACHE_HOME` | `/workspace/.cache`: vLLM's compile cache |
+| `FLASHINFER_WORKSPACE_BASE` | `/workspace`: FlashInfer's kernels |
+| `TRITON_CACHE_DIR` | `/workspace/.cache/triton`: Triton's kernels |
+
+The last four keep the models and the kernels on the volume, so a restart doesn't download or compile again. The
+first start takes ~10 minutes or more (the download and the compiles); later ones ~2–3 minutes.
+
+**4. Check it.** The pod's logs show `run.sh`'s output: "EARS ready", then `cloudflared`'s "Registered tunnel
+connection". Then, from anywhere:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://tyger.example.com/voices
+```
+
+`401`: EARS answered and wants a token, so the tunnel works. `530` (Cloudflare's error 1033): no tunnel yet, because
+the stack is still starting or the tunnel token is wrong (the logs say which). `502`: the tunnel is up but can't
+reach EARS: check the hostname's service URL. The smoke test runs from a shell in the pod (the web terminal):
+`cd /app && .venv/bin/python scripts/stack/smoke.py`.
+
+- **Shared memory:** Docker's `--ipc=host` has no RunPod equivalent. If MOUTH fails at start with a shared-memory
+  error, the pod's `/dev/shm` (`df -h /dev/shm`) is too small for vLLM.
+- **Logs:** keep `cloudflared` at its default log level. At `TUNNEL_LOGLEVEL=debug` it logs request URLs, and so the
+  conversations' tokens.
+- **Stopping:** a stopped pod keeps its volume (and bills for it), but may not get its GPU back when the host is
+  full. A new pod then downloads and compiles again.
+
+**5. Your app.** Copy `web/lib/tyger/` into it and point the client at the tunnel:
+`url: "wss://tyger.example.com/ws"` ("Using tyger from your own app"). The token route is the one shown there, with
+the secret from the Worker's env: set it with `npx wrangler secret put TYGER_API_SECRET` (for `next dev`, in
+`.dev.vars`), and read it inside the handler. `jose` runs on Workers.
+
+```ts
+import { getCloudflareContext } from "@opennextjs/cloudflare"
+
+export async function POST() {
+  const user = await getSignedInUser()
+  if (!user) return new Response("Sign in first", { status: 401 })
+  const secret = new TextEncoder().encode(getCloudflareContext().env.TYGER_API_SECRET)
+  // ... the same SignJWT as above
+}
+```
+
+**A per-IP cap,** if you want one (I-11 left it out): a Cloudflare rate-limiting rule on the hostname (Security →
+WAF → Rate limiting rules), e.g. on the path `/ws`. It limits how often an IP starts conversations, not how many it
+holds at once; the token stays the gate.
 
 ## Plugins
 
@@ -444,7 +543,8 @@ tokens. Without `llm.smart` the agent answers what it knows and says plainly tha
 
 No audio or transcript is written to disk or logs. Logs carry only timings and event types (endpoint source,
 onset ms, barge, backchannel, tool name). EARS's request log has paths, never query strings, so a conversation's
-token isn't logged either. Voice reference clips and their transcripts stay on the box. The page gets
+token isn't logged either. Voice reference clips and their transcripts stay on the box, or in the Docker image built
+there, which goes to a private registry only. The page gets
 the user's own words back (as they speak, on `partial`, and each turn's transcript, on `endpoint`) to show them.
 
 **Hosted plugins send text off the box**, and only because the config names one: a hosted `reply` gets every

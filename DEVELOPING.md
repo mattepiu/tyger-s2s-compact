@@ -545,9 +545,10 @@ own web search.
   - This covers new tests too: use synthetic, TTS or public LibriSpeech speech, held in memory and scored without
     printing words.
 - **Voice clips, and anything derived from them, are personal data.** They stay in gitignored `voices/`, and are
-  never committed, uploaded or sent to a hosted service.
-- **Secrets** (`HF_TOKEN`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TYGER_API_SECRET`) live in `.env` (or the
-  container's env) only. Never print them, and don't
+  never committed, uploaded or sent to a hosted service. The one exception, the user's call (2026-10-13) until voices
+  come from a database: the Docker image carries them, so it's pushed to a private registry only.
+- **Secrets** (`HF_TOKEN`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TYGER_API_SECRET`, `CLOUDFLARE_TUNNEL_TOKEN`) live
+  in `.env` (or the container's env) only. Never print them, and don't
   leave copies of `.env` around, e.g. in a scratch git worktree.
 - **Hosted runs.** A live run against a hosted model (`smart`, or any remote role) needs the user's OK each time.
 - **The heads release is private.** This is a serving project only: no training code.

@@ -6,11 +6,12 @@
 #   2. EARS   (app.ears): nemotron + endpoint head + the web app (:7860): the new page at /, the classic page at
 #      /classic. The new page is web/'s static build (web/out/), made here first when it's missing or out of date.
 #      In API mode (TYGER_PAGES=false) there are no pages and no build: only /ws and /voices (README -> "API mode").
+#   With CLOUDFLARE_TUNNEL_TOKEN set, also cloudflared: a Cloudflare Tunnel to EARS (README -> "RunPod + Cloudflare").
 # MOUTH starts first so its engines claim their (pinned) GPU memory before EARS loads (DEVELOPING.md -> "GPU memory").
 #
 # Reach it: the web app serves on :7860 (config/default.yaml server.port). The mic needs a secure context, so either
 #   - SSH port-forward 7860 to your localhost and open http://localhost:7860, or
-#   - put it behind an HTTPS proxy (see README.md).
+#   - put it behind an HTTPS proxy, or a Cloudflare Tunnel (see README.md).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -84,4 +85,20 @@ echo "=== starting EARS + web app ==="
 # expandable segments: EARS encodes windows of many lengths; without it the allocator cache fragments and grows
 PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}" "$PY" -m app.ears "${CFG_ARGS[@]}" &
 PIDS+=($!)
-wait "${PIDS[-1]}"
+EARS_PID=$!
+
+# A Cloudflare Tunnel to EARS when CLOUDFLARE_TUNNEL_TOKEN is set (README -> "RunPod + Cloudflare"): cloudflared
+# connects out to Cloudflare, which serves the tunnel's hostname over HTTPS and wss. It starts once EARS listens, so
+# the hostname answers only when the stack is ready. The token goes in through the env, never the command line (ps
+# shows that). Keep cloudflared's log level at info: at debug it logs request URLs, and so the conversations' tokens.
+if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+  if command -v cloudflared >/dev/null; then
+    wait_tcp "$("$PY" -m app.config "${CFG_ARGS[@]}" server.port)" "EARS" "$EARS_PID"
+    echo "=== starting the Cloudflare Tunnel ==="
+    TUNNEL_TOKEN="$CLOUDFLARE_TUNNEL_TOKEN" cloudflared tunnel --no-autoupdate run &
+    PIDS+=($!)
+  else
+    echo "CLOUDFLARE_TUNNEL_TOKEN is set, but cloudflared isn't installed: no tunnel (the Docker image has it)"
+  fi
+fi
+wait "$EARS_PID"
