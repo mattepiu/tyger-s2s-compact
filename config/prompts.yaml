@@ -99,7 +99,7 @@ backchannel:
     little so far to react to, or nothing in their words calls for a specific reaction, use a neutral hum such
     as 'mm-hm' or 'mhm'. Do NOT answer, do NOT ask a real question, do NOT continue their sentence, do NOT take
     the floor. Always react in English. Plain spoken words only, no markdown or symbols. Just the short reaction.
-  no_repeat: " You just said $acks -- don't repeat those."
+  no_repeat: " (You already said $acks.)"
   user_empty: The user is speaking, but no words have been recognized yet.
   user_short: 'The user has only said a few words so far: "$partial"'
   user: 'The user is currently saying: "$partial"'
@@ -109,6 +109,9 @@ backchannel:
     - ["The user has only said a few words so far: \"so I\"", "mm-hm"]
     - ["The user has only said a few words so far: \"well so\"", "uh-huh"]
     - ["The user is currently saying: \"I finally passed my driving test yesterday\"", "oh, that's great!"]
+    - ["The user is currently saying: \"we adopted a kitten and now the kitten sleeps on my pillow every\" (You already said 'aw, how cute'.)", "ha, lucky you"]
+    - ["The user is currently saying: \"so the flight got cancelled and then the airline lost my bag and\" (You already said 'oh, no'.)", "ugh, what a day"]
+    - ["The user is currently saying: \"I got the job, and the job is in Denver, so in Denver we'll need a\" (You already said 'that's great', 'wow'.)", "mm-hm"]
 # few-shot turns for the `reply` role in both modes (after the system prompt, before escalation.shots): local
 # answers ({user, reply}) mixed with lookups ({user, call: {name, arguments}, result, answer}: the call, its result
 # as kept in history, the answer). Both kinds are needed: with lookup turns only, Gemma 4 E4B looked up simple facts.

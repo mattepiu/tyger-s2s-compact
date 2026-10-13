@@ -74,6 +74,7 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **Docs:** README, DEVELOPING, CHANGELOG, ISSUES and HANDOFF replace the old notes and design docs.
 
 ### Fixed
+- **Backchannels no longer say the same thing twice** while you stay on one topic.
 - An interrupted reply stays in the conversation history, cut to what you heard.
 - The first words of an interruption are kept: the first 3 words are recognised 83% of the time, up from 14%.
 - Interrupting during a tool call stops the agent at once, instead of after up to 15 s.

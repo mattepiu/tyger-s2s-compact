@@ -24,11 +24,10 @@ def still_user(p, transcript, fillers, section="still_looking"):
 
 
 def bc_messages(p, recent_acks, partial, bc_min_words):
-    """The backchannel request: the system prompt (+ the acks not to repeat), few-shot turns, and the partial
-    framed as empty / only a few words / a reaction-worthy utterance."""
+    """The backchannel request: the system prompt, few-shot turns, and the partial framed as empty / only a few
+    words / a reaction-worthy utterance (+ the acks not to repeat: next to the partial, where Gemma heeds them;
+    in the system prompt it said "aw, cute!" twice on a puppy)."""
     system = p.text("backchannel", "system")
-    if recent_acks:
-        system += p.fill("backchannel", "no_repeat", acks=", ".join(f"'{a}'" for a in recent_acks))
     user = (partial or "").strip()
     if not user:
         said = p.text("backchannel", "user_empty")
@@ -36,6 +35,8 @@ def bc_messages(p, recent_acks, partial, bc_min_words):
         said = p.fill("backchannel", "user_short", partial=user)
     else:
         said = p.fill("backchannel", "user", partial=user)
+    if recent_acks:
+        said += p.fill("backchannel", "no_repeat", acks=", ".join(f"'{a}'" for a in recent_acks))
     return with_shots(system, p.shots("backchannel"), said)
 
 

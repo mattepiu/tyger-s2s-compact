@@ -42,6 +42,23 @@ def test_shots_and_tools_checked():
     expect_error(d, "tools.fly")
 
 
+def test_backchannel_note_next_to_the_partial():
+    """The acks not to repeat go next to the partial, in the last user turn (in the system prompt Gemma said "aw,
+    cute!" twice on a puppy); the shots that show it use the very note bc_messages writes."""
+    import re
+    from app.mouth.messages import bc_messages
+    msgs = bc_messages(P, ["aw, cute!", "mm-hm"], "my sister just got a puppy and the puppy keeps", 4)
+    note = P.fill("backchannel", "no_repeat", acks="'aw, cute!', 'mm-hm'")
+    assert msgs[-1]["role"] == "user" and msgs[-1]["content"].endswith(note) and "puppy" in msgs[-1]["content"]
+    assert note not in msgs[0]["content"]
+    assert not any("already" in m["content"] for m in bc_messages(P, [], "my sister just got a puppy", 4)[-1:])
+    shown = [u for u, _ in P.shots("backchannel") if "already" in u]
+    assert shown, "no shot shows the note"
+    for u in shown:
+        acks = re.search(r"\(You already said (.*)\.\)$", u)
+        assert acks and u.endswith(P.fill("backchannel", "no_repeat", acks=acks.group(1))), u
+
+
 def test_reply_shots_checked():
     d = copy.deepcopy(P.d); d["reply_shots"].append({"user": "x", "call": {"name": "fly", "arguments": {}},
                                                     "result": {}, "answer": "y"})

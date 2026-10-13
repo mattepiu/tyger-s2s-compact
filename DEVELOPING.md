@@ -281,7 +281,9 @@ README → "API mode" has the settings; this is how they work.
   looked up, and it's announced at the next pause. Where no task can start, history keeps the round's results.
 - **Backchannels** are contextual.
   - `filler` reacts to the ASR partial. When the partial is shorter than `bc_min_words`, it hums instead.
-  - Its recent acks are passed along as "don't repeat those".
+  - Its last 3 acks go next to the partial ("(You already said 'aw, cute!'.)"), and three of the few-shot turns show
+    a different reaction after that note. As "don't repeat those" in the system prompt, Gemma said the same ack
+    again on 17 of 100 follow-ups (`aw, cute!` twice on a puppy); with this, none.
   - The ack is one TTS request. Its audio goes out as `K`, and never into history or the 2nd ear.
   - A backchannel still being made when the turn starts is aborted.
 - **Engine requests.** Every engine call has its own request id, which is what a barge aborts:
