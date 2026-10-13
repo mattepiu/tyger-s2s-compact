@@ -1,21 +1,33 @@
-"""tyger-s2s, the EarsPlugin surface: the TYGER S2S bundle (`ears.model` at `ears.revision`; private), nemotron-3.5-asr
-and the turn-taker GRU in one file. It runs on nemotron-tyger-1.0's machinery (nemotron_tyger/: the audio grid, the
-batched tick, the turn rules, the ASR and GPU threads), with the same thresholds and sliders; only the model behind the
-decisions differs. As there, only the head ends a turn: the bundle's silence fallback isn't used.
+"""tyger, the EarsPlugin surface: the tyger bundle (`ears.model` at `ears.revision`; private), nemotron-3.5-asr and the
+turn-taker GRU in one file. Builds EarsEngine + EarsService: one GPU thread, one batched step per 320 ms hop for every
+conversation with a hop ready. The class stays light to import (EARS's page and tests read THRESHOLDS); the models
+load in the constructor. Only the head ends a turn: the bundle's silence fallback isn't used.
+
+Per hop, feed() returns FRAME / ENDPOINT / BARGE / BACKCHANNEL / PARTIAL events. A session is an EarsSession: reset()
+starts a new turn (applied before its next hop); its thresholds are per conversation (the page's live-tuning sliders).
 """
 from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from app.plugins.base import EarsPlugin
-from app.plugins.ears.nemotron_tyger.constants import HOP_N, SR
-from app.plugins.ears.nemotron_tyger.plugin import THRESHOLDS
+from app.plugins.base import EarsPlugin, Slider, Threshold
 from app.plugins.options import PluginOptions
+from .constants import HOP_N, SR
 
 log = logging.getLogger("ears")
 
+# per-conversation thresholds; defaults from the `ears:` config block
+THRESHOLDS = (
+    Threshold("ep_thr", float, slider=Slider("endpoint p_end τ", 0.30, 0.99, 0.005, decimals=3, meter="p_end")),
+    Threshold("ep_deb", int, slider=Slider("endpoint deb", 1, 5, 1, decimals=0)),
+    Threshold("barge_thr", float, slider=Slider("barge (yield)", 0.20, 1.00, 0.01, meter="yield")),
+    Threshold("barge_deb", int),
+    Threshold("bc_thr", float, slider=Slider("backchannel", 0.20, 1.00, 0.01, meter="bc")),
+    Threshold("bc_deb", int),
+)
 
-class TygerS2S(EarsPlugin):
+
+class Tyger(EarsPlugin):
     THRESHOLDS = THRESHOLDS
     sr = SR
     hop_samples = HOP_N                    # 320 ms @ 16 kHz = 5120
@@ -31,16 +43,16 @@ class TygerS2S(EarsPlugin):
 
     def __init__(self, conf: dict, ctx):
         import torch
-        from app.plugins.ears.nemotron_tyger.service import EarsService
         from .bundle import fetch
-        from .engine import S2SEngine
+        from .engine import EarsEngine
+        from .service import EarsService
         super().__init__(conf, ctx)
         o = self.opts
         torch.set_num_threads(o.cpu_threads)
         self.slots = int(ctx.cfg["server"].get("max_sessions", 4))
-        log.info("loading EARS (tyger-s2s: %s) for %d sessions, ep_thr=%s ep_deb=%s", o.model, self.slots,
+        log.info("loading EARS (tyger: %s) for %d sessions, ep_thr=%s ep_deb=%s", o.model, self.slots,
                  self.defaults["ep_thr"], self.defaults["ep_deb"])
-        engine = S2SEngine(fetch(o.model, o.revision), slots=self.slots)
+        engine = EarsEngine(fetch(o.model, o.revision), slots=self.slots)
         self.service = EarsService(engine, gather_s=o.gather_ms / 1e3, expect_s=o.expect_ms / 1e3,
                                    stats_every_s=o.stats_s)
 

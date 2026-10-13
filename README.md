@@ -80,7 +80,7 @@ Copy `.env.example` to `.env` (gitignored) and fill in:
   and live facts (weather, news, prices) through OpenAI's web search. There is no local web search or weather tool.
   Without the key, comment out `llm.smart`: the agent then says it can't check live facts.
 - **`ANTHROPIC_API_KEY`** — only if `llm.smart` is the `anthropic` plugin instead.
-- **`HF_TOKEN`** — pulls the **private** turn-taking model, the tyger-s2s bundle (`ears.model` in
+- **`HF_TOKEN`** — pulls the **private** turn-taking model, the tyger bundle (`ears.model` in
   `config/default.yaml`). If a token already exists at `$HF_HOME/token`, leave this blank.
 - **`TYGER_API_SECRET`** — only for API mode: the secret your app's backend signs conversation tokens with ("API
   mode"). Unset, there's no token check. A long random string, e.g. `openssl rand -base64 32`.
@@ -471,8 +471,7 @@ block names its `plugin:`; the rest of the block is that plugin's options.
 | LLM | `openai-responses` | **hosted** | **the `smart` role**: OpenAI's Responses API with its web search (escalations, live facts, background tasks) |
 | LLM | `anthropic` | **hosted** | the alternative `smart`: the Claude Messages API; default `claude-opus-5-5`, `effort: low`, server-side refusal fallback |
 | TTS | `voxcpm2` | local, vLLM-Omni in MOUTH | cloned voices from `voices/` |
-| EARS | `tyger-s2s` | local, in EARS | **the default**: nemotron ASR + a GRU turn-taker, one bundle (`nineninesix/tyger-s2s`) |
-| EARS | `nemotron-tyger-1.0` | local, in EARS | nemotron ASR + the tyger 1.0 turn-taking heads (DEVELOPING has its block) |
+| EARS | `tyger` | local, in EARS | nemotron ASR + a GRU turn-taker, one bundle (`nineninesix/tyger`) |
 | all three | `fake` | no model, CPU | scripted / energy-based; tests and `CONFIG=config/fake.yaml ./run.sh` |
 
 Ten other responders were measured against Gemma 4 E4B and lost (DEVELOPING.md → "Benchmarks"); their plugins are
@@ -534,8 +533,7 @@ tokens. Without `llm.smart` the agent answers what it knows and says plainly tha
 
 | component | model | licence |
 |---|---|---|
-| ASR + turn-taking | `nineninesix/tyger-s2s` @ `e35bfa5` (private): `nvidia/nemotron-3.5-asr-streaming-0.6b` @ `ea30d66`, unchanged, + a 3-layer GRU turn-taker | Apache-2.0 (the GRU), OpenMDW-1.1 (nemotron) |
-| turn-taking heads (`nemotron-tyger-1.0`, not the default) | `nineninesix/TYGER-S2S-endpointer` v0.1.0-rc1 (private; Qwen3-0.6B decoder with its LoRA merged + the heads) | Apache-2.0 (modified Qwen3-0.6B: see its NOTICE) |
+| ASR + turn-taking | `nineninesix/tyger` @ `e35bfa5` (private): `nvidia/nemotron-3.5-asr-streaming-0.6b` @ `ea30d66`, unchanged, + a 3-layer GRU turn-taker (it replaced the tyger 1.0 heads, `nineninesix/TYGER-S2S-endpointer`) | Apache-2.0 (the GRU), OpenMDW-1.1 (nemotron) |
 | responder | `google/gemma-4-E4B-it`, FP8 at load (was `Qwen/Qwen3.5-4B`, before that `Qwen/Qwen3-4B-Instruct-2507`) | Apache-2.0 |
 | TTS | `openbmb/VoxCPM2` | Apache-2.0 |
 | expert, background tasks, web search | OpenAI `gpt-5.4-mini` with OpenAI's web search (`llm.smart`) | commercial API (your key) |

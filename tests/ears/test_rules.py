@@ -1,16 +1,16 @@
-"""nemotron-tyger-1.0's turn rules (app/plugins/ears/nemotron_tyger/rules.py) on synthetic head outputs, GPU-free:
-endpoint by the head (and never by silence alone), the minimum speech, backchannel debounce and refractory, barge-in and the turn it
-seeds, mode switches. The engine and the validators' reference share these rules, so they are tested here.
+"""tyger's turn rules (app/plugins/ears/tyger/rules.py) on synthetic head outputs, GPU-free: endpoint by the head
+(and never by silence alone), the minimum speech, backchannel debounce and refractory, barge-in and the turn it seeds,
+mode switches. The engine and the validators' reference share these rules, so they are tested here.
 Run: .venv/bin/python tests/ears/test_rules.py"""
 import os, sys
 
 TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 import numpy as np  # noqa: E402
-from app.plugins.ears.nemotron_tyger import rules  # noqa: E402
-from app.plugins.ears.nemotron_tyger.constants import (FRAME_S, LISTEN, ONSET_GAP_FRAMES, ONSET_MAX_S, SPEAK,  # noqa: E402
-                                                       SR, WARMUP_FRAMES)
-from app.plugins.ears.nemotron_tyger.session import EarsSession  # noqa: E402
+from app.plugins.ears.tyger import rules  # noqa: E402
+from app.plugins.ears.tyger.constants import (FRAME_S, LISTEN, ONSET_GAP_FRAMES, ONSET_MAX_S, SPEAK,  # noqa: E402
+                                              SR, WARMUP_FRAMES)
+from app.plugins.ears.tyger.session import EarsSession  # noqa: E402
 
 VOICED, SILENT = -20.0, -80.0                       # frame energy (dB) above / below VAD_DB
 

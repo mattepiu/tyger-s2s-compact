@@ -1,18 +1,27 @@
-"""The TYGER S2S bundle (`ears.model` at `ears.revision`; private): one model.safetensors with nemotron-3.5-asr
+"""The tyger bundle (`ears.model` at `ears.revision`; private): one model.safetensors with nemotron-3.5-asr
 (`nemotron.*`; its config, processor and tokenizer in nemotron/) and the turn-taker GRU that reads its layer 15
 (`turn_taker.*`); config.json describes both. Fetched once into HF_HOME, then loaded from it: nothing else is
 downloaded. The checks here make a bundle that needs another audio grid or other turn rules fail at load instead of
 misbehaving.
 """
 from __future__ import annotations
-import hashlib, json
+import hashlib, json, os
 from pathlib import Path
 
-from app.plugins.ears.nemotron_tyger.constants import (ENC_HIDDEN, FRAME_S, HOP_N, L15, LISTEN, MIN_SPEECH_MS, SPEAK,
-                                                       SR, STATE_NAMES, VAD_DB, WARMUP_FRAMES, WINDOW_S)
+from .constants import (ENC_HIDDEN, FRAME_S, HOP_N, L15, LISTEN, MIN_SPEECH_MS, SPEAK, SR, STATE_NAMES, VAD_DB,
+                        WARMUP_FRAMES, WINDOW_S)
 
 MODEL_TYPE = "tyger_nemotron_gru"
 FILES = ["config.json", "model.safetensors", "nemotron/*.json"]
+
+
+def _hf_token():
+    t = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    if not t:
+        tf = Path(os.environ.get("HF_HOME", "/workspace/.hf_home")) / "token"
+        if tf.exists():
+            t = tf.read_text().strip()
+    return t or None
 
 
 def fetch(repo: str, revision: str | None = None) -> Path:
@@ -21,7 +30,6 @@ def fetch(repo: str, revision: str | None = None) -> Path:
     if Path(repo).is_dir():
         return Path(repo)
     from huggingface_hub import snapshot_download
-    from app.plugins.ears.nemotron_tyger.release import _hf_token
     token = _hf_token()
     if not token:
         raise RuntimeError(f"HF_TOKEN required for the private bundle {repo!r}")
@@ -29,8 +37,8 @@ def fetch(repo: str, revision: str | None = None) -> Path:
 
 
 def check_config(config: dict):
-    """The bundle must be the GRU format this plugin runs, on the audio grid and turn rules of nemotron_tyger
-    (constants.py); ValueError naming what differs."""
+    """The bundle must be the GRU format this plugin runs, on its audio grid and turn rules (constants.py);
+    ValueError naming what differs."""
     if config.get("model_type") != MODEL_TYPE or config.get("format_version") != 1:
         raise ValueError(f"not a {MODEL_TYPE} bundle of format 1 (model_type {config.get('model_type')!r})")
     arch = config["controller"]["architecture"]

@@ -1,7 +1,7 @@
 """GruBatch: the turn-taker's step for every live conversation at once. Each conversation (slot) has its own row of
 GRU state; a step gathers the live rows, runs one frame of all of them as one batch, and writes their new state back.
 A reset zeroes the row, which is where the GRU starts a fresh context. Small enough to run eager: a 3-layer GRU step
-is a few kernels (the tyger 1.0 heads needed a KV ring and CUDA graphs).
+is a few kernels.
 """
 from __future__ import annotations
 

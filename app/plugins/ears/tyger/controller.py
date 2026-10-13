@@ -4,7 +4,7 @@ Per frame it reads the layer-15 features of the user's audio and of the agent's 
 normalised frame energy and the previous state (LISTEN while listening, SPEAK while speaking: never its own decision).
 Their projections are summed into one input per frame (`fuse`), the GRU carries the conversation (its state: 9 KiB per
 conversation, no KV cache), and five heads read its output (`outputs`): the 4-way state logits, and the hazard, yield
-(barge), backchannel and endpoint probabilities, the layout nemotron_tyger's rules read. Everything is fp32.
+(barge), backchannel and endpoint probabilities, the layout the turn rules read. Everything is fp32.
 
 Module names and the order of the sums are the research runtime's (tyger_endpointer.controller), so its tensors load
 as they are and the outputs are the same.
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import torch, torch.nn as nn
 
-from app.plugins.ears.nemotron_tyger.constants import ENC_HIDDEN, N_STATE
+from .constants import ENC_HIDDEN, N_STATE
 
 
 def _mlp_head(d):

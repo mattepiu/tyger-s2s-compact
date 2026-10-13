@@ -16,7 +16,7 @@ from app.plugins.options import PluginOptions
 
 SR = 16000
 FRAME_N = 1280                         # 80 ms
-HOP_N = 4 * FRAME_N                    # 320 ms, as nemotron-tyger-1.0
+HOP_N = 4 * FRAME_N                    # 320 ms, as tyger
 
 THRESHOLDS = (
     Threshold("endpoint_silence_frames", int, default=6,

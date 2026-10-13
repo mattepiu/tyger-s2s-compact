@@ -15,10 +15,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2])); torch.set_num_thre
 logging.basicConfig(level=logging.WARNING)
 from datasets import load_dataset
 from app.config import load_config
-from app.plugins.ears.nemotron_tyger.release import heads_release
-from app.plugins.ears.nemotron_tyger.constants import HOP_N
-from app.plugins.ears.nemotron_tyger.engine import EarsEngine
-from app.plugins.ears.nemotron_tyger.session import EarsSession
+from app.plugins.ears.tyger.bundle import fetch
+from app.plugins.ears.tyger.constants import HOP_N
+from app.plugins.ears.tyger.engine import EarsEngine
+from app.plugins.ears.tyger.session import EarsSession
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--double-reset", action="store_true", help="emulate the old finish_turn reset after the barge")
@@ -28,7 +28,7 @@ a = ap.parse_args()
 ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
 words = lambda t: re.findall(r"[a-z']+", t.lower())
 cfg = load_config(); e = cfg["ears"]
-ckpt = heads_release(cfg["ears"]["heads"], cfg["ears"].get("heads_revision"))
+ckpt = fetch(e["model"], e.get("revision"))
 thr = dict(ep_thr=float(e["ep_thr"]), ep_deb=int(e["ep_deb"]), barge_thr=float(e["barge_thr"]),
            barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]))
 eng = EarsEngine(ckpt, slots=1)

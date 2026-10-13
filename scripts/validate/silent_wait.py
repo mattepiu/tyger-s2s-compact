@@ -24,10 +24,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2])); torch.set_num_thre
 logging.basicConfig(level=logging.WARNING)
 from datasets import load_dataset  # noqa: E402
 from app.config import load_config  # noqa: E402
-from app.plugins.ears.nemotron_tyger.constants import HOP_N  # noqa: E402
-from app.plugins.ears.nemotron_tyger.engine import EarsEngine  # noqa: E402
-from app.plugins.ears.nemotron_tyger.release import heads_release  # noqa: E402
-from app.plugins.ears.nemotron_tyger.session import EarsSession  # noqa: E402
+from app.plugins.ears.tyger.bundle import fetch  # noqa: E402
+from app.plugins.ears.tyger.constants import HOP_N  # noqa: E402
+from app.plugins.ears.tyger.engine import EarsEngine  # noqa: E402
+from app.plugins.ears.tyger.session import EarsSession  # noqa: E402
 
 SR = 16000
 
@@ -64,7 +64,7 @@ def main():
     cfg = load_config(); e = cfg["ears"]
     thr = dict(ep_thr=float(e["ep_thr"]), ep_deb=int(e["ep_deb"]), barge_thr=float(e["barge_thr"]),
                barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]))
-    eng = EarsEngine(heads_release(e["heads"], e.get("heads_revision")), slots=1)
+    eng = EarsEngine(fetch(e["model"], e.get("revision")), slots=1)
     sil = lambda s: np.zeros(int(SR * s), np.float32)   # noqa: E731
     starts = [float(x) for x in a.wait_starts.split(",")]
     cases = ["talking"] + [f"wait +{x:g} s" for x in starts] + ["wait, no user", "no agent yet"]

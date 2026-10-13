@@ -1,15 +1,14 @@
-"""NemotronAsr: everything specific to nemotron-3.5-asr (the checkpoint and revision the heads release pins, or
-ears.nemotron; tyger-s2s passes the copy its bundle carries). Its processor and model, its log-mel features computed
-on the GPU, the layer-15 encode the tyger heads read (equal-length windows batched; all-zero windows cached), and
-transcription through its own greedy RNN-T decoder as a CUDA graph (rnnt.py), on a CUDA stream of its own so it never
-stalls the hop clock.
+"""NemotronAsr: everything specific to nemotron-3.5-asr (the copy the tyger bundle carries). Its processor and model,
+its log-mel features computed on the GPU, the layer-15 encode the turn-taker reads (equal-length windows batched;
+all-zero windows cached), and transcription through its own greedy RNN-T decoder as a CUDA graph (rnnt.py), on a
+CUDA stream of its own so it never stalls the hop clock.
 """
 from __future__ import annotations
 import threading
 
 import numpy as np, torch
 
-from .constants import FRAME_S, L15, MODEL_ID, TURN_MAX_S
+from .constants import FRAME_S, L15, TURN_MAX_S
 from .rnnt import GraphedRNNT
 
 
@@ -19,7 +18,7 @@ class _StopAtL15(Exception):
 
 class NemotronAsr:
     def __init__(self, model, proc, device="cuda", max_batch=4, cuda_graph=True):
-        """model, proc: nemotron-3.5-asr's model (fp32) and processor, as loaded (from_hub, or a bundle's copy)."""
+        """model, proc: nemotron-3.5-asr's model (fp32) and processor, as bundle.load gives them."""
         self.device = device
         self.proc = proc
         self.fe = self.proc.feature_extractor
@@ -36,13 +35,6 @@ class NemotronAsr:
         self.rnnt = GraphedRNNT(self.model, max_batch=max_batch, max_frames=int(TURN_MAX_S / FRAME_S) + 8)
         if cuda_graph:
             self.rnnt.capture()
-
-    @classmethod
-    def from_hub(cls, model_id=MODEL_ID, revision=None, **kw):
-        """The checkpoint from the Hub (or a local directory) at `revision`."""
-        from transformers import AutoModel, AutoProcessor
-        return cls(AutoModel.from_pretrained(model_id, revision=revision, dtype=torch.float32),
-                   AutoProcessor.from_pretrained(model_id, revision=revision), **kw)
 
     def _l15_hook(self, mod, args, out):
         if getattr(self._tls, "stop", False):

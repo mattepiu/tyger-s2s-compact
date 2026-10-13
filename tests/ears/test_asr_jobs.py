@@ -1,4 +1,4 @@
-"""EARS's ASR thread job handling (app/plugins/ears/nemotron_tyger/engine.py), GPU-free: transcription is stubbed, so
+"""EARS's ASR thread job handling (app/plugins/ears/tyger/engine.py), GPU-free: transcription is stubbed, so
 this checks only how finals (an endpoint waits on them) and partials (backchannels) are resolved, especially when
 transcription fails. Run: .venv/bin/python tests/ears/test_asr_jobs.py"""
 import os, sys, logging
@@ -7,7 +7,7 @@ from types import SimpleNamespace
 TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 import numpy as np  # noqa: E402
-from app.plugins.ears.nemotron_tyger.engine import EarsEngine, Job  # noqa: E402
+from app.plugins.ears.tyger.engine import EarsEngine, Job  # noqa: E402
 
 logging.disable(logging.CRITICAL)                  # the failure paths log tracebacks on purpose
 

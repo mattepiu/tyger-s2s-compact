@@ -15,8 +15,8 @@ server:
   max_session_s: 180      # TYGER_MAX_SESSION_S: a conversation ends after this long; 0: no limit
 
 ears:                      # turn-taking: nemotron ASR + a GRU turn-taker that reads its layer 15, in one bundle
-  plugin: tyger-s2s
-  model: nineninesix/tyger-s2s   # the bundle (private): nemotron-3.5-asr + the GRU, one model.safetensors
+  plugin: tyger
+  model: nineninesix/tyger  # the bundle (private): nemotron-3.5-asr + the GRU, one model.safetensors
   revision: e35bfa541ac7c8b2fb0e31c2157a525cf35a11a1
   ep_thr: 0.915            # p_end threshold (the bundle's default 0.91; user, 2026-10-13: 0.915)
   ep_deb: 2                # debounce frames (80 ms each)

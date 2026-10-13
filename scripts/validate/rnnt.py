@@ -1,6 +1,7 @@
-"""Check the graphed greedy RNN-T decoder (app/plugins/ears/nemotron_tyger/rnnt.py) against nemotron's HF generate(): same text
-on 40 single windows (1-20 s) and 10 padded mixed-length batches, plus timings. Public LibriSpeech test audio, in
-memory. Needs the GPU free (stop run.sh) and `datasets` (pip install datasets).
+"""Check the graphed greedy RNN-T decoder (app/plugins/ears/tyger/rnnt.py) against nemotron's HF generate(), on the
+nemotron the tyger bundle carries (config/default.yaml ears.model): same text on 40 single windows (1-20 s) and 10
+padded mixed-length batches, plus timings. Public LibriSpeech test audio, in memory. Needs the GPU free (stop run.sh)
+and `datasets` (pip install datasets).
 
   .venv/bin/python scripts/validate/rnnt.py              # expect "40/40 identical" twice
 """
@@ -8,12 +9,13 @@ import sys, time, numpy as np, torch, logging
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2])); logging.basicConfig(level=logging.ERROR); torch.set_num_threads(4)
 from datasets import load_dataset
-from transformers import AutoModel, AutoProcessor
-from app.plugins.ears.nemotron_tyger.rnnt import greedy_rnnt, GraphedRNNT
+from app.config import load_config
+from app.plugins.ears.tyger.bundle import fetch, load
+from app.plugins.ears.tyger.rnnt import greedy_rnnt, GraphedRNNT
 ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
 sp = np.concatenate([np.asarray(ds[i]["audio"]["array"], np.float32) for i in range(len(ds))])
-mid = "nvidia/nemotron-3.5-asr-streaming-0.6b"
-proc = AutoProcessor.from_pretrained(mid); asr = AutoModel.from_pretrained(mid, dtype=torch.float32).cuda().eval()
+e = load_config()["ears"]
+asr, proc, _, _ = load(fetch(e["model"], e.get("revision"))); asr = asr.cuda().eval()
 rng = np.random.default_rng(0)
 G = GraphedRNNT(asr); G.capture()
 def graphed(wavs):

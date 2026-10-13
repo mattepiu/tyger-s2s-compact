@@ -11,10 +11,8 @@ REGISTRY = {
             "fake": "app.plugins.llm.fake:FakeLLM"},
     "tts": {"voxcpm2": "app.plugins.tts.voxcpm2:VoxCPM2",
             "fake": "app.plugins.tts.fake:FakeTTS"},
-    # nemotron ASR encoder + the tyger 1.0 turn-taking heads (exp-12 arm C: endpoint / barge / backchannel)
-    "ears": {"nemotron-tyger-1.0": "app.plugins.ears.nemotron_tyger:NemotronTyger",
-             # the same, from one bundle: nemotron + a GRU turn-taker (nineninesix/tyger-s2s)
-             "tyger-s2s": "app.plugins.ears.tyger_s2s:TygerS2S",
+    # nemotron ASR + a GRU turn-taker (endpoint / barge / backchannel), one bundle: nineninesix/tyger
+    "ears": {"tyger": "app.plugins.ears.tyger:Tyger",
              "fake": "app.plugins.ears.fake:EnergyEars"},
 }
 

@@ -1,16 +1,16 @@
-"""tyger-s2s without its weights (no GPU, no download): the bundle check, and a small random TurnTaker stepped as EARS
-steps it. Run: .venv/bin/python tests/plugins/test_tyger_s2s.py"""
+"""tyger without its weights (no GPU, no download): the bundle check, and a small random TurnTaker stepped as EARS
+steps it. Run: .venv/bin/python tests/plugins/test_tyger.py"""
 import os, sys
 
 import numpy as np, torch
 
 TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.dirname(TESTS), TESTS]
-from app.plugins.ears.tyger_s2s.bundle import check_config  # noqa: E402
-from app.plugins.ears.tyger_s2s.controller import TurnTaker  # noqa: E402
-from app.plugins.ears.tyger_s2s.gru_batch import GruBatch  # noqa: E402
+from app.plugins.ears.tyger.bundle import check_config  # noqa: E402
+from app.plugins.ears.tyger.controller import TurnTaker  # noqa: E402
+from app.plugins.ears.tyger.gru_batch import GruBatch  # noqa: E402
 
-# what the published bundle's config.json says (nineninesix/tyger-s2s @ e35bfa54), the fields check_config reads
+# what the published bundle's config.json says (nineninesix/tyger @ e35bfa54), the fields check_config reads
 CONFIG = {
     "model_type": "tyger_nemotron_gru", "format_version": 1, "dtype": "float32",
     "state_names": ["LISTEN", "HOLD", "SPEAK", "BACKCHANNEL"],
@@ -55,15 +55,15 @@ def test_bundle_check():
 
 
 def test_plugin_surface():
-    """tyger-s2s has nemotron-tyger-1.0's thresholds (the page's sliders don't change), and its block names the
-    bundle: a tyger 1.0 key there is an error at config load."""
+    """tyger keeps the page's sliders (THRESHOLDS), and its block names the bundle: a key of the removed tyger 1.0
+    heads there is an error at config load."""
     from app.plugins import plugin_class
-    from app.plugins.ears.nemotron_tyger.plugin import THRESHOLDS
-    cls = plugin_class("ears", "tyger-s2s")
+    from app.plugins.ears.tyger.plugin import THRESHOLDS
+    cls = plugin_class("ears", "tyger")
     assert cls.THRESHOLDS is THRESHOLDS and cls.hop_samples == 5120 and cls.sr == 16000
-    block = {"plugin": "tyger-s2s", "model": "nineninesix/tyger-s2s", "revision": "e35bfa54", "ep_thr": 0.91,
-             "ep_deb": 2, "barge_thr": 0.5, "barge_deb": 2, "bc_thr": 0.4, "bc_deb": 2}
-    assert cls.options(block).model == "nineninesix/tyger-s2s"
+    block = {"plugin": "tyger", "model": "nineninesix/tyger", "revision": "e35bfa54", "ep_thr": 0.915,
+             "ep_deb": 2, "barge_thr": 0.4, "barge_deb": 2, "bc_thr": 0.4, "bc_deb": 2}
+    assert cls.options(block).model == "nineninesix/tyger"
     for bad in ({"heads": "nineninesix/TYGER-S2S-endpointer"}, {"model": None}):
         try:
             cls.options({**block, **bad}); raise AssertionError(f"accepted {bad}")

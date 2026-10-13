@@ -33,12 +33,12 @@ import numpy as np, torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2])); torch.set_num_threads(4)
 logging.basicConfig(level=logging.WARNING)
 from datasets import load_dataset  # noqa: E402
-from app.plugins.ears.nemotron_tyger.release import heads_release  # noqa: E402
 from app.config import load_config  # noqa: E402
 from app.ears.playback import AgentPlayback  # noqa: E402
-from app.plugins.ears.nemotron_tyger.constants import HOP_N  # noqa: E402
-from app.plugins.ears.nemotron_tyger.engine import EarsEngine  # noqa: E402
-from app.plugins.ears.nemotron_tyger.session import EarsSession  # noqa: E402
+from app.plugins.ears.tyger.bundle import fetch  # noqa: E402
+from app.plugins.ears.tyger.constants import HOP_N  # noqa: E402
+from app.plugins.ears.tyger.engine import EarsEngine  # noqa: E402
+from app.plugins.ears.tyger.session import EarsSession  # noqa: E402
 from app.plugins.tts import WIRE_SR  # noqa: E402
 from app.runtime.audio import StreamingAudioResampler  # noqa: E402
 
@@ -244,7 +244,7 @@ def main():
                barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]))
     barge_thrs = [float(x) for x in a.barge_thr.split(",")] if a.barge_thr else [thr["barge_thr"]]
     acks = make_acks(cfg, np.median([rms(c) for c in clips])) if a.offset_ms else None
-    eng = EarsEngine(heads_release(e["heads"], e.get("heads_revision")), slots=1)
+    eng = EarsEngine(fetch(e["model"], e.get("revision")), slots=1)
     if a.offset_ms:
         for echo_db in (float(x) for x in a.echo_db.split(",")):
             for b in barge_thrs:

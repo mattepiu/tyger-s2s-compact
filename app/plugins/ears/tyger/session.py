@@ -19,7 +19,7 @@ class EarsSession:
         self.closed = False; self.turn_gen = 0; self.partial_inflight = False
         self.trace = None                      # set to a list to record per-frame head outputs (tests only)
         self._clear()
-        self.pending_reset = True              # the slot's ring row is cleared on the first hop
+        self.pending_reset = True              # the slot's GRU state is cleared on the first hop
 
     def _clear(self):
         self.win_u = np.zeros(0, np.float32); self.win_a = np.zeros(0, np.float32)

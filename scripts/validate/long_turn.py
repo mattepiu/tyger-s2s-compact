@@ -15,17 +15,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2])); torch.set_num_thre
 logging.basicConfig(level=logging.WARNING)
 from datasets import load_dataset
 from app.config import load_config
-from app.plugins.ears.nemotron_tyger.release import heads_release
-from app.plugins.ears.nemotron_tyger.constants import HOP_N
-from app.plugins.ears.nemotron_tyger.engine import EarsEngine
-from app.plugins.ears.nemotron_tyger.service import EarsService
+from app.plugins.ears.tyger.bundle import fetch
+from app.plugins.ears.tyger.constants import HOP_N
+from app.plugins.ears.tyger.engine import EarsEngine
+from app.plugins.ears.tyger.service import EarsService
 
 ap = argparse.ArgumentParser(); ap.add_argument("--seconds", type=float, nargs="+", default=[12.0, 30.0, 45.0])
 a = ap.parse_args()
 ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
 words = lambda t: re.findall(r"[a-z']+", t.lower())
 cfg = load_config(); e = cfg["ears"]
-ckpt = heads_release(cfg["ears"]["heads"], cfg["ears"].get("heads_revision"))
+ckpt = fetch(e["model"], e.get("revision"))
 svc = EarsService(EarsEngine(ckpt, slots=4), gather_s=0.0, expect_s=0.0, stats_every_s=1e9)
 
 

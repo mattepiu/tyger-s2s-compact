@@ -33,13 +33,18 @@ def test_old_shape_rejected_with_new_keys():
            "ears": {"ep_thr": 0.9}, "llm": {"model": "some/old-model", "enable_thinking": False},
            "tts": {"model": "openbmb/VoxCPM2"}, "mouth": {"temperature": 0.7}}
     rejects(old, "`models:`", "`ears:`", "`llm.reply:`", "plugin: gemma-4-e4b", "`llm.reply.temperature`",
-            "plugin: voxcpm2", "plugin: nemotron-tyger-1.0")
+            "plugin: voxcpm2", "plugin: tyger")
 
 
-def test_research_heads_keys_rejected():
-    cfg = copy.deepcopy(BASE)
-    cfg["ears"] = {**cfg["ears"], "heads_repo": "r", "heads_file": "f.pt"}
-    rejects(cfg, "`ears.heads_repo`", "`ears.heads: nineninesix/TYGER-S2S-endpointer`", "`ears.heads_revision`")
+def test_old_heads_keys_rejected():
+    """The research .pt keys, and the tyger 1.0 heads' block (removed 2026-10-13), point at the tyger bundle."""
+    for keys in ({"heads_repo": "r", "heads_file": "f.pt"},
+                 {"plugin": "nemotron-tyger-1.0", "heads": "nineninesix/TYGER-S2S-endpointer"}):
+        cfg = copy.deepcopy(BASE)
+        cfg["ears"] = {**cfg["ears"], **keys}
+        rejects(cfg, "`ears.heads", "`ears.plugin: tyger`", "`ears.model: nineninesix/tyger`")
+    cfg = copy.deepcopy(BASE); cfg["ears"]["plugin"] = "tyger-s2s"
+    rejects(cfg, "`ears.plugin: tyger-s2s` -> `tyger`")
 
 
 def test_filler_defaults_to_reply_instance():
@@ -129,9 +134,9 @@ def test_config_files_in_config_dir():
 
 def test_options_types():
     """Scalars as YAML leaves them: an int where a float is declared, an all-digit revision hash as a string."""
-    from app.plugins.ears.tyger_s2s.plugin import TygerS2S
+    from app.plugins.ears.tyger.plugin import Tyger
     from app.plugins.llm.local.vllm_base import VLLMChatPlugin
-    o = TygerS2S.options({**BASE["ears"], "gather_ms": 20, "revision": 1234567})
+    o = Tyger.options({**BASE["ears"], "gather_ms": 20, "revision": 1234567})
     assert o.gather_ms == 20.0 and isinstance(o.gather_ms, float) and o.revision == "1234567"
     assert o.model == BASE["ears"]["model"] and o.cpu_threads == BASE["ears"]["cpu_threads"]
     assert VLLMChatPlugin.options({"plugin": "gemma-4-e4b", "name": "x"}).kv_cache_gib == 3.0   # shape keys skipped

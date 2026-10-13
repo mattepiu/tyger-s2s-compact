@@ -1,9 +1,9 @@
 """Plugin contract (DEVELOPING.md -> "Adding a plugin"): one suite per kind, run against every plugin that can run here.
 
   * the `fake` plugins always run (no GPU);
-  * the local model plugins (gemma-4-e4b, voxcpm2, and the EARS plugin the config names: nemotron-tyger-1.0 or
-    tyger-s2s) run with TYGER_CONTRACT_LOCAL=1, on the GPU box with the GPU free (stop run.sh first): they load the
-    real models, one at a time. CONFIG=... picks another config, as for run.sh.
+  * the local model plugins (gemma-4-e4b, voxcpm2, and the EARS plugin the config names: tyger) run with
+    TYGER_CONTRACT_LOCAL=1, on the GPU box with the GPU free (stop run.sh first): they load the real models, one at
+    a time. CONFIG=... picks another config, as for run.sh.
 
 Checks: events in a valid order; stop_flag ends a stream within one item; tool-call IDs unique; text never carries
 tool-call or thinking markup; TTS audio is 1-D float32 at out_sr; EARS sessions open / close / reset and return

@@ -344,7 +344,7 @@ s = T.reduce(s, { kind: "connecting" });
 ok(s.conn === "connecting" && s.note === "", "and a new conversation can start");
 
 // ---- live tuning (tuning.ts): the plugin's sliders and this conversation's values, the meters ----------------------
-// the sliders as nemotron-tyger's THRESHOLDS declare them (app/plugins/ears/nemotron_tyger/plugin.py), and the fake
+// the sliders as tyger's THRESHOLDS declare them (app/plugins/ears/tyger/plugin.py), and the fake
 // plugin's frames -> seconds one, with an "off" value
 const SLIDERS = [
   { name: "ep_thr", type: "float", label: "endpoint p_end τ", lo: 0.3, hi: 0.99, step: 0.005, decimals: 3, scale: 1, unit: "", meter: "p_end", off: null },

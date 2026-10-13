@@ -95,11 +95,14 @@ def _old_shape(cfg: dict) -> list[str]:
     """What still uses the pre-plugin config shape, each with the key that replaces it."""
     found = []
     if "models" in cfg:
-        found.append("top-level `models:` -> the heads release goes in `ears.heads` (it pins its nemotron encoder)")
+        found.append("top-level `models:` -> the turn-taking model goes in `ears.model` (nineninesix/tyger: nemotron "
+                     "and the turn-taker in one bundle)")
     ears = cfg.get("ears")
-    if isinstance(ears, dict) and ("heads_repo" in ears or "heads_file" in ears):
-        found.append("`ears.heads_repo` / `ears.heads_file` (a research .pt) -> `ears.heads: "
-                     "nineninesix/TYGER-S2S-endpointer` (the release) and `ears.heads_revision`")
+    if isinstance(ears, dict) and ("heads_repo" in ears or "heads_file" in ears or "heads" in ears):
+        found.append("`ears.heads` / `ears.heads_repo` / `ears.heads_file` (the tyger 1.0 heads, removed) -> "
+                     "`ears.plugin: tyger` with `ears.model: nineninesix/tyger` and `ears.revision`")
+    if isinstance(ears, dict) and ears.get("plugin") in ("nemotron-tyger-1.0", "tyger-s2s"):
+        found.append(f"`ears.plugin: {ears['plugin']}` -> `tyger` (one EARS plugin since 2026-10-13)")
     llm = cfg.get("llm")
     if isinstance(llm, dict) and "model" in llm:
         found.append("`llm.model` and the other flat `llm:` keys -> move them under `llm.reply:` with "
@@ -110,7 +113,7 @@ def _old_shape(cfg: dict) -> list[str]:
     for kind in ("tts", "ears"):
         if isinstance(cfg.get(kind), dict) and "plugin" not in cfg[kind]:
             found.append(f"`{kind}:` has no `plugin:` -> add `plugin: "
-                         f"{'voxcpm2' if kind == 'tts' else 'nemotron-tyger-1.0'}`")
+                         f"{'voxcpm2' if kind == 'tts' else 'tyger'}`")
     return found
 
 

@@ -47,9 +47,9 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **Measurement scripts:** smoke and load tests on the running stack, GPU parity checks, stack comparisons.
 
 ### Changed
-- **Turn-taking from one model, `tyger-s2s`:** nemotron ASR and a small GRU turn-taker in one file
-  (`nineninesix/tyger-s2s`), now the default. EARS needs about half the GPU memory, and a step for 4 conversations
-  takes 27 ms instead of 42. The tyger 1.0 heads stay available as `nemotron-tyger-1.0`.
+- **Turn-taking from one model, `tyger`:** nemotron ASR and a small GRU turn-taker in one file
+  (`nineninesix/tyger`), in place of the tyger 1.0 heads. EARS needs about half the GPU memory, and a step for 4
+  conversations takes 27 ms instead of 42.
 - **The new page is the default at `/`; the classic page moved to `/classic`.** Both are on the one port, :7860.
 - **Four characters, one per voice: Mira (the default), Aria, Kai and Rex.** The expert answers in the same voice.
 - **Each voice can have its own character:** picking a voice on the page switches who you're talking to, and the
@@ -68,7 +68,6 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **Half the bandwidth:** int16 audio both ways, and the mic is captured with an AudioWorklet.
 - **Faster turn-taking:** audio features on the GPU, and a speech decoder 3–5× faster.
 - **The voice clip is encoded once** and kept in memory.
-- **The turn-taking heads** load from the `TYGER-S2S-endpointer` release.
 - **Code layout:** `app/` is split into `ears/`, `mouth/`, `plugins/`, `prompts/`, `runtime/` and `tools/`, and the
   configs are in `config/`.
 - **Docs:** README, DEVELOPING, CHANGELOG, ISSUES and HANDOFF replace the old notes and design docs.
@@ -89,6 +88,7 @@ Everything since the imported v1 baseline. It becomes the first release.
   "I d").
 
 ### Removed
+- **The tyger 1.0 heads** (`nemotron-tyger-1.0`, a Qwen3-0.6B decoder on nemotron): `tyger` replaces them.
 - **The silence fallback:** only the turn-taking model ends a turn.
 - **The weather and web-search tools,** and Tavily: live facts go to the expert's web search.
 
