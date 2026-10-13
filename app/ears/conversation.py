@@ -34,7 +34,7 @@ from collections import deque
 import numpy as np
 from aiohttp import WSMsgType
 
-from app.ears.playback import AgentPlayback, BACKCHANNEL_ID, audio_frame, mic_block
+from app.ears.playback import AgentPlayback, BACKCHANNEL_ID, EchoMeter, audio_frame, mic_block
 from app.wire import async_send_msg, async_recv_msg
 
 log = logging.getLogger("ears")
@@ -59,6 +59,7 @@ class Conversation:
         self.mic_pos = 0; self.hop_pos = 0               # mic samples received / cut into hops so far
         self.hop_ready = asyncio.Event()
         self.playback = AgentPlayback(ears.sr)
+        self.echo = EchoMeter(ears.sr)                   # the agent's echo in the mic, per reply (logged, I-26)
         self.reader = self.writer = None; self.have_mouth = False
         # the state machine (module docstring)
         self.speaking = False; self.halting = False
@@ -180,6 +181,7 @@ class Conversation:
                     self.session.reset(); self.reset_due = False
                 if self.speaking:
                     agent, mode = ear, "speaking"
+                    self.echo.add(user, ear)
                 else:
                     agent, mode = np.zeros(self.hop_n, np.float32), "listen"
                 events = await self.ears.feed(self.session, user, agent, mode, more=len(self.mic) >= self.hop_n)
@@ -243,6 +245,7 @@ class Conversation:
         self.speaking = False; self.halting = True; self.reset_due = True
         onset = float(e.get("onset_s") or 0.0)
         heard = self.playback.heard_s(hop_end - int(onset * self.ears.sr))   # by the tags, when the user started
+        self.echo.drop_last(onset)                                           # the user's speech isn't echo
         self.barge_t0 = time.perf_counter()
         log.info("barge yield=%.2f onset %.2f s: heard %.2f s by then (the server's guess at the barge: %.2f s)",
                  e.get("yield_prob", 0.0), onset, heard, self.playback.estimate_s())
@@ -260,7 +263,7 @@ class Conversation:
     # ---- the agent's turn ----
     def _start_speaking(self):
         self.speaking = True; self.turn_t0 = time.perf_counter(); self.await_onset = True
-        self.mouth_done = False; self.playback.start()
+        self.mouth_done = False; self.playback.start(); self.echo.start()
 
     async def _send_turn(self, transcript):
         self._start_speaking()
@@ -289,8 +292,9 @@ class Conversation:
             log.info("barge_halted tail %.0f ms", (time.perf_counter() - self.barge_t0) * 1e3)
         self.barge_t0 = None
         off = self.playback.offset_ms()
-        log.info("turn_done barged=%s; 2nd ear by arrival order %s", bool(barged),
-                 "untagged" if off is None else f"{off:+.0f} ms ahead of the page's playback")
+        log.info("turn_done barged=%s; 2nd ear by arrival order %s; %s", bool(barged),
+                 "untagged" if off is None else f"{off:+.0f} ms ahead of the page's playback",
+                 self.echo.summary() or "no echo frames")
         await self.ws.send_json({"type": "turn_done", "barged": barged})
         if self.halting:
             self.halting = False

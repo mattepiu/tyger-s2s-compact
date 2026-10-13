@@ -198,6 +198,11 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Using tyg
 - **Why.** Until 2026-10-10 EARS paired the two channels in arrival order. Live, that put the 2nd ear 316–783 ms
   (median 566) ahead of what the user heard. With echo in the mic, the agent's own voice then looked like a cut-in.
   The log line `2nd ear by arrival order +X ms ahead` still reports that offset, as a diagnostic only.
+- **The echo in the mic** (`EchoMeter`, I-26). Each reply's `turn_done` line also gives the mic's level minus the 2nd
+  ear's on the frames where the agent is audible (`echo -NN dB`, with p10 / p90), in
+  `scripts/validate/second_ear.py`'s `--echo-db` unit, and the mic's floor while the agent is silent. At a barge,
+  the frames since the user's onset are left out. Live with the browser's echo cancellation: −65 to −73 dB, the same
+  as with headphones.
 - **Known limit (I-18).** With no echo in the mic, as with headphones, an "mm-hm" in a pause between the agent's
   sentences barges.
 

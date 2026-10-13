@@ -15,7 +15,7 @@ sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (
 import numpy as np  # noqa: E402
 from app.config import load_config  # noqa: E402
 from app.ears import conversation as C  # noqa: E402
-from app.ears.playback import AgentPlayback, BACKCHANNEL_ID, audio_frame, mic_block  # noqa: E402
+from app.ears.playback import AgentPlayback, BACKCHANNEL_ID, EchoMeter, audio_frame, mic_block  # noqa: E402
 from app.plugins.base import PluginContext  # noqa: E402
 from app.plugins.ears.fake import EnergyEars  # noqa: E402
 from fakes import FakePage, MouthServer  # noqa: E402
@@ -89,6 +89,27 @@ def test_wire_frames():
     assert mic_block(b"\x00" * 7) is None and mic_block(b"\x00" * 9) is None
     f = audio_frame(3, np.array([0.5, -2.0], np.float32))
     assert f[:4] == b"\x03\x00\x00\x00" and list(np.frombuffer(f, "<i2", offset=4)) == [16384, -32768]
+
+
+def test_echo_meter():
+    """I-26: the agent's voice 35 dB down in the mic over a -90 dB floor reads as -35 dB echo on its voiced frames, the
+    agent's silent stretch as the floor; at a barge, the user's speech since the onset (and a margin) is dropped."""
+    rng = np.random.default_rng(0)
+    ear = (0.1 * rng.standard_normal(HOP * 4)).astype(np.float32)          # -20 dB
+    ear[HOP * 3:] = 0                                                       # the last hop: the agent silent
+    mic = ear * 10 ** (-35 / 20) + 10 ** (-90 / 20) * rng.standard_normal(len(ear)).astype(np.float32)
+    meter = EchoMeter(16000)
+    assert meter.summary() is None
+    for i in range(4):
+        meter.add(mic[i * HOP:(i + 1) * HOP], ear[i * HOP:(i + 1) * HOP])
+    s = meter.summary()
+    assert s.startswith("echo -35.0 dB") and "over 12 frames" in s, s
+    assert abs(float(s.split("mic floor ")[1].split()[0]) + 90) < 0.5, s      # 4 frames of noise: within 0.5 dB
+    meter.add(0.3 * np.ones(HOP, np.float32), ear[:HOP])                    # the user cuts in (+ the agent)
+    meter.drop_last(0.3)                                                    # onset 0.3 s ago: 0.3 + 0.3 s dropped
+    assert len(meter.mic) == 20 - 8 and meter.summary().endswith("over 12 frames; mic floor n/a")
+    meter.start()
+    assert meter.summary() is None
 
 
 # ---- the Conversation ---------------------------------------------------------------------------------------

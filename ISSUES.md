@@ -15,7 +15,7 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
 |---|---|---|---|---|
 | I-20 | smart | medium | open | The expert calls `get_current_time` before most answers; once an empty answer, once a "Dummy" reminder |
 | I-18 | EARS | medium | accepted for now | With a clean mic, an "mm-hm" in the agent's pause barges |
-| I-26 | EARS | medium | open | With echo in the mic (−30 dB), tyger barges on the agent's own voice |
+| I-26 | EARS | low | open (not seen live) | With echo in the mic (−30 dB), tyger barges on the agent's own voice |
 | I-27 | EARS | low | open | One slow tick (0.27–0.39 s) soon after start |
 | I-24 | tests | low | open | `test_barged_round.py` is timing-based and failed once under CPU load |
 | I-09 | EARS | low | check on the stack | A lost MOUTH ends the conversation on the fakes; not checked on the real stack |
@@ -115,7 +115,7 @@ would halve that.
 
 ## Tests and ops
 
-### I-26 — With echo in the mic, tyger barges on the agent's own voice (medium, confirmed offline)
+### I-26 — With echo in the mic, tyger barges on the agent's own voice (low, confirmed offline; not seen live)
 **What happens** (`scripts/validate/second_ear.py --pairing tags`, 24 trials, 2026-10-13): the agent talks alone, its
 echo in the mic at a fixed level, the user silent. A trial with a BARGE is a reply cut off by the agent's own voice.
 
@@ -132,13 +132,24 @@ echo in the mic at a fixed level, the user silent. A trial with a BARGE is a rep
 - The tyger 1.0 heads, with the same tags (2026-10-10): 0 / 24 replies cut off at every echo level.
 - At −30 dB no threshold works: 0.4 cuts off 2 replies in 3, 0.5 misses 2 cut-ins in 3. At −40 dB and below, 0.4
   (the user's live setting) is fine.
-- The page asks the browser for echo cancellation. How much echo it leaves live hasn't been measured; the user
-  hasn't reported a reply cut off at 0.4 (2026-10-13).
+- **Live, the browser leaves far less** (2026-10-13, the user's laptop, the new page, barge 0.4; EARS logs the echo
+  on each reply's `turn_done` line). The page asks for echo cancellation, noise suppression and gain control:
+
+  | output | replies | cut off (user silent) | echo, median per reply | p90 per reply | mic floor |
+  |---|---|---|---|---|---|
+  | laptop speakers | 7 + 1 cut-in | 0 / 7 | −64.8 to −73.4 dB | −50.7 to −66.0 dB | −77.7 to −87.1 dB |
+  | headphones | 3 + 1 cut-in | 0 / 3 | −66.0 to −69.5 dB | −50.0 to −53.6 dB | −81.0 to −82.5 dB |
+
+  - Speakers read the same as headphones, so the echo left is at or below the room's noise: these are upper bounds,
+    25 dB or more under the −40 dB row.
+  - The two cut-ins barged 2.0 s (speakers) and 1.2 s (headphones) after the user's onset.
+  - One laptop and browser so far: louder speakers, a phone, or a browser with weaker echo cancellation may leave
+    more.
 - I-16's silent wait is fine on tyger (`silent_wait.py`, 24 trials): every case barges 24 / 24 with no false barges,
   0.66–0.70 s (median) after the user starts in the agent's silence, 1.54 s over its speech.
 
 **Fix options:**
-- Measure the echo the browser leaves live (the mic's level while the agent plays, through speakers), then decide.
+- On a new device or browser, read the echo on the `turn_done` lines: near −40 dB or above, 0.4 cuts replies off.
 - In the model repo: train the yield head with the agent's echo in the user channel.
 
 ### I-27 — One slow tick soon after start (low, confirmed)

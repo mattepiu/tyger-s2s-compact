@@ -137,3 +137,48 @@ class AgentPlayback:
     def estimate_s(self):
         """The server's own guess at how much the page has played (s): only for the logs, next to the tags."""
         return max(0.0, self.sent24 / WIRE_SR - max(0.0, self.play_until - time.perf_counter()))
+
+
+def frame_db(x, frame):
+    """Per-frame energy (dB re full scale) of x, in frames of `frame` samples (a tail short of a frame dropped)."""
+    n = len(x) // frame
+    seg = x[:n * frame].reshape(n, frame).astype(np.float64)
+    return 20 * np.log10(np.sqrt((seg ** 2).mean(1)) + 1e-9)
+
+
+class EchoMeter:
+    """How much of the agent's voice the page's echo cancellation leaves in the mic (I-26), per reply: the mic's level
+    minus the 2nd ear's on the 80 ms frames where the agent is audible, in scripts/validate/second_ear.py's unit (its
+    --echo-db: the 2nd ear scaled into the mic). Measured while the user is silent: at a barge, the frames since the
+    user's onset are dropped. Numbers only, for the log."""
+    FRAME_S = 0.08
+    VOICED_DB = -40.0                # the 2nd ear above this: the agent is audible in the frame
+    QUIET_DB = -60.0                 # below this: the agent is silent (the mic is the room's floor plus echo tails)
+    ONSET_MARGIN_S = 0.3             # dropped before a barge's onset too: the onset is a model's guess
+
+    def __init__(self, sr):
+        self.frame = int(round(self.FRAME_S * sr))
+        self.start()
+
+    def start(self):
+        self.mic = []; self.ear = []
+
+    def add(self, mic, ear):
+        """One hop of mic audio and the 2nd ear for it."""
+        self.mic += frame_db(mic, self.frame).tolist(); self.ear += frame_db(ear, self.frame).tolist()
+
+    def drop_last(self, seconds):
+        """Drop the frames of the last `seconds` (the user's speech at a barge) and ONSET_MARGIN_S before them."""
+        k = min(len(self.mic), int(np.ceil((seconds + self.ONSET_MARGIN_S) / self.FRAME_S)))
+        del self.mic[len(self.mic) - k:], self.ear[len(self.ear) - k:]
+
+    def summary(self):
+        """'echo -34.1 dB (p10 -41.0, p90 -27.5) over 120 frames; mic floor -62.0 dB' or None (no audible frames)."""
+        mic, ear = np.array(self.mic), np.array(self.ear)
+        voiced, quiet = ear > self.VOICED_DB, ear < self.QUIET_DB
+        if not voiced.any():
+            return None
+        d = mic[voiced] - ear[voiced]
+        floor = f"{np.median(mic[quiet]):.1f} dB" if quiet.any() else "n/a"
+        return (f"echo {np.median(d):.1f} dB (p10 {np.percentile(d, 10):.1f}, p90 {np.percentile(d, 90):.1f}) "
+                f"over {voiced.sum()} frames; mic floor {floor}")

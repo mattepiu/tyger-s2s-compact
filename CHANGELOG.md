@@ -45,6 +45,7 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **Tests that need no GPU,** and a check of the web page in jsdom.
 - **A routing test** (`scripts/bench/escalation.py`): 119 synthetic cases, no API cost.
 - **Measurement scripts:** smoke and load tests on the running stack, GPU parity checks, stack comparisons.
+- **An echo meter in the EARS log:** each reply's line says how much of the agent's voice is left in the mic.
 
 ### Changed
 - **Turn-taking from one model, `tyger`:** nemotron ASR and a small GRU turn-taker in one file
