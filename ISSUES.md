@@ -5,14 +5,14 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
   has the detail and the numbers.
 - The write-ups of fixed issues (I-01 to I-17, L-03, L-04, O-04) are in git history: this file at `4d4c2e3`. I-19,
   I-22 and I-23 left when the agent became English only: this file at `1b8e6ff`. O-06 (run.sh now limits the
-  kernel compilers): this file at `9caeca9`.
+  kernel compilers): this file at `9caeca9`. I-21 was dropped by the user on 2026-10-13: the voice reads digits and
+  "°C" well. Its write-up: this file at `ce52f66`.
 - Each issue says how sure it is: **confirmed** (in code or on the box), **likely**, or **hypothesis** (measure
   before fixing).
 
 | ID | Area | Severity | Status | One line |
 |---|---|---|---|---|
 | I-20 | smart | medium | open | The expert calls `get_current_time` before most answers; once an empty answer, once a "Dummy" reminder |
-| I-21 | smart | low | open | The expert writes unit symbols ("19°C") and digits into speech |
 | I-18 | EARS | medium | accepted for now | With a clean mic, an "mm-hm" in the agent's pause barges |
 | I-24 | tests | low | open | `test_barged_round.py` is timing-based and failed once under CPU load |
 | I-09 | EARS | low | check on the stack | A lost MOUTH ends the conversation on the fakes; not checked on the real stack |
@@ -58,18 +58,6 @@ user's OK each time.
 
 **Verify:** the live check's questions as plugin-level probes, with the user's OK: time rounds per answer, no empty
 answers, no action calls.
-
-### I-21 — The expert writes unit symbols into speech (low, confirmed)
-**What happens:** weather answers said "19°C, or 66°F" (4 of 6), though the smart prompt asks for spoken words only.
-The probes of 2026-10-12, with Ori's or Mike's lines first: "23°C", "25°C, or 77°F" in 3 of 5 weather answers,
-digits in all 5 ("October 13, 2026"), and in a savings answer ("7 percent", "104 thousand"). The chunker turns
-"25°C" into "25 C". The user's full Ori prompt had a "write out and normalize" rule that might have helped; it
-failed the routing gate, so it isn't in the reply or smart prompts.
-
-**Fix:** spell units and numbers out in the smart prompt, with an example ("nineteen degrees Celsius"); it isn't
-routed, so the reply model's gate doesn't apply. Or normalise them in MOUTH before the TTS.
-
-**Verify:** the weather questions of the live check, with the user's OK.
 
 ---
 
@@ -167,7 +155,12 @@ faster than real time or in huge frames, and list voice names at `/voices`.
 ### O-02 — The Dockerfile was never built (blocked)
 The GPU boxes so far are themselves Docker containers with no daemon, so nothing can be built there. The
 non-Docker fresh-box install has been run end to end. It needs a host with Docker and the NVIDIA runtime, and is
-best done after P, from the Dockerfile P leaves:
+best done after P, from the Dockerfile P leaves.
+
+The user plans to run the server in Docker, called from another Next.js app, and will build the image on their own
+side (2026-10-13). The API-mode settings (pages, allowed origins, session limit) are env vars for that reason.
+
+The steps:
 1. Build the image.
 2. Run it with the mounts from the Dockerfile header.
 3. Run `scripts/stack/smoke.py` against it.
@@ -251,6 +244,8 @@ ordinary dependencies. There are no extras and no engine packages: tyger targets
 - **`scripts/` and `tests/`** stay out of the wheel; the sdist may include them. They run from an editable install,
   `uv pip install -e .`. `tests/page/page_check.mjs` reads `static/index.html` by default; point it at
   `tyger/static/`.
+- **The new page** (`web/`, served by EARS from its static build): the wheel ships the build, so building it needs
+  Node at release time only, never at install.
 - **Dockerfile.** Install the wheel and set `ENTRYPOINT ["tyger", "serve"]`. A box that is itself a Docker container
   can't build it (O-02).
 

@@ -363,6 +363,8 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Run & rea
     `run.sh` sets `expandable_segments` for EARS; without it the cache fragmented past 9 GiB.
 - **Headroom.** A 5090 (32.6 GB) is left with ~2.5 GB, and a 48 GB RTX PRO 5000 with ~19 GB. Measure before adding
   anything.
+- **No memory work is planned** (the user, 2026-10-13: it fits the 5090). The figures above are estimates, not
+  measurements. Don't cut anything unless the stack grows past the card.
 
 ### VoxCPM2 settings that matter
 
@@ -644,7 +646,7 @@ only within one box and config.
 The voice changes the end-of-speech numbers: `load_ears.py` speaks its utterance in the default voice, and with the
 `ori` clip the endpoint comes ~100 ms sooner than on the last box. Since the characters, `load_ears.py`'s "count to
 ten" reply is no longer the same text every turn (2–10 distinct texts in a run, was 1), so its end-of-speech → audio
-varies more.
+varies more. Run it with the default voice every time (the user, 2026-10-13), and compare 3-run medians.
 
 "End of speech → first audio" is what the user hears as the response gap. About 600–850 ms of it is endpoint
 detection, which live tuning of the endpoint thresholds is meant to cut (O-01).
