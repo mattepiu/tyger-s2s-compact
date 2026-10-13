@@ -14,19 +14,16 @@ server:
   pages: true             # TYGER_PAGES: serve the pages at / and /classic; false: /ws and /voices only
   max_session_s: 180      # TYGER_MAX_SESSION_S: a conversation ends after this long; 0: no limit
 
-ears:                      # turn-taking: nemotron ASR + the tyger 1.0 heads (exp-12 arm C endpoint rule +
-  plugin: nemotron-tyger-1.0   # barge/backchannel; live defaults, retuned live at V2)
-  heads: nineninesix/TYGER-S2S-endpointer   # the tyger 1.0 heads release (private; exp-12 arm C seed 0, LoRA merged).
-  heads_revision: 5df9430bfbae16f6d489a60fd309ab578f6c1a60   # v0.1.0-rc1. Its config pins the nemotron
-                           # encoder (ears.nemotron / nemotron_revision would override it)
-  ep_thr: 0.9146           # p_end threshold (sel_dev tau) -- NOT yet retuned live (exp-11 found offline ~2x high)
+ears:                      # turn-taking: nemotron ASR + a GRU turn-taker that reads its layer 15, in one bundle
+  plugin: tyger-s2s
+  model: nineninesix/tyger-s2s   # the bundle (private): nemotron-3.5-asr + the GRU, one model.safetensors
+  revision: e35bfa541ac7c8b2fb0e31c2157a525cf35a11a1
+  ep_thr: 0.915            # p_end threshold (the bundle's default 0.91; user, 2026-10-13: 0.915)
   ep_deb: 2                # debounce frames (80 ms each)
-  barge_thr: 0.4           # yield threshold: 0.5 -> 0.4 live with the I-17 2nd ear (user, 2026-10-10: cut-ins over
-                           # long replies barge; an "mm-hm" in a pause barges too, I-18)
+  barge_thr: 0.5           # yield threshold (the bundle's default)
   barge_deb: 2
-  bc_thr: 0.5
+  bc_thr: 0.4              # the bundle's default
   bc_deb: 2
-  ring_frames: 2048        # head context per conversation (frames of 80 ms = 164 s); resets at every turn
   gather_ms: 15            # wait up to this long to batch other conversations' hops into one GPU step
   expect_ms: 60            # ...or this long when a conversation that is behind is about to resubmit
   stats_s: 60              # log tick timing + encoder/head/ASR busy % this often

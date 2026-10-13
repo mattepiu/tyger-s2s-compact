@@ -1,9 +1,9 @@
 """Plugin contract (DEVELOPING.md -> "Adding a plugin"): one suite per kind, run against every plugin that can run here.
 
   * the `fake` plugins always run (no GPU);
-  * the local model plugins (gemma-4-e4b, voxcpm2, nemotron-tyger-1.0) run with
-    TYGER_CONTRACT_LOCAL=1, on the GPU box with the GPU free (stop run.sh first): they load the real models, one at
-    a time.
+  * the local model plugins (gemma-4-e4b, voxcpm2, and the EARS plugin the config names: nemotron-tyger-1.0 or
+    tyger-s2s) run with TYGER_CONTRACT_LOCAL=1, on the GPU box with the GPU free (stop run.sh first): they load the
+    real models, one at a time. CONFIG=... picks another config, as for run.sh.
 
 Checks: events in a valid order; stop_flag ends a stream within one item; tool-call IDs unique; text never carries
 tool-call or thinking markup; TTS audio is 1-D float32 at out_sr; EARS sessions open / close / reset and return
@@ -22,7 +22,7 @@ from app.prompts import default_prompts  # noqa: E402
 from app.tools import build_tools  # noqa: E402
 
 LOCAL = os.environ.get("TYGER_CONTRACT_LOCAL") == "1"
-CFG = load_config()
+CFG = load_config(os.environ.get("CONFIG") or None)
 P = default_prompts()
 TOOLS = build_tools(P)
 TOOLS_EXPERT = build_tools(P, expert=True)
@@ -204,12 +204,13 @@ def test_ears_fake():
 
 def test_ears_local():
     if not LOCAL:
-        raise Skip("TYGER_CONTRACT_LOCAL=1 to run nemotron-tyger-1.0")
+        raise Skip(f"TYGER_CONTRACT_LOCAL=1 to run {CFG['ears']['plugin']}")
     from datasets import load_dataset                       # public LibriSpeech test clip, in memory
     ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
     a = ds[0]["audio"]; wav = np.asarray(a["array"], np.float32)
     assert a["sampling_rate"] == 16000
-    ears = plugin_class("ears", "nemotron-tyger-1.0")(CFG["ears"], ctx("nemotron-tyger-1.0"))
+    name = CFG["ears"]["plugin"]
+    ears = plugin_class("ears", name)(CFG["ears"], ctx(name))
     ears_suite(ears, wav)
 
 

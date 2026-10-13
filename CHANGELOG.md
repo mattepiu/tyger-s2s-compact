@@ -47,6 +47,9 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **Measurement scripts:** smoke and load tests on the running stack, GPU parity checks, stack comparisons.
 
 ### Changed
+- **Turn-taking from one model, `tyger-s2s`:** nemotron ASR and a small GRU turn-taker in one file
+  (`nineninesix/tyger-s2s`), now the default. EARS needs about half the GPU memory, and a step for 4 conversations
+  takes 27 ms instead of 42. The tyger 1.0 heads stay available as `nemotron-tyger-1.0`.
 - **The new page is the default at `/`; the classic page moved to `/classic`.** Both are on the one port, :7860.
 - **Four characters, one per voice: Mira (the default), Aria, Kai and Rex.** The expert answers in the same voice.
 - **Each voice can have its own character:** picking a voice on the page switches who you're talking to, and the

@@ -64,6 +64,12 @@ app/
         head_batch.py      #     the heads batched across conversations: KV ring, CUDA graphs
         rules.py           #     the per-frame turn rules: endpoint, barge-in, backchannel
         session.py, engine.py, service.py, plugin.py, release.py
+      tyger_s2s/           #   tyger-s2s (the default): nemotron + a GRU turn-taker in one bundle, on nemotron_tyger's
+                           #   engine, rules and ASR
+        bundle.py          #     fetch, check and load the bundle
+        controller.py      #     the GRU and its heads
+        gru_batch.py       #     the GRU stepped for every conversation at once, a state row each
+        engine.py, plugin.py
       fake.py              #   an energy endpointer
 config/
   default.yaml             # the stack (run.sh's default)
@@ -139,9 +145,27 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Using tyg
   320 ms (a hop of 4 frames) and re-encodes the last 8 s of each channel. The heads read encoder layer 15, so the
   encode stops there.
 - **Two channels:** the user's mic, and the 2nd ear, what the agent was saying at that moment (next section).
-- **The heads** come from the private `TYGER-S2S-endpointer` release: a Qwen3-0.6B decoder with its LoRA merged.
-  Per frame they give the end of the user's turn (`p_end`), the yield (the user taking the turn) and the
-  backchannel probability.
+- **The heads.** Per frame they give the end of the user's turn (`p_end`), the yield (the user taking the turn) and
+  the backchannel probability. Two plugins have them; both run the same engine and rules (`nemotron_tyger/`):
+  - **`tyger-s2s`** (the default): the private `nineninesix/tyger-s2s` bundle, nemotron and a 3-layer GRU (768
+    wide, 14M parameters) in one `model.safetensors`. Its nemotron is the same as nvidia's at `ea30d66` (every
+    tensor). Everything runs in fp32 with TF32 off, as the bundle was validated. The bundle's silence fallback (an
+    endpoint after 1.2 s below the VAD level) isn't used.
+  - **`nemotron-tyger-1.0`**: the private `TYGER-S2S-endpointer` release, a Qwen3-0.6B decoder with its LoRA merged,
+    on nvidia's nemotron. To go back to it, its block was:
+    ```yaml
+    ears:
+      plugin: nemotron-tyger-1.0
+      heads: nineninesix/TYGER-S2S-endpointer
+      heads_revision: 5df9430bfbae16f6d489a60fd309ab578f6c1a60
+      ep_thr: 0.9146
+      ep_deb: 2
+      barge_thr: 0.4
+      barge_deb: 2
+      bc_thr: 0.5
+      bc_deb: 2
+      ring_frames: 2048
+    ```
 - **The rules** (`rules.py`):
   - **Listening.** ENDPOINT when `p_end` ≥ `ep_thr` for `ep_deb` frames, once the user has 350 ms of voiced speech.
     Only the head ends a turn; there is no silence rule. BACKCHANNEL when the bc head fires for `bc_deb` frames,
@@ -164,8 +188,9 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Using tyg
   blocks, then the partial) as `partial` when they change.
 - **Batching.** One GPU thread serves every conversation.
   - A tick gathers the conversations' hops, waiting up to `gather_ms`, or `expect_ms` when one is catching up.
-  - It encodes their windows in one batch, then steps the heads in one batch. Each conversation has a slot in a KV
-    ring (`ring_frames`, reset at each turn), and there is one CUDA graph per attention width.
+  - It encodes their windows in one batch, then steps the heads in one batch. Each conversation has a slot: in
+    tyger-s2s a row of GRU state (9 KiB), stepped eager; in nemotron-tyger-1.0 a KV ring (`ring_frames`), with one
+    CUDA graph per attention width. A slot resets at each turn and at each switch between listening and speaking.
   - All-zero agent windows (while listening) are cached.
   - The RNN-T decoder is our own greedy loop: one CUDA graph of 16 steps, on its own thread and CUDA stream. It
     gives the same text as nemotron's `generate()` and is 3–5× faster.
@@ -551,7 +576,8 @@ own web search.
   in `.env` (or the container's env) only. Never print them, and don't
   leave copies of `.env` around, e.g. in a scratch git worktree.
 - **Hosted runs.** A live run against a hosted model (`smart`, or any remote role) needs the user's OK each time.
-- **The heads release is private.** This is a serving project only: no training code.
+- **The turn-taking models are private** (the tyger-s2s bundle, the tyger 1.0 heads). This is a serving project
+  only: no training code.
 - **Prompts and tool parsing.** The agent speaks English only: prompts, few-shot turns and test cases are in English.
   Every prompt must keep `enable_thinking: false` working. Tool parsing keeps Gemma 4's format, and Hermes JSON for
   the `fake` LLM.
@@ -592,6 +618,7 @@ own web search.
   tests/ears/test_second_ear.py         the 2nd ear from the page's tags; the turn ends on the page's report
   tests/ears/test_asr_jobs.py           the ASR thread finishes its jobs, even on failure
   tests/ears/test_rules.py              the turn rules: endpoint, backchannel, barge-in
+  tests/plugins/test_tyger_s2s.py       tyger-s2s without its weights: the bundle check, the GRU stepped per conversation
   tests/plugins/test_plugins.py         base classes, light imports, off-rate TTS, thresholds
   tests/plugins/test_contract.py        the plugin contract on the fakes (TYGER_CONTRACT_LOCAL=1: the real plugins too)
   tests/plugins/test_llm_calls.py       what every call format shares, on a toy format; the local plugin base
@@ -612,8 +639,8 @@ own web search.
 - **GPU checks, with the stack stopped:**
   - `TYGER_CONTRACT_LOCAL=1 .venv/bin/python tests/plugins/test_contract.py`. It aborts at exit after passing (I-15).
   - `scripts/validate/`:
-    - `ears_batched.py`: batched EARS = the single-session reference (`--pcm16`: the mic as int16, as the page
-      sends it);
+    - `ears_batched.py`: batched EARS = the single-session reference, for the EARS plugin the config names
+      (`--config`; `--pcm16`: the mic as int16, as the page sends it);
     - `rnnt.py`: the graphed RNN-T = nemotron's `generate()`;
     - `heads.py`: the heads release loads and is consistent;
     - `barge.py`: a barge keeps the start of the utterance;

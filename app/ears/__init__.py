@@ -1,7 +1,7 @@
-"""EARS: the turn-taking side. The configured EARS plugin (ears.plugin; nemotron-tyger-1.0 = nemotron-3.5-asr L15
-+ the tyger 1.0 heads) listens to every conversation, and this package serves the mic page + WebSocket on one port
-and wires each conversation to MOUTH over its own TCP connection. Up to server.max_sessions conversations at once;
-the plugin batches their hops on the GPU.
+"""EARS: the turn-taking side. The configured EARS plugin (ears.plugin; tyger-s2s = nemotron-3.5-asr L15 + a GRU
+turn-taker, one bundle; nemotron-tyger-1.0 = the same encoder + the tyger 1.0 heads) listens to every conversation,
+and this package serves the mic page + WebSocket on one port and wires each conversation to MOUTH over its own TCP
+connection. Up to server.max_sessions conversations at once; the plugin batches their hops on the GPU.
 
 Modules (app/ears/):
   __main__      the process: load the plugin, run the web app

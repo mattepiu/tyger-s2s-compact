@@ -1,11 +1,12 @@
 """Validate the batched multi-session EARS engine (app/plugins/ears/nemotron_tyger) against a plain single-session run
 of the same TYGER-S2S-endpointer release (scripts/validate/reference.py: CPU features, the full encoder, eager heads, HF
 generate; the same turn rules): per-frame head outputs and events, alone and 4 sessions with staggered starts, plus
-tick timing.
+tick timing. With a config whose ears.plugin is tyger-s2s, the same for its bundle (S2SEngine vs ReferenceS2S).
 Mic input = public LibriSpeech test clips (hf-internal-testing/librispeech_asr_dummy), in memory; prints numbers
 and event kinds only. Needs the GPU free (stop run.sh) and `datasets` (pip install datasets).
 
   .venv/bin/python scripts/validate/ears_batched.py      # expect "events match: True" for every session
+  .venv/bin/python scripts/validate/ears_batched.py --config my.yaml   # the EARS plugin that config names
   .venv/bin/python scripts/validate/ears_batched.py --pcm16   # the engine gets the mic as the page sends it (int16,
                                                               # I-17); the reference keeps float32: diffs should stay
                                                               # within the float32 run's
@@ -16,14 +17,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2])); torch.set_num_thre
 logging.basicConfig(level=logging.WARNING)
 from datasets import load_dataset
 from app.config import load_config
+from app.plugins import plugin_class
 from app.plugins.ears.nemotron_tyger.release import heads_release
-from scripts.validate.reference import ReferenceEars
+from scripts.validate.reference import ReferenceEars, ReferenceS2S
 from app.plugins.ears.nemotron_tyger.constants import HOP_N, SEG_S
 from app.plugins.ears.nemotron_tyger.engine import EarsEngine
 from app.plugins.ears.nemotron_tyger.session import EarsSession
 
 ap = argparse.ArgumentParser(); ap.add_argument("--no-graph", action="store_true")
 ap.add_argument("--pcm16", action="store_true", help="the engine's mic through the page's int16 (I-17)")
+ap.add_argument("--config", help="another config (default: config/default.yaml): checks the EARS plugin it names")
 a = ap.parse_args()
 ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
 clip = lambda i: np.asarray(ds[i]["audio"]["array"], np.float32)
@@ -42,13 +45,18 @@ def scenario(k):
         hops.append((user_spk[i:i + HOP_N], agent[i:i + HOP_N] * 0.6, "speaking"))
     return hops
 
-cfg = load_config(); e = cfg["ears"]
-release = heads_release(e["heads"], e.get("heads_revision"))
-thr = dict(ep_thr=float(e["ep_thr"]), ep_deb=int(e["ep_deb"]), barge_thr=float(e["barge_thr"]),
-           barge_deb=int(e["barge_deb"]), bc_thr=float(e["bc_thr"]), bc_deb=int(e["bc_deb"]))
+cfg = load_config(a.config); e = cfg["ears"]
+if e["plugin"] == "tyger-s2s":
+    from app.plugins.ears.tyger_s2s.bundle import fetch
+    from app.plugins.ears.tyger_s2s.engine import S2SEngine
+    release = fetch(e["model"], e.get("revision")); Reference, Engine = ReferenceS2S, S2SEngine
+else:
+    release = heads_release(e["heads"], e.get("heads_revision")); Reference, Engine = ReferenceEars, EarsEngine
+print(f"EARS plugin: {e['plugin']}")
+thr = {t.name: t.from_config(e) for t in plugin_class("ears", e["plugin"]).THRESHOLDS}
 
 # ---- reference: one session at a time, the plain way ----
-ref = ReferenceEars(release)
+ref = Reference(release)
 def run_ref(hops):
     s = EarsSession(0, **thr); s.trace = []; ref.cache = None; evs = []
     for uh, ah, mode in hops:
@@ -67,7 +75,7 @@ if a.pcm16:                                   # the mic as EARS decodes the page
     from app.ears.playback import to_pcm16
     scen = [[(to_pcm16(uh).astype(np.float32) / 32768.0, ah, mode) for uh, ah, mode in h] for h in scen]
     print("the engine's mic: int16, as the page sends it; the reference's: float32")
-eng = EarsEngine(release, slots=S, cuda_graph=not a.no_graph)
+eng = Engine(release, slots=S, cuda_graph=not a.no_graph)
 def run_eng(sessions, hop_lists, offsets):
     """Run sessions together; session k starts at tick offsets[k]. Returns per-session (trace, events), tick ms."""
     for s in sessions:

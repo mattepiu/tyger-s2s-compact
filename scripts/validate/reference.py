@@ -8,6 +8,9 @@ step the engine speeds up is done here without the speed-up:
     batched across conversations, CUDA graphs);
   * transcripts: nemotron's HF generate() on the whole turn (the engine: its graphed greedy RNN-T, on the ASR thread,
     long turns in segments). No backchannel partials (they don't change events).
+ReferenceS2S does the same for a TYGER S2S bundle (tyger-s2s): its nemotron, and its GRU stepped one frame at a time
+for one conversation, as the research runtime's StreamSession steps it (the engine: GruBatch, a state row per
+conversation).
 Audio is held in memory only.
 """
 from __future__ import annotations
@@ -74,3 +77,20 @@ class ReferenceEars:
             if reset:
                 self.cache = None
         return events
+
+
+class ReferenceS2S(ReferenceEars):
+    """ReferenceEars on a TYGER S2S bundle; `cache` is the GRU's state."""
+    def __init__(self, bundle_dir, device="cuda"):
+        from app.plugins.ears.tyger_s2s.bundle import load
+        nemotron, self.proc, turn_taker, _ = load(bundle_dir)
+        self.device = device
+        self.asr = nemotron.to(device); self.turn_taker = turn_taker.to(device)
+        self.cache = None
+
+    @torch.no_grad()
+    def head_step(self, hu, ha, act_db, prev_state):
+        act = ((torch.tensor([[float(act_db)]], device=self.device) + 50) / 25).clamp(-3, 3)
+        prev = torch.tensor([[prev_state]], dtype=torch.long, device=self.device)
+        out, self.cache = self.turn_taker(hu[None, None], ha[None, None], act, prev, self.cache)
+        return out[0, 0].cpu().numpy()
