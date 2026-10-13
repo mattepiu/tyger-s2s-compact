@@ -203,11 +203,16 @@ found three gaps, fixed in the image: no CUDA toolkit for FlashInfer's kernel bu
 and the CUDA driver's caches with the others, so a new container on warm volumes starts in ~2 min, not ~5.5.
 - **Shared memory:** without `--ipc=host`, on Docker's default 64 MB `/dev/shm`, the stack starts and passes smoke,
   using ~12 KB. So a pod's `/dev/shm` of 64 MB or more is enough.
+- **The tunnel,** from the box to a test hostname (a dashboard tunnel the user made, outside their Terraform): it
+  registered, and `/voices` (401 / 200) and a `wss` conversation went through it. The first run found cloudflared
+  logging `CLOUDFLARE_TUNNEL_TOKEN` in clear at start; `run.sh` now gives it the token as `TUNNEL_TOKEN` alone.
 
 **Left: RunPod** (README → "RunPod + Cloudflare"): the user deploys. A pod with its own volume disk at `/workspace`,
 no network volume (the user, 2026-10-13): a new pod starts cold (~11 min on the test box), the same pod's later starts
 in ~2 min. Check there: `df -h /dev/shm` (64 MB or more), the logs to "EARS ready" and "Registered tunnel connection",
-`curl` on `/voices` (401), and smoke from the pod's terminal (it signs its own token).
+`curl` on `/voices` (401), and smoke from the pod's terminal (it signs its own token). The production tunnel is made
+by hand in the dashboard too (the user, 2026-10-13), outside their Terraform: its hostname's CNAME must stay out of
+Terraform's records. Its token goes to RunPod as a secret.
 
 ### O-03 — `main` is over 130 commits behind `plugins` (needs the user)
 All work since 2026-10-02 is on `plugins`. `main` is an ancestor of it (a fast-forward), and `voxcpm2` and

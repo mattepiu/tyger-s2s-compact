@@ -390,9 +390,11 @@ or moves. RunPod's own options don't fit: its HTTPS proxy cuts connections after
 through your Worker. **It hasn't run on RunPod yet** (O-02): the first deploy is the test.
 
 **1. The tunnel,** once, in the Cloudflare dashboard (your domain on Cloudflare): Zero Trust → Networks → Tunnels →
-Create a tunnel → Cloudflared. Name it (`tyger`), copy its token (the long string in the install command it shows),
-and add a public hostname: `tyger.example.com`, service type `HTTP`, URL `localhost:7860`. The token is a secret:
-whoever holds it can serve your hostname.
+Create a tunnel → Cloudflared. Name it (`tyger`), copy its token (the long string after `--token` in the install
+command it shows; later, on the tunnel's page under "Install and run a connector"), and add a public hostname:
+`tyger.example.com`, service type `HTTP`, URL `localhost:7860`. The token is a secret: whoever holds it can serve
+your hostname. If it leaks, refresh it on the tunnel's page. The public hostname adds a CNAME to your zone: if
+Terraform manages the zone's DNS, keep that name out of its records.
 
 **2. The image.** Build it as in "Docker", with your clips in `voices/`, and push it to a **private** registry
 (the image holds the clips). On an Apple Silicon Mac, build for the pod's CPU:
@@ -446,7 +448,11 @@ reach EARS: check the hostname's service URL. The smoke test runs from a shell i
   default 64 MB `/dev/shm` it starts and passes the smoke test, using ~12 KB (2026-10-13). A pod's `/dev/shm` of
   64 MB or more is enough (`df -h /dev/shm` in the pod's terminal).
 - **Logs:** keep `cloudflared` at its default log level. At `TUNNEL_LOGLEVEL=debug` it logs request URLs, and so the
-  conversations' tokens.
+  conversations' tokens. At start it logs its tunnel env vars, masking `TUNNEL_TOKEN` only, so `run.sh` hands it the
+  token as `TUNNEL_TOKEN` alone (`Environmental variables map[TUNNEL_TOKEN:*****]`).
+- **Tested from a GPU host** (2026-10-13, the image in Docker, no published port): two tunnel connections registered
+  ~2 min after the start, then through the hostname `/voices` gave 401 without a token and 200 with one, and a `wss`
+  conversation with a token reached `ready`; nothing secret in the logs.
 - **Stopping:** a stopped pod keeps its volume disk (and bills for it), but may not get its GPU back when the host
   is full. A new pod then downloads and compiles again.
 

@@ -96,12 +96,15 @@ EARS_PID=$!
 # A Cloudflare Tunnel to EARS when CLOUDFLARE_TUNNEL_TOKEN is set (README -> "RunPod + Cloudflare"): cloudflared
 # connects out to Cloudflare, which serves the tunnel's hostname over HTTPS and wss. It starts once EARS listens, so
 # the hostname answers only when the stack is ready. The token goes in through the env, never the command line (ps
-# shows that). Keep cloudflared's log level at info: at debug it logs request URLs, and so the conversations' tokens.
+# shows that), and only as TUNNEL_TOKEN: cloudflared logs its tunnel env vars at start, masking TUNNEL_TOKEN but not
+# CLOUDFLARE_TUNNEL_TOKEN, so that one and the app's secrets are left out of its env. Keep cloudflared's log level at
+# info: at debug it logs request URLs, and so the conversations' tokens.
 if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
   if command -v cloudflared >/dev/null; then
     wait_tcp "$("$PY" -m app.config "${CFG_ARGS[@]}" server.port)" "EARS" "$EARS_PID"
     echo "=== starting the Cloudflare Tunnel ==="
-    TUNNEL_TOKEN="$CLOUDFLARE_TUNNEL_TOKEN" cloudflared tunnel --no-autoupdate run &
+    env -u CLOUDFLARE_TUNNEL_TOKEN -u TYGER_API_SECRET -u HF_TOKEN -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
+      TUNNEL_TOKEN="$CLOUDFLARE_TUNNEL_TOKEN" cloudflared tunnel --no-autoupdate run &
     PIDS+=($!)
   else
     echo "CLOUDFLARE_TUNNEL_TOKEN is set, but cloudflared isn't installed: no tunnel (the Docker image has it)"
