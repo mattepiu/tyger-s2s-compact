@@ -10,12 +10,13 @@ from app.plugins.ears.tyger.bundle import check_config  # noqa: E402
 from app.plugins.ears.tyger.controller import TurnTaker  # noqa: E402
 from app.plugins.ears.tyger.gru_batch import GruBatch  # noqa: E402
 
-# what the published bundle's config.json says (nineninesix/tyger @ e35bfa54), the fields check_config reads
+# what the published bundle's config.json says (nineninesix/tyger @ cd826db0), the fields check_config reads, and the
+# controller's seed (added at cd826db0 for the research runtime; the weights are e35bfa54's)
 CONFIG = {
     "model_type": "tyger_nemotron_gru", "format_version": 1, "dtype": "float32",
     "state_names": ["LISTEN", "HOLD", "SPEAK", "BACKCHANNEL"],
     "output_order": ["state_logits", "hazard_logits", "yield_logits", "bc_logits", "endpoint_logits"],
-    "controller": {"architecture": {"kind": "gru", "width": 768, "layers": 3}},
+    "controller": {"seed": 0, "architecture": {"kind": "gru", "width": 768, "layers": 3}},
     "frontend": {"layer": 15, "hidden_size": 1024, "num_lookahead_tokens": 0, "sample_rate": 16000,
                  "frame_period_s": 0.08, "live_window_s": 8.0, "live_hop_s": 0.32,
                  "energy_norm": "clip((dB + 50) / 25, -3, 3)"},
@@ -61,7 +62,7 @@ def test_plugin_surface():
     from app.plugins.ears.tyger.plugin import THRESHOLDS
     cls = plugin_class("ears", "tyger")
     assert cls.THRESHOLDS is THRESHOLDS and cls.hop_samples == 5120 and cls.sr == 16000
-    block = {"plugin": "tyger", "model": "nineninesix/tyger", "revision": "e35bfa54", "ep_thr": 0.915,
+    block = {"plugin": "tyger", "model": "nineninesix/tyger", "revision": "cd826db0", "ep_thr": 0.915,
              "ep_deb": 2, "barge_thr": 0.4, "barge_deb": 2, "bc_thr": 0.4, "bc_deb": 2}
     assert cls.options(block).model == "nineninesix/tyger"
     for bad in ({"heads": "nineninesix/TYGER-S2S-endpointer"}, {"model": None}):

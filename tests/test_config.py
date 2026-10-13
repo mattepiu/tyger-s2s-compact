@@ -88,7 +88,7 @@ def test_plugin_options_checked_at_load():
     the key named (before R-07 a typo was silently ignored and the default used)."""
     cfg = copy.deepcopy(BASE); cfg["llm"]["reply"]["kv_cache_gb"] = 2.0
     rejects(cfg, "`llm.reply`", "unknown option `kv_cache_gb`", "did you mean `kv_cache_gib`")
-    cfg = copy.deepcopy(BASE); cfg["ears"]["revison"] = "e35bfa54"
+    cfg = copy.deepcopy(BASE); cfg["ears"]["revison"] = "cd826db0"
     rejects(cfg, "`ears`", "`revison`", "`revision`")
     cfg = copy.deepcopy(BASE); cfg["tts"]["allow_zero_shot"] = "yes"
     rejects(cfg, "`tts`", "`allow_zero_shot` must be a bool")

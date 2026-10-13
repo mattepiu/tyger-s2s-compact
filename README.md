@@ -558,7 +558,7 @@ tokens. Without `llm.smart` the agent answers what it knows and says plainly tha
 
 | component | model | licence |
 |---|---|---|
-| ASR + turn-taking | `nineninesix/tyger` @ `e35bfa5` (private): `nvidia/nemotron-3.5-asr-streaming-0.6b` @ `ea30d66`, unchanged, + a 3-layer GRU turn-taker (it replaced the tyger 1.0 heads, `nineninesix/TYGER-S2S-endpointer`) | Apache-2.0 (the GRU), OpenMDW-1.1 (nemotron) |
+| ASR + turn-taking | `nineninesix/tyger` @ `cd826db` (private): `nvidia/nemotron-3.5-asr-streaming-0.6b` @ `ea30d66`, unchanged, + a 3-layer GRU turn-taker (it replaced the tyger 1.0 heads, `nineninesix/TYGER-S2S-endpointer`) | Apache-2.0 (the GRU), OpenMDW-1.1 (nemotron) |
 | responder | `google/gemma-4-E4B-it`, FP8 at load (was `Qwen/Qwen3.5-4B`, before that `Qwen/Qwen3-4B-Instruct-2507`) | Apache-2.0 |
 | TTS | `openbmb/VoxCPM2` | Apache-2.0 |
 | expert, background tasks, web search | OpenAI `gpt-5.4-mini` with OpenAI's web search (`llm.smart`) | commercial API (your key) |
