@@ -23,9 +23,10 @@
 FROM nvidia/cuda:13.0.1-devel-ubuntu24.04
 
 # libgl1, libglib2.0-0t64, libxcb1: the venv's OpenCV is the GUI build (a dependency asks for opencv-python), and
-# vLLM's engine process imports it: without them the engine dies at start ("libxcb.so.1: cannot open shared object")
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        libsndfile1 git ca-certificates build-essential curl libgl1 libglib2.0-0t64 libxcb1 && \
+# vLLM's engine process imports it: without them the engine dies at start ("libxcb.so.1: cannot open shared object").
+# tzdata: get_current_time's zoneinfo needs the time zone database (without it every city is "unknown")
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libsndfile1 git ca-certificates build-essential curl libgl1 libglib2.0-0t64 libxcb1 tzdata && \
     rm -rf /var/lib/apt/lists/*
 # uv, pinned; it fetches the venv's Python 3.12 (the base has none) into /opt, outside the volumes
 COPY --from=ghcr.io/astral-sh/uv:0.13.0 /uv /usr/local/bin/uv
