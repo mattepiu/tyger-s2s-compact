@@ -687,8 +687,8 @@ own web search.
 ## Benchmarks
 
 **The stack over time.** Trend only: the rows come from different boxes and configs (noted). Every box was an RTX
-5090 until 2026-10-11 (the first one throttled to half its memory clock), then an RTX PRO 5000. Compare numbers
-only within one box and config.
+5090 until 2026-10-11 (the first one throttled to half its memory clock), then an RTX PRO 5000, then RTX 5090s again;
+the last row is an RTX PRO 4500 Blackwell, in Docker. Compare numbers only within one box and config.
 
 | When | Code / config | Smoke: plain-turn first audio | 4 conversations: turn first audio p50 | End of speech → first audio p50, 1 / 4 conversations | GPU peak |
 |---|---|---|---|---|---|
@@ -708,6 +708,7 @@ only within one box and config.
 | 2026-10-13 | `477c061`, no `smart`, voice `mira` with Ori's character, a new container on an RTX 5090 (this round's baseline) | 204 ms | 404–433 ms (3 runs) | 717–771 / 797–849 ms | 30.2 GB |
 | 2026-10-13 | the four characters (Mira's), same box | 276 ms (one sample) | 426–454 ms (3 runs) | 730 / 777–780 ms (one reply text again) | 30.2 GB |
 | 2026-10-13 | `94dc9e7`, EARS on `tyger-s2s` (now `tyger`; ep_thr 0.915, barge 0.5, bc 0.4), same box | — | 431–475 ms (3 runs) | 711 / 746 ms | 27.9 GB |
+| 2026-10-13 | `c4d73e3` (Mira shorter, tyger @ `cd826db`), no `smart`, in the Docker image on a new host: an RTX PRO 4500 Blackwell (32 GB, ECC on), 8 vCPUs; the box and Docker together | 436 ms (one sample) | 687–727 ms (3 runs) | 819 / 1150 ms | 27.2 GB |
 
 The voice changes the end-of-speech numbers: `load_ears.py` speaks its utterance in the default voice, and with the
 `ori` clip the endpoint comes ~100 ms sooner than on the last box. Since the characters, `load_ears.py`'s "count to
@@ -716,7 +717,12 @@ varies more. Run it with the default voice every time (the user, 2026-10-13), an
 character it's one text again, and the box of 2026-10-13 (driver 595.58, a 24-core Threadripper) gives ~100 ms less
 than the box before.
 
-"End of speech → first audio" is what the user hears as the response gap. About 600–850 ms of it is endpoint
+The RTX PRO 4500 (the last row) has about half the 5090's memory bandwidth, and its extra time is MOUTH's: endpoint
+→ first audio 315 / 563 ms p50 at 1 / 4 conversations, while detection (510 / 657 ms) and the hop lag (p50 24 / 56,
+p90 44 / 117 ms) stay near the 5090's. The box and Docker weren't told apart: no host run (the user's call; the host
+had no CUDA toolkit).
+
+"End of speech → first audio" is what the user hears as the response gap. About 500–850 ms of it is endpoint
 detection, which live tuning of the endpoint thresholds is meant to cut (O-01).
 
 **The two cards** (2026-10-10 and 2026-10-11, the stack without `smart`). With E4B the 5090 is the faster card:
@@ -786,7 +792,13 @@ The full measurements behind these tables are in git history: CHANGELOG.md and N
   The validators need it too.
 - **Disk.** The boxes so far had 100 GB. Delete a model you no longer use from `$HF_HOME/hub` with
   `huggingface_hub`'s `scan_cache_dir`, since repos share blobs.
-- **The box is itself a Docker container,** with no daemon, so `docker build` can't run there (O-02).
+- **Docker.** The boxes until 2026-10-12 were themselves containers, with no daemon. The box of 2026-10-13 was a
+  host with Docker and the NVIDIA runtime but no CUDA toolkit, so FlashInfer couldn't compile there: the GPU scripts
+  (routing, style, the local contract test) ran in one-off containers from the image, the repo mounted, with caches of
+  their own so the stack's volumes stayed cold for the timed first start:
+  `docker run --rm --gpus all --ipc=host --env-file <(grep '^HF_TOKEN=' .env) -v $PWD:/repo -w /repo -v <an HF cache>:/hf --entrypoint /app/.venv/bin/python tyger-v1 scripts/bench/escalation.py ...`.
+- **Compile caches.** `run.sh` keeps torch inductor's and the CUDA driver's JIT cache under `XDG_CACHE_HOME` (or
+  `~/.cache`), beside vLLM's and FlashInfer's; their defaults (`/tmp`, `~/.nv`) cost a new container ~3.5 min.
 - **A fresh clone lacks the repo-local git identity.** Set it from the earlier commits' author.
 - **A synthetic cut-in in the agent's own cloned voice never barges:** the heads take it for echo. Speak the user's
   lines in another voice.

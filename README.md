@@ -318,13 +318,14 @@ export async function POST() {
 
 ## Docker
 
-The image (`Dockerfile`) holds the code, the venv and your voice clips. The models and the compiled kernels stay
-outside it, in volumes. **It hasn't been built end to end yet** (the GPU boxes so far are themselves containers, with
-no Docker daemon: ISSUES.md O-02), so the first build is the test.
+The image (`Dockerfile`) holds the code, the venv and your voice clips, on CUDA 13.0's devel image: on the first
+start FlashInfer compiles kernels with its `nvcc`. The models and the compiled kernels stay outside it, in volumes.
+Built and run on 2026-10-13 (an RTX PRO 4500 Blackwell host, 8 vCPUs): the build takes ~5 minutes, and the image is
+8.4 GB to push and pull, ~17 GB unpacked.
 
-**The host:** an NVIDIA GPU like the stack's (an RTX 5090, 32 GB), a driver ≥ 590 (the image's torch is built for
-CUDA 13), Docker with the NVIDIA Container Toolkit (for `--gpus`), and ~40 GB of disk for the image (~10 GB) and the
-models (~25 GB).
+**The host:** an NVIDIA GPU like the stack's (an RTX 5090 or another 32 GB Blackwell card), a driver ≥ 590 (the
+image's torch is built for CUDA 13), Docker with the NVIDIA Container Toolkit (for `--gpus`), and ~60 GB of disk for
+the image (~17 GB) and its build cache, the models (~25 GB) and the compiled kernels.
 
 ```bash
 docker build -t tyger-v1 .     # voices/ must hold your clips: they go into the image
@@ -339,18 +340,21 @@ docker logs -f tyger           # ready at "EARS ready"
 - **`.env`** (see `.env.example`): `HF_TOKEN` for the private turn-taking model, and `OPENAI_API_KEY`, because the
   default config has `smart` and tasks on and MOUTH refuses to start without the key ("Without OpenAI" below). The
   API-mode settings can go there too: `TYGER_PAGES`, `TYGER_MAX_SESSION_S`, `TYGER_API_SECRET`.
-- **`--ipc=host`:** vLLM's processes pass data through shared memory, and Docker's default `/dev/shm` is 64 MB.
-  `--shm-size=8g` works too.
+- **`--ipc=host`** is optional: without it, on Docker's default 64 MB `/dev/shm`, the stack starts and passes the
+  smoke test, and uses ~12 KB of it (2026-10-13).
 - **`voices/`:** your clips (`mira.wav`, `aria.wav`, `kai.wav`, `rex.wav`, with any `.txt` transcripts) go into the
   image, from the build machine's `voices/`. Until voices come from a database, a new clip means a new build. **The
   clips are personal data, so the image is too: push it to a private registry only.** `.dockerignore` keeps `.env`
   and the local `.venv` out of the build.
 - **The volumes:** `/hf` holds the models, downloaded on the first start. `/root/.cache` and `/root/.triton` hold
-  the compiled kernels and the vLLM compile cache. Without them, every new container downloads and compiles again.
+  the compiled kernels: vLLM's, FlashInfer's, Triton's, torch inductor's and the CUDA driver's (`run.sh` puts the last
+  two there). Without them, every new container downloads and compiles again.
+- **The first start** took 11 min 20 s: the downloads (VoxCPM2 46 s, Gemma 1 min 42 s, the turn-taking bundle) and
+  the compiles (Gemma's ~80 s, VoxCPM2's warm-up ~3 min). A restart then takes ~1 min 45 s, a new container on the
+  same volumes ~2 minutes.
 - **`--restart unless-stopped`:** on a slow link, the first start's download can outlast `run.sh`'s 15-minute wait
-  for MOUTH, and the container exits (I-14). It then restarts, and the download goes on from the volume. Later
-  starts take ~2–3 minutes.
-- **Stopping:** `docker stop -t 30 tyger` gives MOUTH time to shut its engines down.
+  for MOUTH, and the container exits (I-14). It then restarts, and the download goes on from the volume.
+- **Stopping:** `docker stop -t 30 tyger` takes a second or so, and leaves nothing on the GPU.
 
 **API mode** (another app calls it, "API mode" above): put `TYGER_PAGES=false` and `TYGER_API_SECRET` in `.env`.
 The app's page is on HTTPS, so it needs `wss://`: put a TLS proxy in front, and publish the port to it only, e.g.
@@ -366,7 +370,8 @@ agent says it can't check live facts.
 your own config). It runs a few turns through MOUTH, a barge-in, and speech through EARS. It runs inside the
 container because MOUTH listens there only. With `smart` on, a turn could reach OpenAI. In API mode it signs its own
 token with the container's `TYGER_API_SECRET`, as your app's backend would, so it works with the secret set; so does
-`scripts/stack/load_ears.py`.
+`scripts/stack/load_ears.py`. On 2026-10-13 it passed on the default config (one turn went to OpenAI), without
+OpenAI, and in API mode.
 
 ## RunPod + Cloudflare
 
@@ -403,8 +408,8 @@ Give RunPod the registry's credentials (Settings → Container Registry Auth). W
 **3. The pod** (Pods → Deploy):
 - an RTX 5090 on Secure Cloud, on a host with CUDA 13 (the CUDA filter; a driver ≥ 590), in a region near your
   users: every turn crosses that distance;
-- your image; a container disk of ~30 GB (the image is ~10 GB) and a volume of ~60 GB at `/workspace` (the models,
-  ~25 GB, and the compiled kernels);
+- your image; a container disk of ~30 GB (the image is ~17 GB unpacked, 8.4 GB to pull) and a volume disk of
+  ~60 GB at `/workspace`, the pod's own (no network volume): the models, ~25 GB, and the compiled kernels;
 - **no exposed ports**: remove the template's defaults, the tunnel needs none;
 - these env vars, the secrets as RunPod secrets (Secrets; in the env as `{{ RUNPOD_SECRET_<name> }}`):
 
@@ -416,12 +421,13 @@ Give RunPod the registry's credentials (Settings → Container Registry Auth). W
 | `OPENAI_API_KEY` | for the default config's `smart` model (a secret); or `CONFIG=config/local.yaml` without it |
 | `TYGER_PAGES` | `false` |
 | `HF_HOME` | `/workspace/.hf_home`: the models, on the volume |
-| `XDG_CACHE_HOME` | `/workspace/.cache`: vLLM's compile cache |
+| `XDG_CACHE_HOME` | `/workspace/.cache`: vLLM's compile cache, and torch inductor's and the CUDA driver's kernels (`run.sh` puts them there) |
 | `FLASHINFER_WORKSPACE_BASE` | `/workspace`: FlashInfer's kernels |
 | `TRITON_CACHE_DIR` | `/workspace/.cache/triton`: Triton's kernels |
 
-The last four keep the models and the kernels on the volume, so a restart doesn't download or compile again. The
-first start takes ~10 minutes or more (the download and the compiles); later ones ~2–3 minutes.
+The last four keep the models and the kernels on the volume disk, so the pod's later starts don't download or
+compile again: ~2 minutes. A new pod starts cold, with the downloads and the compiles: 11 min 20 s on the test box
+(2026-10-13), longer on a slower link.
 
 **4. Check it.** The pod's logs show `run.sh`'s output: "EARS ready", then `cloudflared`'s "Registered tunnel
 connection". Then, from anywhere:
@@ -436,12 +442,13 @@ reach EARS: check the hostname's service URL. The smoke test runs from a shell i
 `cd /app && .venv/bin/python scripts/stack/smoke.py`. It signs its own token with the pod's `TYGER_API_SECRET`; a
 "refused the WebSocket: HTTP 401" means the shell doesn't have the server's secret.
 
-- **Shared memory:** Docker's `--ipc=host` has no RunPod equivalent. If MOUTH fails at start with a shared-memory
-  error, the pod's `/dev/shm` (`df -h /dev/shm`) is too small for vLLM.
+- **Shared memory:** Docker's `--ipc=host` has no RunPod equivalent, and the stack doesn't need it: on Docker's
+  default 64 MB `/dev/shm` it starts and passes the smoke test, using ~12 KB (2026-10-13). A pod's `/dev/shm` of
+  64 MB or more is enough (`df -h /dev/shm` in the pod's terminal).
 - **Logs:** keep `cloudflared` at its default log level. At `TUNNEL_LOGLEVEL=debug` it logs request URLs, and so the
   conversations' tokens.
-- **Stopping:** a stopped pod keeps its volume (and bills for it), but may not get its GPU back when the host is
-  full. A new pod then downloads and compiles again.
+- **Stopping:** a stopped pod keeps its volume disk (and bills for it), but may not get its GPU back when the host
+  is full. A new pod then downloads and compiles again.
 
 **5. Your app.** Copy `web/lib/tyger/` into it and point the client at the tunnel:
 `url: "wss://tyger.example.com/ws"` ("Using tyger from your own app"). The token route is the one shown there, with
@@ -584,17 +591,18 @@ for that data.
 ## Known limits (v1)
 
 - **Up to 4 conversations** per GPU (`server.max_sessions`); more visitors get a busy page. On a healthy 5090, 4
-  conversations keep EARS real time (hop lag p50 47–87 / p90 124–170 ms on two boxes).
+  conversations keep EARS real time (hop lag p50 56 / p90 117 ms on an RTX PRO 4500, 2026-10-13).
 - **A conversation ends after 3 minutes** by default (`TYGER_MAX_SESSION_S`, 0 for no limit).
 - **No per-user cap in the server:** whoever holds tokens (or reaches a server without a secret) can take all 4
   slots. Your app's backend decides who gets a token, and a Cloudflare rule limits how often one IP starts
   conversations ("RunPod + Cloudflare", step 6).
 - **English only:** every prompt asks for English, so the agent answers in English whatever language it hears.
 - `set_reminder` / `send_message` are **placeholders** — the model says they aren't connected yet.
-- The user waits **~0.8–1.0 s** from the end of their speech to the first reply audio at 1 conversation and
-  **~1.0–1.1 s** at 4 (two RTX 5090 boxes, `scripts/stack/load_ears.py`), and ~600–770 ms of that is endpoint
-  detection. Live threshold tuning should cut it (ISSUES.md, O-01). MOUTH's part is small: first audio ~175–235 ms
-  after the endpoint on a plain turn (smoke test, cloned voice), 400–520 ms p50 with 4 busy sessions.
+- The user waits **~0.7 s** from the end of their speech to the first reply audio at 1 conversation and **~0.75 s**
+  at 4 on an RTX 5090 (p50 711 / 746 ms, `scripts/stack/load_ears.py`), and ~0.8 / ~1.15 s on an RTX PRO 4500, a
+  card with half the 5090's memory bandwidth (819 / 1150 ms, in Docker). About 510–660 ms of it is endpoint
+  detection; live threshold tuning should cut it (ISSUES.md, O-01). MOUTH's part: first audio ~200–280 ms after the
+  endpoint on a plain turn on the 5090 (smoke test, cloned voice), ~440 ms on the PRO 4500; with 4 busy sessions,
+  430–475 and 690–730 ms p50.
 - Endpoint thresholds are not yet live-tuned (see Configure).
-- The `Dockerfile` has not yet been built and run end to end (the box used so far is itself a container, with no
-  Docker daemon). The non-Docker fresh-box path above has been run end to end on a clean box.
+- The Docker image has run on one host (an RTX PRO 4500, 2026-10-13), not yet on RunPod (ISSUES.md, O-02).

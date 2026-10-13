@@ -24,7 +24,7 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
 | L-01 | perf | lever | partly done | The encoder re-encodes the full 8 s window, twice, every hop |
 | L-02 | latency | lever | open | Decisions land on 320 ms hops |
 | O-01 | ops | — | needs the user | The endpoint thresholds were never tuned live |
-| O-02 | ops | — | blocked | The Dockerfile was never built |
+| O-02 | ops | — | partly done | The image is built and checked on one host; not run on RunPod yet |
 | O-03 | ops | — | needs the user | `main` is over 130 commits behind `plugins` |
 | O-05 | ops | — | partly done | No CI |
 | P | packaging | — | planned (parked) | The pip package `tyger-s2s` |
@@ -194,22 +194,20 @@ biggest risk to how the product feels.
   ≤ 450 ms (p90 ≤ 550), with no more endpoints inside utterances.
 - Afterwards, freeze the values into `config/default.yaml` and re-run `scripts/stack/load_ears.py`.
 
-### O-02 — The Dockerfile was never built (blocked)
-The GPU boxes so far are themselves Docker containers with no daemon, so nothing can be built there. The
-non-Docker fresh-box install has been run end to end. It needs a host with Docker and the NVIDIA runtime, and is
-best done after P, from the Dockerfile P leaves.
+### O-02 — The image is built and checked on one host; not run on RunPod yet (partly done)
+**Done (2026-10-13, an RTX PRO 4500 Blackwell host with Docker 29.8; README → "Docker"):** built from the final code,
+started cold and warm, smoke inside on the default config, without OpenAI and in API mode, the benchmarks without
+OpenAI, and API mode's checks (no pages, the token, the session limit, nothing secret in the log). The first build
+found three gaps, fixed in the image: no CUDA toolkit for FlashInfer's kernel builds (now on
+`nvidia/cuda:13.0.1-devel-ubuntu24.04`), OpenCV's X libraries, and `tzdata`. And `run.sh` now keeps torch inductor's
+and the CUDA driver's caches with the others, so a new container on warm volumes starts in ~2 min, not ~5.5.
+- **Shared memory:** without `--ipc=host`, on Docker's default 64 MB `/dev/shm`, the stack starts and passes smoke,
+  using ~12 KB. So a pod's `/dev/shm` of 64 MB or more is enough.
 
-The user plans to run the server in Docker, called from another Next.js app, and will build the image on their own
-side (2026-10-13). The API-mode settings (pages, session limit) and the token's secret are env vars
-for that reason (README → "API mode"); the Dockerfile's header shows them.
-
-The steps (README → "Docker"):
-1. Build the image, with the clips in `voices/` (they go into it).
-2. Run it with the GPU, `--ipc=host`, `.env` and the three volumes.
-3. Run the smoke test inside it: `docker exec tyger .venv/bin/python scripts/stack/smoke.py`.
-
-The target is a RunPod GPU Pod behind a Cloudflare Tunnel (README → "RunPod + Cloudflare", 2026-10-13), not run
-there yet either. Open on RunPod: whether the pod's `/dev/shm` is big enough for vLLM without `--ipc=host`.
+**Left: RunPod** (README → "RunPod + Cloudflare"): the user deploys. A pod with its own volume disk at `/workspace`,
+no network volume (the user, 2026-10-13): a new pod starts cold (~11 min on the test box), the same pod's later starts
+in ~2 min. Check there: `df -h /dev/shm` (64 MB or more), the logs to "EARS ready" and "Registered tunnel connection",
+`curl` on `/voices` (401), and smoke from the pod's terminal (it signs its own token).
 
 ### O-03 — `main` is over 130 commits behind `plugins` (needs the user)
 All work since 2026-10-02 is on `plugins`. `main` is an ancestor of it (a fast-forward), and `voxcpm2` and

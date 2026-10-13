@@ -37,8 +37,7 @@ Everything since the imported v1 baseline. It becomes the first release.
   (`TYGER_API_SECRET`).
 - **Docker instructions** (README → "Docker"): the run command with its volumes and shared memory, API mode, a
   config without OpenAI, the smoke test inside the container; and a `.dockerignore` that keeps `.env` out of the
-  build. The voice clips go into the image, so it goes to a private registry only. The image hasn't been built end
-  to end yet.
+  build. The voice clips go into the image, so it goes to a private registry only.
 - **A Cloudflare Tunnel from the container** (README → "RunPod + Cloudflare"): with `CLOUDFLARE_TUNNEL_TOKEN` set,
   `run.sh` starts `cloudflared` (in the image) once EARS is up, and Cloudflare serves your hostname over HTTPS and
   `wss`, with no open port. The README walks through RunPod, a Next.js app on Cloudflare Workers, and a Cloudflare
