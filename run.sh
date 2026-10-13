@@ -24,6 +24,12 @@ export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
 # with these the peak was 32 GiB (DEVELOPING.md -> "On the GPU box"). Anything already set wins.
 export MAX_JOBS="${MAX_JOBS:-4}" FLASHINFER_NVCC_THREADS="${FLASHINFER_NVCC_THREADS:-1}" \
        TORCHINDUCTOR_COMPILE_THREADS="${TORCHINDUCTOR_COMPILE_THREADS:-4}"
+# Two compile caches live outside the cache dir by default, so a new container starts without them: torch inductor's
+# kernels (VoxCPM2's; /tmp, ~3 min of TTS warmup again) and the CUDA driver's JIT cache (~/.nv, ~70 s). Keep them
+# with the other caches (Docker's volume; XDG_CACHE_HOME on RunPod's volume).
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}"
+export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-$CACHE/torchinductor}" \
+       CUDA_CACHE_PATH="${CUDA_CACHE_PATH:-$CACHE/nv-compute}"
 
 VENV="${VENV:-.venv}"
 PY="$VENV/bin/python"
