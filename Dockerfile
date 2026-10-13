@@ -1,20 +1,20 @@
 # tyger v1 — one GPU, up to 4 conversations, one venv (MOUTH: Gemma 4 E4B + VoxCPM2 on vLLM/vLLM-Omni; EARS:
-# nemotron + endpoint head). See README.md and DEVELOPING.md.
+# nemotron + endpoint head). How to build, run and check it: README.md -> "Docker".
 #
 # torch cu130 wheels bundle the CUDA 13 runtime, so a plain python base works on a host with an sm_120
-# (Blackwell / RTX 5090) GPU and a CUDA-13-capable driver (>=590). No weights are baked in: models download
-# on first start into the mounted HF cache.
+# (Blackwell / RTX 5090) GPU, a CUDA-13-capable driver (>=590) and the NVIDIA Container Toolkit. No weights or voice
+# clips are baked in: the models download on the first start into the /hf volume, and voices/ is mounted.
+# .dockerignore keeps the build context to what's copied below: never .env, voices/ or .venv.
 #
 # Build:  docker build -t tyger-v1 .
-# Run:    docker run --gpus all --rm -p 7860:7860 \
-#           --env-file .env \
-#           -e HF_HOME=/hf -v /workspace/.hf_home:/hf \
-#           -v "$PWD/voices":/app/voices:ro \
+# Run:    docker run -d --name tyger --restart unless-stopped --gpus all --ipc=host -p 7860:7860 \
+#           --env-file .env -v "$PWD/voices":/app/voices:ro \
+#           -v tyger-hf:/hf -v tyger-cache:/root/.cache -v tyger-triton:/root/.triton \
 #           tyger-v1
-#         then SSH-forward 7860 and open http://localhost:7860  (see README for HTTPS).
-# API mode, for another app (README -> "API mode"): no pages (none are built in this image anyway), a
-# conversation's length and the token's secret (without it, anyone can connect), all as env vars:
-#           -e TYGER_PAGES=false -e TYGER_MAX_SESSION_S=180 -e TYGER_API_SECRET=...
+#         .env: HF_TOKEN, OPENAI_API_KEY (the default config's smart model), and for API mode TYGER_API_SECRET
+#         and TYGER_PAGES=false. --ipc=host: vLLM's processes share memory. The volumes: the models and the
+#         compiled kernels, kept across containers. --restart: a slow first download can outlast run.sh's wait.
+# Check:  docker logs -f tyger (until "EARS ready"), then docker exec tyger .venv/bin/python scripts/stack/smoke.py
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -29,6 +29,7 @@ RUN uv venv /app/.venv --python 3.12 && \
 COPY app ./app
 COPY static ./static
 COPY config ./config
+COPY scripts/stack ./scripts/stack
 COPY run.sh stop.sh ./
 RUN chmod +x run.sh stop.sh
 

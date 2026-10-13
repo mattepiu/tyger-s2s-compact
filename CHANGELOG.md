@@ -35,6 +35,9 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **Conversations end after 3 minutes by default (configurable):** `TYGER_MAX_SESSION_S`, 0 for no limit.
 - **Your app's backend can hand the browser a short-lived token, so only your app can open a conversation**
   (`TYGER_API_SECRET`).
+- **Docker instructions** (README → "Docker"): the run command with its volumes and shared memory, API mode, a
+  config without OpenAI, the smoke test inside the container; and a `.dockerignore` that keeps `.env` and voice clips
+  out of the build. The image hasn't been built end to end yet.
 - **Tests that need no GPU,** and a check of the web page in jsdom.
 - **A routing test** (`scripts/bench/escalation.py`): 119 synthetic cases, no API cost.
 - **Measurement scripts:** smoke and load tests on the running stack, GPU parity checks, stack comparisons.

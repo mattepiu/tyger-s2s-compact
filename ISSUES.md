@@ -151,10 +151,10 @@ The user plans to run the server in Docker, called from another Next.js app, and
 side (2026-10-13). The API-mode settings (pages, session limit) and the token's secret are env vars
 for that reason (README → "API mode"); the Dockerfile's header shows them.
 
-The steps:
+The steps (README → "Docker"):
 1. Build the image.
-2. Run it with the mounts from the Dockerfile header.
-3. Run `scripts/stack/smoke.py` against it.
+2. Run it with the GPU, `--ipc=host`, `.env`, the voices mount and the three volumes.
+3. Run the smoke test inside it: `docker exec tyger .venv/bin/python scripts/stack/smoke.py`.
 
 ### O-03 — `main` is over 130 commits behind `plugins` (needs the user)
 All work since 2026-10-02 is on `plugins`. `main` is an ancestor of it (a fast-forward), and `voxcpm2` and

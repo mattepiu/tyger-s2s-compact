@@ -313,6 +313,54 @@ export async function POST() {
   `time_limit`; the socket closes next), `busy` and `error` (`mouth_lost`, `audio_too_fast`; the socket closes next),
   and a few more.
 
+## Docker
+
+The image (`Dockerfile`) holds the code and the venv. The models, the compiled kernels and your voice clips stay
+outside it, in volumes and a mount. **It hasn't been built end to end yet** (the GPU boxes so far are themselves
+containers, with no Docker daemon: ISSUES.md O-02), so the first build is the test.
+
+**The host:** an NVIDIA GPU like the stack's (an RTX 5090, 32 GB), a driver ≥ 590 (the image's torch is built for
+CUDA 13), Docker with the NVIDIA Container Toolkit (for `--gpus`), and ~40 GB of disk for the image (~10 GB) and the
+models (~25 GB).
+
+```bash
+docker build -t tyger-v1 .
+docker run -d --name tyger --restart unless-stopped \
+  --gpus all --ipc=host -p 7860:7860 \
+  --env-file .env \
+  -v "$PWD/voices":/app/voices:ro \
+  -v tyger-hf:/hf -v tyger-cache:/root/.cache -v tyger-triton:/root/.triton \
+  tyger-v1
+docker logs -f tyger           # ready at "EARS ready"
+```
+
+- **`.env`** (see `.env.example`): `HF_TOKEN` for the private heads release, and `OPENAI_API_KEY`, because the
+  default config has `smart` and tasks on and MOUTH refuses to start without the key ("Without OpenAI" below). The
+  API-mode settings can go there too: `TYGER_PAGES`, `TYGER_MAX_SESSION_S`, `TYGER_API_SECRET`.
+- **`--ipc=host`:** vLLM's processes pass data through shared memory, and Docker's default `/dev/shm` is 64 MB.
+  `--shm-size=8g` works too.
+- **`voices/`:** your clips (`mira.wav`, `aria.wav`, `kai.wav`, `rex.wav`), read-only. They never go into the image:
+  `.dockerignore` keeps them, `.env` and the local `.venv` out of the build.
+- **The volumes:** `/hf` holds the models, downloaded on the first start. `/root/.cache` and `/root/.triton` hold
+  the compiled kernels and the vLLM compile cache. Without them, every new container downloads and compiles again.
+- **`--restart unless-stopped`:** on a slow link, the first start's download can outlast `run.sh`'s 15-minute wait
+  for MOUTH, and the container exits (I-14). It then restarts, and the download goes on from the volume. Later
+  starts take ~2–3 minutes.
+- **Stopping:** `docker stop -t 30 tyger` gives MOUTH time to shut its engines down.
+
+**API mode** (another app calls it, "API mode" above): put `TYGER_PAGES=false` and `TYGER_API_SECRET` in `.env`.
+The app's page is on HTTPS, so it needs `wss://`: put a TLS proxy in front, and publish the port to it only, e.g.
+`-p 127.0.0.1:7860:7860` with Caddy on the host. With the pages on, the image serves the classic page at `/`: the
+new page's build needs Node, which the image doesn't have.
+
+**Without OpenAI:** mount a copy of `config/default.yaml` without `llm.smart` and `mouth.tasks`, and point `CONFIG`
+at it: `-v "$PWD/local.yaml":/app/config/local.yaml:ro -e CONFIG=config/local.yaml`. Then no key is needed, and the
+agent says it can't check live facts.
+
+**Check it:** `docker exec tyger .venv/bin/python scripts/stack/smoke.py` (add `--config config/local.yaml` with
+your own config). It runs a few turns through MOUTH, a barge-in, and speech through EARS. It runs inside the
+container because MOUTH listens there only. With `smart` on, a turn could reach OpenAI.
+
 ## Plugins
 
 The LLM, the TTS and the turn-taking model are **plugins chosen in `config/default.yaml`** (`app/plugins/`). Each
