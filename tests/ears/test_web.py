@@ -1,7 +1,7 @@
 """EarsApp's HTTP side, GPU-free, over a real aiohttp test server with the fake EARS plugin: the pages (the new page's
 build at /, its files, the classic page at /classic, the classic page at / until the new one is built), the busy
-page and the voice list; API mode (no pages), the allowed origins (403), the token (401), /voices's CORS headers,
-the WebSocket message cap, and no token in the logs. Tokens are signed here as another app's backend would
+page and the voice list; API mode (no pages), no origin check, the token (401), /voices's CORS headers, the
+WebSocket message cap, and no token in the logs. Tokens are signed here as another app's backend would
 (tests/fakes.py); the secret is made up.
 Run: .venv/bin/python tests/ears/test_web.py"""
 import os, sys, asyncio, copy, logging, tempfile, time
@@ -167,27 +167,21 @@ def test_api_mode_serves_no_pages():
         run(app(build=build, pages=False), fn)
 
 
-def test_allowed_origins_on_the_websocket():
+def test_no_origin_check():
+    """Any page connects, whatever its origin (the token, when there's a secret, is the check)."""
     async def fn(client):
-        own = f"http://{client.server.host}:{client.server.port}"
-        for origin, status in ((APP_ORIGIN, 101), ("https://eu.example.org", 101), ("https://a.b.example.org", 101),
-                               (None, 101), (own, 101),               # a script; the page EARS serves itself
-                               ("https://evil.example", 403), ("https://example.org", 403),
-                               ("http://app.example.com", 403), ("null", 403)):
-            assert await connects(client, origin=origin) == status, origin
-    run(app(allowed_origins=[APP_ORIGIN, "https://*.example.org"]), fn)
+        for origin in (APP_ORIGIN, "https://anywhere.example", "null", None):
+            assert await connects(client, origin=origin) == 101, origin
+    run(app(), fn)
 
 
 def test_voices_cors_headers():
+    """/voices answers CORS for any page (with a secret, a token too: test_tokens)."""
     async def fn(client):
-        r = await client.get("/voices", headers={"Origin": APP_ORIGIN})
-        assert r.status == 200 and r.headers["Access-Control-Allow-Origin"] == APP_ORIGIN
-        assert "Origin" in r.headers["Vary"]
-        r = await client.get("/voices")                                 # no Origin: no CORS header needed
-        assert r.status == 200 and "Access-Control-Allow-Origin" not in r.headers
-        r = await client.get("/voices", headers={"Origin": "https://evil.example"})
-        assert r.status == 403 and "Access-Control-Allow-Origin" not in r.headers
-    run(app(allowed_origins=[APP_ORIGIN]), fn)
+        for origin in (APP_ORIGIN, "https://anywhere.example"):
+            r = await client.get("/voices", headers={"Origin": origin})
+            assert r.status == 200 and r.headers["Access-Control-Allow-Origin"] == "*", origin
+    run(app(), fn)
 
 
 def test_message_size_cap():
@@ -217,16 +211,16 @@ def test_tokens():
         token = make_token(SECRET)
         assert (await client.get("/voices")).status == 401
         r = await client.get("/voices", params={"token": token}, headers={"Origin": APP_ORIGIN})
-        assert r.status == 200 and r.headers["Access-Control-Allow-Origin"] == APP_ORIGIN
+        assert r.status == 200 and r.headers["Access-Control-Allow-Origin"] == "*"
         assert await connects(client, f"/ws?token={token}", origin=APP_ORIGIN) == 101    # /voices didn't use it
         assert await connects(client, f"/ws?token={token}", origin=APP_ORIGIN) == 401    # used: one conversation
         for name, t in bad.items():
             assert await connects(client, "/ws" + (f"?token={t}" if t else ""), origin=APP_ORIGIN) == 401, name
         r = await client.get("/voices", params={"token": bad["expired"]}, headers={"Origin": APP_ORIGIN})
-        assert r.status == 401 and r.headers["Access-Control-Allow-Origin"] == APP_ORIGIN    # readable by the app
+        assert r.status == 401 and r.headers["Access-Control-Allow-Origin"] == "*"    # readable by the app
         assert await connects(client, f"/ws?token={make_token(SECRET, origin=APP_ORIGIN)}", origin=APP_ORIGIN) == 101
-        assert await connects(client, f"/ws?token={make_token(SECRET)}", origin="https://evil.example") == 403
-    run(app(secret=SECRET, allowed_origins=[APP_ORIGIN]), fn)
+        assert await connects(client, f"/ws?token={make_token(SECRET)}", origin="https://anywhere.example") == 101
+    run(app(secret=SECRET), fn)
 
 
 def test_no_secret_no_token_check():

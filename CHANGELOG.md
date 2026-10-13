@@ -32,7 +32,6 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **API mode: run the server without its pages** (`TYGER_PAGES=false`), for another app to call.
 - **A client for your own app** (`web/lib/tyger/`): one TypeScript file with no dependencies that captures the mic,
   plays the agent and talks to the server, as tyger's own page does.
-- **Allowed origins** (`TYGER_ALLOWED_ORIGINS`): only the pages of the sites you list can connect from a browser.
 - **Conversations end after 3 minutes by default (configurable):** `TYGER_MAX_SESSION_S`, 0 for no limit.
 - **Your app's backend can hand the browser a short-lived token, so only your app can open a conversation**
   (`TYGER_API_SECRET`).

@@ -182,30 +182,26 @@ the change.
 ## API mode
 
 To use tyger from another app (its own page, e.g. a Next.js app, calling this server), run it without its pages and
-let only that app in. Four settings, each in `config/default.yaml`'s `server:` block and as an env var, which wins
-over the file (Docker sets them when it starts the container). EARS logs the values it runs with at startup.
+let only that app in, with a token its backend hands out. Two settings are in `config/default.yaml`'s `server:` block
+and each has an env var, which wins over the file (Docker sets them when it starts the container); the token's secret
+is an env var only. EARS logs the values it runs with at startup.
 
 | Setting | Env var | Default | What it does |
 |---|---|---|---|
 | `server.pages` | `TYGER_PAGES` | `true` | `false`: no pages, only `/ws` and `/voices` (`/` and `/classic` are 404s), and `run.sh` builds nothing, so no Node is needed |
-| `server.allowed_origins` | `TYGER_ALLOWED_ORIGINS` (comma-separated) | `http://localhost:3000`, `http://127.0.0.1:3000` (`npm run dev`) | the other sites whose pages may connect, e.g. `https://app.example.com` or `https://*.example.com` (any subdomain, not the bare domain) |
 | `server.max_session_s` | `TYGER_MAX_SESSION_S` | `180` | a conversation's length in seconds; `0`: no limit |
 | — | `TYGER_API_SECRET` | unset | the token's secret; env only, never in the config file, never logged |
 
-For example: `TYGER_PAGES=false TYGER_ALLOWED_ORIGINS=https://app.example.com TYGER_API_SECRET=... ./run.sh`, or the
-same as `-e` options to `docker run`.
+For example: `TYGER_PAGES=false TYGER_API_SECRET=... ./run.sh`, or the same as `-e` options to `docker run`.
 
-**Allowed origins.** A browser sends its page's origin when it opens the WebSocket, and EARS refuses an origin that
-isn't allowed with a 403, before the upgrade. The pages EARS serves itself are always allowed (the same host as the
-request). A request with no `Origin` (a script, not a browser) passes. `/voices` sends CORS headers to the allowed
-origins. **This stops other websites' pages from using the server from a visitor's browser, but not a script, which
-can send any `Origin` it likes. The token is the real protection:** set `TYGER_API_SECRET` before the server is
-reachable from the internet.
+**The token is the only protection.** EARS doesn't check which site a page comes from: any page (and any script)
+can connect, and `/voices` answers CORS for any page. **Without `TYGER_API_SECRET`, anyone who can reach the port can
+open a conversation, so set the secret before the server is reachable from the internet.**
 
 **The token.** With `TYGER_API_SECRET` set, every conversation needs a token, made by your app's backend for a user it
 has signed in, and handed to the browser:
 - a JWT signed with HS256 and the same secret, carrying `aud: "tyger"`, `exp` at most 5 minutes ahead and a unique
-  `jti`; optionally `origin`, which must then match the page's origin exactly;
+  `jti`; optionally `origin`, which must then match the page's origin exactly (it ties a token to your app's page);
 - sent as `?token=…` on `/ws` (browsers can't set headers on a WebSocket). EARS never logs it, nor any query string;
 - one token opens one conversation (EARS remembers its `jti` until it expires); a refused one gets a 401 before the
   upgrade (bad signature, another algorithm or `none`, wrong audience, expired, `exp` too far ahead, origin mismatch,
@@ -275,8 +271,6 @@ context) breaks them, and barge-in then takes the agent's own echo for the user 
 
 **HTTPS.** Browsers give the mic only to pages on HTTPS (or localhost), and an HTTPS page can only open `wss://`, so
 put the server behind TLS too (e.g. Caddy: `tyger.example.com { reverse_proxy localhost:7860 }`).
-
-**Allow your app's origin** on the server: `TYGER_ALLOWED_ORIGINS=https://app.example.com`.
 
 **The token, from your backend.** A Next.js route handler that checks your app's own session, then signs a token with
 [`jose`](https://github.com/panva/jose) (`npm install jose`). The secret is a server-only env var with the same value

@@ -7,7 +7,7 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
   I-22 and I-23 left when the agent became English only: this file at `1b8e6ff`. O-06 (run.sh now limits the
   kernel compilers): this file at `9caeca9`. I-21 was dropped by the user on 2026-10-13: the voice reads digits and
   "°C" well. Its write-up: this file at `ce52f66`. I-11 (no auth, no limits on :7860) left on 2026-10-13 with API
-  mode: allowed origins, a token, the session limit and the size caps. Its write-up: this file at `17e88cd`.
+  mode: a token, the session limit and the size caps. Its write-up: this file at `17e88cd`.
 - Each issue says how sure it is: **confirmed** (in code or on the box), **likely**, or **hypothesis** (measure
   before fixing).
 
@@ -148,7 +148,7 @@ non-Docker fresh-box install has been run end to end. It needs a host with Docke
 best done after P, from the Dockerfile P leaves.
 
 The user plans to run the server in Docker, called from another Next.js app, and will build the image on their own
-side (2026-10-13). The API-mode settings (pages, allowed origins, session limit) and the token's secret are env vars
+side (2026-10-13). The API-mode settings (pages, session limit) and the token's secret are env vars
 for that reason (README → "API mode"); the Dockerfile's header shows them.
 
 The steps:
@@ -244,7 +244,7 @@ ordinary dependencies. There are no extras and no engine packages: tyger targets
 - **Publishing.** Don't upload anywhere, not even TestPyPI: the user publishes.
 - **Making the heads public.** That is the user's decision. While the release stays private, the package works only
   for HF accounts that have access, and `tyger check` must say so plainly.
-- **API mode** (allowed origins, the token, the limits: README → "API mode"). `serve` keeps them as they are, env
+- **API mode** (the token, the limits: README → "API mode"). `serve` keeps them as they are, env
   vars included.
 
 **Done when:**

@@ -1,13 +1,12 @@
-"""Who may open a conversation (app/ears/access.py), GPU-free: the origin check (this server's own, the allowed list,
-a wildcard subdomain, no Origin) and the token check (HS256 only, the signature, aud, exp and its 5-minute cap, the
-jti used once, the optional origin). Tokens are made here with the stdlib, as the other app's backend would make
+"""Who may open a conversation (app/ears/access.py), GPU-free: the token check (HS256 only, the signature, aud, exp
+and its 5-minute cap, the jti used once, the optional origin). Tokens are made here with the stdlib, as the other app's backend would make
 them with `jose` (tests/fakes.py). The secrets and claims are made up.
 Run: .venv/bin/python tests/ears/test_access.py"""
 import os, sys, json
 
 TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
-from app.ears.access import Origins, TokenRefused, Tokens  # noqa: E402
+from app.ears.access import TokenRefused, Tokens  # noqa: E402
 from fakes import b64url as b64, make_token as signed  # noqa: E402
 
 SECRET = "test-secret-not-a-real-one"
@@ -24,28 +23,6 @@ def refused(tokens, token, origin=None, use=True):
     except TokenRefused as e:
         return e.reason
     return None
-
-
-def test_origins():
-    o = Origins(["https://app.example.com", "https://*.example.org", "http://localhost:3000"])
-    host = "tyger.example.net"
-    for origin in ("https://app.example.com", "https://APP.example.com", "https://app.example.com:443",
-                   "https://a.example.org", "https://a.b.example.org", "http://localhost:3000", None,
-                   "https://tyger.example.net", "http://tyger.example.net"):      # the server's own, any scheme
-        assert o.allows(origin, host), origin
-    for origin in ("https://evil.example", "http://app.example.com", "https://app.example.com:8443",
-                   "https://example.org", "https://evilexample.org", "https://app.example.com.evil.example",
-                   "http://localhost:3001", "null", "https://tyger.example.net:8443", ""):
-        assert not o.allows(origin, host), origin
-
-
-def test_same_origin_by_host_header():
-    """The pages EARS serves: through an SSH tunnel (Host with its port) and behind an HTTPS proxy (no port)."""
-    assert Origins.same("http://localhost:7860", "localhost:7860")
-    assert Origins.same("https://tyger.example.com", "tyger.example.com")
-    assert not Origins.same("http://localhost:7861", "localhost:7860")
-    assert not Origins.same("http://evil.example", "localhost:7860")
-    assert not Origins.same("http://localhost:7860", None)
 
 
 def test_a_valid_token():

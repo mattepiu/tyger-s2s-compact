@@ -28,7 +28,7 @@ app/
   ears/                    # the EARS process (python -m app.ears)
     __main__.py            #   loads the plugin, runs the web app
     web.py                 #   EarsApp: the pages, the voice list, one Conversation per WebSocket
-    access.py              #   who may connect: the allowed origins, the token (a JWT, HS256), the request log
+    access.py              #   who may connect: the token (a JWT, HS256); the request log without query strings
     conversation.py        #   Conversation: the turn-taking state machine, the floor queue, the session limit
     playback.py            #   AgentPlayback: the reply as the page plays it, and the 2nd ear
   tools/
@@ -197,20 +197,16 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Using tyg
 ### EARS: who may connect, and for how long
 
 README → "API mode" has the settings; this is how they work.
-- **Settings.** `server.pages`, `server.allowed_origins` and `server.max_session_s` come from the config, and an env
-  var each (`TYGER_PAGES`, `TYGER_ALLOWED_ORIGINS`, `TYGER_MAX_SESSION_S`) wins over the file (`app/config.py`,
-  `server_env`). They are checked and defaulted with the rest of the config. The token's secret, `TYGER_API_SECRET`,
+- **Settings.** `server.pages` and `server.max_session_s` come from the config, and an env var each (`TYGER_PAGES`,
+  `TYGER_MAX_SESSION_S`) wins over the file (`app/config.py`, `server_env`). They are checked and defaulted with the rest of the config. The token's secret, `TYGER_API_SECRET`,
   is read from the env by EARS only, and never logged. EARS logs the settings it runs with at startup. `run.sh` asks
   `python -m app.config server.pages` whether to build the page.
-- **Before the upgrade** (`EarsApp.refused`, `app/ears/access.py`):
-  - **the origin:** a browser's `Origin` must be this server's own (the host and port of the request's `Host`
-    header, whatever the scheme: TLS may end at a proxy) or match `allowed_origins` (`*.` for any subdomain);
-    none (a script) passes; otherwise 403;
-  - **the token**, when the secret is set: a JWT, HS256 only, the signature compared in constant time before any
-    claim is read; `aud` "tyger", `exp` in the future and at most 5 minutes (+10 s of clock skew) ahead, a `jti`
-    not used before (`Tokens.used` holds each until its `exp`), and an optional `origin` equal to the request's;
-    otherwise 401 with the reason, which is logged (never the token).
-  - `/voices` runs the same checks without spending the `jti`, and sends CORS headers to an allowed origin.
+- **Before the upgrade** (`EarsApp.refused`, `app/ears/access.py`), when the secret is set, **the token**: a JWT,
+  HS256 only, the signature compared in constant time before any claim is read; `aud` "tyger", `exp` in the future
+  and at most 5 minutes (+10 s of clock skew) ahead, a `jti` not used before (`Tokens.used` holds each until its
+  `exp`), and an optional `origin` equal to the request's `Origin`; otherwise 401 with the reason, which is logged
+  (never the token). `/voices` runs the same check without spending the `jti`, and answers CORS for any page.
+- **No origin check** (the user, 2026-10-13: the token is enough). Without the secret, anyone can connect.
 - **The request log** (`AccessLog`) has the method, the path without its query string, the status and the time.
   aiohttp's default logs the whole request line, which would log the token.
 - **Limits on a conversation** (`Conversation`): a WebSocket message over 64 KB closes it (aiohttp's
@@ -589,9 +585,9 @@ own web search.
   tests/ears/test_conversation.py       halting, the held endpoint, the reset after a barge, MOUTH's D
   tests/ears/test_limits.py             the session limit (a reply finishes, then session_end), the mic buffer cap
   tests/ears/test_parts.py              AgentPlayback
-  tests/ears/test_web.py                the web app: the pages and their files, API mode, origins, tokens, CORS, the
-                                        message cap, no token in EARS's own log
-  tests/ears/test_access.py             the origin and token checks on their own
+  tests/ears/test_web.py                the web app: the pages and their files, API mode, no origin check, tokens,
+                                        CORS, the message cap, no token in EARS's own log
+  tests/ears/test_access.py             the token check on its own
   tests/ears/test_second_ear.py         the 2nd ear from the page's tags; the turn ends on the page's report
   tests/ears/test_asr_jobs.py           the ASR thread finishes its jobs, even on failure
   tests/ears/test_rules.py              the turn rules: endpoint, backchannel, barge-in

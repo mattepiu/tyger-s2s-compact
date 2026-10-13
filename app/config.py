@@ -4,7 +4,7 @@ vars too (SERVER_ENV), and the env var wins over the file.
 
 `python -m app.config [--config PATH] KEY` prints a setting's effective value (run.sh asks for server.pages)."""
 from __future__ import annotations
-import difflib, json, os, re
+import difflib, json, os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]   # the repo
@@ -45,12 +45,10 @@ class ConfigError(ValueError):
 
 # The `server:` settings an env var overrides, as Docker sets them when it starts the container: the env var wins over
 # the file, and an empty one counts as unset. TYGER_API_SECRET, the token's secret, is env only (app/ears/access.py).
-SERVER_ENV = {"pages": "TYGER_PAGES", "allowed_origins": "TYGER_ALLOWED_ORIGINS", "max_session_s": "TYGER_MAX_SESSION_S"}
-SERVER_DEFAULTS = {"pages": True,                                                   # serve the pages (false: API mode)
-                   "allowed_origins": ["http://localhost:3000", "http://127.0.0.1:3000"],   # npm run dev in web/
-                   "max_session_s": 180}                                            # 0: no limit
+SERVER_ENV = {"pages": "TYGER_PAGES", "max_session_s": "TYGER_MAX_SESSION_S"}
+SERVER_DEFAULTS = {"pages": True,                   # serve the pages (false: API mode)
+                   "max_session_s": 180}            # 0: no limit
 BOOLEANS = {"true": True, "1": True, "yes": True, "on": True, "false": False, "0": False, "no": False, "off": False}
-ORIGIN = re.compile(r"https?://(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*(:\d{1,5})?", re.I)   # a wildcard first label at most
 
 
 def server_env(cfg: dict) -> dict:
@@ -64,8 +62,6 @@ def server_env(cfg: dict) -> dict:
             if raw.lower() not in BOOLEANS:
                 raise ConfigError(f"{var}={raw} is not true or false")
             srv[key] = BOOLEANS[raw.lower()]
-        elif key == "allowed_origins":
-            srv[key] = [o.strip() for o in raw.split(",") if o.strip()]
         else:
             try:
                 srv[key] = float(raw)
@@ -75,18 +71,11 @@ def server_env(cfg: dict) -> dict:
 
 
 def _check_server(srv: dict):
-    """The server settings, defaults filled in: pages a boolean, every allowed origin a scheme and host (a `*.` first
-    label for any subdomain) with an optional port and no path, the session limit seconds (0: none)."""
+    """The server settings, defaults filled in: pages a boolean, the session limit seconds (0: none)."""
     for key, default in SERVER_DEFAULTS.items():
-        srv.setdefault(key, list(default) if isinstance(default, list) else default)
+        srv.setdefault(key, default)
     if not isinstance(srv["pages"], bool):
         raise ConfigError(f"`server.pages: {srv['pages']}` must be true or false ({SERVER_ENV['pages']})")
-    origins = srv["allowed_origins"]
-    bad = [o for o in origins if not (isinstance(o, str) and ORIGIN.fullmatch(o))] if isinstance(origins, list) \
-        else [origins]
-    if bad:
-        raise ConfigError(f"`server.allowed_origins` ({SERVER_ENV['allowed_origins']}): {bad[0]!r} is not an origin, "
-                          "e.g. https://app.example.com or https://*.example.com (scheme, host, optional port, no path)")
     limit = srv["max_session_s"]
     if isinstance(limit, bool) or not isinstance(limit, (int, float)) or limit < 0:
         raise ConfigError(f"`server.max_session_s: {limit}` must be seconds, 0 for no limit "

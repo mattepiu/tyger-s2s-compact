@@ -1,19 +1,15 @@
-"""Who may open a conversation, checked before the WebSocket upgrade (README -> "Using tyger from your own app").
+"""Who may open a conversation, checked before the WebSocket upgrade (README -> "API mode").
 
-  * Origins: a browser page's Origin must be this server's own (the pages EARS serves) or one of
-    server.allowed_origins; a request without an Origin (a script, not a browser) passes. This stops other websites'
-    pages from using the server from a visitor's browser, but not a script, which can send any Origin: the token is
-    the real protection.
   * Tokens: with TYGER_API_SECRET set, a short-lived JWT signed with HS256 by the other app's backend: `aud` "tyger",
     `exp` at most 5 minutes ahead, a `jti` that opens one conversation only, and an optional `origin` that must match
-    the request's. Only HS256 is accepted (`none` included, every other algorithm is refused), and the signature is
-    compared in constant time. The stdlib is enough.
+    the request's (it ties a token to the app's page). Only HS256 is accepted (`none` included, every other algorithm
+    is refused), and the signature is compared in constant time. The stdlib is enough. There is no origin check
+    otherwise: without the secret, anyone can connect.
   * AccessLog: the request log, without query strings (the token travels in one). The secret and the token are never
     logged.
 """
 from __future__ import annotations
 import base64, binascii, hashlib, hmac, json, os, re, time
-from urllib.parse import urlsplit
 
 from aiohttp.abc import AbstractAccessLogger
 
@@ -22,50 +18,10 @@ AUDIENCE = "tyger"
 MAX_AHEAD_S = 300            # a token's exp may be at most this far ahead
 SKEW_S = 10                  # the signer's clock may be this far ahead of EARS's (exp's cap, nbf)
 B64URL = re.compile(r"[A-Za-z0-9_-]*")
-DEFAULT_PORT = {"http": 80, "https": 443}
 
 
 def secret_from_env():
     return os.environ.get(SECRET_ENV, "").strip() or None
-
-
-def _parts(url):
-    """(scheme, host, port) of an origin or a Host header ("//" + host), the port filled in from the scheme."""
-    u = urlsplit(url.lower())
-    try:
-        port = u.port
-    except ValueError:                 # a port that isn't a number: matches nothing
-        return u.scheme, u.hostname, -1
-    return u.scheme, u.hostname, port
-
-
-class Origins:
-    def __init__(self, allowed):
-        self.allowed = [_parts(o) for o in allowed]
-
-    @staticmethod
-    def same(origin, host):
-        """`origin` is this server's own: the same host and port as the request's Host header, whatever the scheme
-        (TLS may end at a proxy, which passes the Host on)."""
-        scheme, oh, op = _parts(origin)
-        _, hh, hp = _parts("//" + (host or ""))
-        default = DEFAULT_PORT.get(scheme)
-        return oh is not None and oh == hh and (op or default) == (hp or default)
-
-    def allows(self, origin, host):
-        if origin is None:             # not a browser
-            return True
-        if self.same(origin, host):
-            return True
-        scheme, oh, op = _parts(origin)
-        if oh is None:                 # "null" (a sandboxed frame, a file) and anything that isn't an origin
-            return False
-        for s, h, p in self.allowed:
-            if s != scheme or (p or DEFAULT_PORT[s]) != (op or DEFAULT_PORT.get(scheme)):
-                continue
-            if h == oh or (h.startswith("*.") and oh.endswith(h[1:])):    # *.example.com: any subdomain, not the apex
-                return True
-        return False
 
 
 class TokenRefused(Exception):

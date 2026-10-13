@@ -220,8 +220,8 @@ ok(G._ws.url === "ws://localhost:7860/ws?token=t1", `the page's own /ws, a token
 fresh.stop(); await fresh.start(); await sleep(10);
 ok(G._ws.url.endsWith("?token=t2") && calls === 2, `the function is called at each start: ${G._ws.url}`);
 fresh.stop(); ev2.length = 0;
-await fresh.start(); G._ws.onopen = null; G._ws.onclose();     // refused before the upgrade (401 / 403): never opened
-ok(/refused this page/.test(ev2.at(-1)), `never opened, with a token: maybe refused: ${ev2.at(-1)}`);
+await fresh.start(); G._ws.onopen = null; G._ws.onclose();     // refused before the upgrade (401): never opened
+ok(/refused the token/.test(ev2.at(-1)), `never opened, with a token: maybe refused: ${ev2.at(-1)}`);
 const before = G._ws, errs = [];
 const broken = new TygerClient({ token: async () => { throw new Error("401 from /api/tyger-token"); }, on: { error: w => errs.push(w) } });
 await broken.start();

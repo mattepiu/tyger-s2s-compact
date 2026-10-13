@@ -10,11 +10,8 @@ server:
   mouth_port: 8770        # internal EARS<->MOUTH TCP (one connection per conversation)
   max_sessions: 4         # concurrent conversations; more visitors get the "busy" page
   # API mode and its limits (README -> "API mode"). Each has an env var, which wins over this file (Docker sets them).
-  # The token's secret, TYGER_API_SECRET, is env only: never put it here.
+  # The token's secret, TYGER_API_SECRET, is env only: never put it here. Without it, anyone can connect.
   pages: true             # TYGER_PAGES: serve the pages at / and /classic; false: /ws and /voices only
-  allowed_origins:        # TYGER_ALLOWED_ORIGINS (comma-separated): other sites whose pages may connect, e.g.
-    - http://localhost:3000      # https://app.example.com or https://*.example.com; the pages EARS serves itself
-    - http://127.0.0.1:3000      # are always allowed. These two: `npm run dev` in web/
   max_session_s: 180      # TYGER_MAX_SESSION_S: a conversation ends after this long; 0: no limit
 
 ears:                      # turn-taking: nemotron ASR + the tyger 1.0 heads (exp-12 arm C endpoint rule +

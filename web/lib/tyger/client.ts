@@ -147,8 +147,8 @@ export class TygerClient {
     ws.onopen = () => { opened = true; this.on.open?.() }
     ws.onclose = () => {
       if (this.ws !== ws) return                         // stopped here (stop() said so), or an older conversation's
-      const why = this.closeReason || (opened ? "The connection closed." : this.token || this.url
-        ? "Can't reach tyger, or it refused this page (its origin or its token)." : "Can't reach tyger.")
+      const why = this.closeReason || (opened ? "The connection closed." : this.token
+        ? "Can't reach tyger, or it refused the token." : "Can't reach tyger.")
       this.closeReason = ""; this.ws = null; this.stopAudio(); this.on.close?.(why)
     }
     ws.onmessage = (ev) => { if (ev.data instanceof ArrayBuffer) this.playChunk(ev.data); else this.onMessage(JSON.parse(ev.data)) }
