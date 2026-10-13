@@ -15,6 +15,8 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
 |---|---|---|---|---|
 | I-20 | smart | medium | open | The expert calls `get_current_time` before most answers; once an empty answer, once a "Dummy" reminder |
 | I-18 | EARS | medium | accepted for now | With a clean mic, an "mm-hm" in the agent's pause barges |
+| I-26 | tests | medium | open | Four of the EARS checks run only nemotron-tyger-1.0, not the default tyger-s2s |
+| I-27 | EARS | low | open | tyger-s2s: one slow tick (0.27–0.39 s) soon after start |
 | I-24 | tests | low | open | `test_barged_round.py` is timing-based and failed once under CPU load |
 | I-09 | EARS | low | check on the stack | A lost MOUTH ends the conversation on the fakes; not checked on the real stack |
 | I-14 | ops | low | open (P fixes it) | `run.sh` giving up on a slow first start orphans the LLM engine on the GPU |
@@ -65,6 +67,8 @@ answers, no action calls.
 
 ### I-18 — With a clean mic, an "mm-hm" in the agent's pause barges (medium, confirmed; accepted for now)
 **Where:** the yield head and the barge rule (`app/plugins/ears/nemotron_tyger/rules.py`, `barge_thr`).
+The numbers below are the tyger 1.0 heads'. tyger-s2s, the default since 2026-10-13, has its own yield head and
+hasn't been measured this way (I-26); the user found barge 0.4 better than its 0.5 default, live.
 
 **What happens** (`scripts/validate/second_ear.py --pairing tags`, 24 trials):
 - With the 2nd ear aligned and no echo in the mic (headphones, or echo cancellation that leaves nothing), a short
@@ -103,12 +107,31 @@ Each hop re-encodes ~25× the new audio, for both channels, in fp32.
 ### L-02 — Decisions land on 320 ms hops (lever)
 Endpoint and barge decisions land on hop boundaries, which adds ~160 ms on average to both. A 160 ms hop (2 frames)
 would halve that.
-- GPU time is there now: the encoder and the heads are each ~22% busy at 4 conversations.
+- GPU time is there now: the encoder was ~22% busy at 4 conversations, and tyger-s2s's GRU steps all 4 in ~0.5 ms a
+  frame (the tyger 1.0 heads were another ~22%).
 - Measure the hop lag at 4 conversations, and the detection delay, before and after.
 
 ---
 
 ## Tests and ops
+
+### I-26 — Four of the EARS checks run only nemotron-tyger-1.0 (medium, confirmed)
+`scripts/validate/barge.py`, `long_turn.py`, `second_ear.py` and `silent_wait.py` build the engine from
+`ears.heads` (the tyger 1.0 release), so they can't run the default plugin. tyger-s2s is covered by `ears_batched.py`
+(`--config`; the batched engine = the plain reference) and the contract test, and by the stack's checks. So I-18's
+echo and acknowledgement numbers, and I-16's silent wait, are unmeasured on its yield head.
+
+**Fix:** pick the engine from the config's plugin, as `ears_batched.py` does (`S2SEngine` for tyger-s2s), then run
+`second_ear.py --pairing tags` and `silent_wait.py` on it. `heads.py` checks the tyger 1.0 release only, by design.
+
+### I-27 — tyger-s2s: one slow tick soon after start (low, confirmed)
+One tick takes 0.27–0.39 s (the hop is 0.32 s), once: the first time the encoder meets a new shape at 4
+conversations (`ears_batched.py`: 267 ms at the first 4-session tick of that size; the stack's first-minute tick
+log: 394 ms; `load_ears.py --sessions 4` right after a restart: a 268 ms hop lag). It is the encoder, not the GRU,
+and not TF32 (the same with TF32 on). Every tick after it stays under ~100 ms. nemotron-tyger-1.0 didn't show it,
+likely because its head graphs left the allocator spare memory.
+
+**Fix option:** warm the encoder at start on the window lengths and batch sizes it will see.
 
 ### I-24 — `test_barged_round.py` is timing-based (low, confirmed)
 It failed once while vLLM was compiling on the same CPUs; it passes 3 / 3 on an idle box. Run the GPU-free tests on
@@ -134,12 +157,13 @@ isn't affected.
 As a stopgap, end the test's `__main__` with `os._exit(code)` after flushing.
 
 ### O-01 — The endpoint thresholds were never tuned live (needs the user)
-`ep_thr` 0.9146 and `ep_deb` 2 ship at the training defaults; offline thresholds ran ~2× high on a live mic.
-`barge_thr` was set to 0.4 live on 2026-10-10. It's the biggest risk to how the product feels.
+tyger-s2s ships `ep_thr` 0.915 (the user's pick, by the bundle's 0.91), `ep_deb` 2 and `bc_thr` 0.4, untuned
+live; `barge_thr` 0.4 is the user's live call (2026-10-13; also 0.4 for the tyger 1.0 heads, 2026-10-10). It's the
+biggest risk to how the product feels.
 - The user drives the mic with the page's sliders (shown unless `?nodebug`); a slider change is logged
   (`threshold <name> = <value>`).
-- Target: end of speech → endpoint from ~600–775 ms p50 to ≤ 450 ms (p90 ≤ 550), with no more endpoints inside
-  utterances.
+- Target: end of speech → endpoint from ~530 ms p50 (tyger-s2s, `load_ears.py`, 1 and 4 conversations) to
+  ≤ 450 ms (p90 ≤ 550), with no more endpoints inside utterances.
 - Afterwards, freeze the values into `config/default.yaml` and re-run `scripts/stack/load_ears.py`.
 
 ### O-02 — The Dockerfile was never built (blocked)
@@ -183,7 +207,9 @@ so the second command stays.
 
 **One package (user, 2026-10-10).** `tyger-s2s` is this repo: the core and every plugin, with vLLM and vLLM-Omni as
 ordinary dependencies. There are no extras and no engine packages: tyger targets vLLM on NVIDIA GPUs. The name
-`tyger` is taken on PyPI; `tyger-s2s` was free on 2026-10-10.
+`tyger` is taken on PyPI; `tyger-s2s` was free on 2026-10-10. Since 2026-10-13 the turn-taking bundle
+(`nineninesix/tyger-s2s`) and the default EARS plugin carry that name too: check with the user that the package
+should still be called `tyger-s2s`.
 - **Rename.** The import package is `tyger`.
   - Rename `app/` to `tyger/` with `git mv`, so history follows.
   - Make it its own commit, holding only the rename and the import fixes, so the user can review it alone.
@@ -214,8 +240,8 @@ ordinary dependencies. There are no extras and no engine packages: tyger targets
   - free GPU memory against the budget in DEVELOPING.md → "GPU memory";
   - a C compiler is present, for Triton and FlashInfer's kernel builds (the Dockerfile installs `build-essential`
     for this reason);
-  - Hugging Face access to the heads release. On a 401 or 404, say the release is private and `HF_TOKEN` needs
-    access to it;
+  - Hugging Face access to the turn-taking model (the tyger-s2s bundle). On a 401 or 404, say it is private and
+    `HF_TOKEN` needs access to it;
   - every key the config needs, e.g. `OPENAI_API_KEY` for `smart`.
 
   Each failure prints one line that names the fix. The fake config skips the GPU checks.
