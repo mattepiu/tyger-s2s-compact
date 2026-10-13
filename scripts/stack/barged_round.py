@@ -18,7 +18,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.config import load_config  # noqa: E402
 from scripts.stack.load_ears import speech_from_mouth, CHUNK  # noqa: E402
-from scripts.stack.page import PageSim  # noqa: E402
+from scripts.stack.page import PageSim, open_ws  # noqa: E402
 
 ASK = "If I save three hundred dollars every month for fifteen years at five percent interest, how much will I have?"
 CUT_IN = "Wait, sorry, quick one first: what is the capital of Australia?"
@@ -45,7 +45,7 @@ async def run(port, ask, cut_in, cut_in_after, timeout_s, barge_thr=None, turns=
     queue = [np.zeros(int(0.5 * 16000), np.float32), ask]
     state = {"phase": "ask", "audio_after_ask": False, "announce": False, "done": 0}
     async with aiohttp.ClientSession() as sess:
-        async with sess.ws_connect(f"http://127.0.0.1:{port}/ws", max_msg_size=0) as ws:
+        async with open_ws(sess, port) as ws:
             assert json.loads((await ws.receive()).data)["type"] == "ready"
             if barge_thr is not None:                       # the page's live-tuning command, this conversation only
                 await ws.send_str(f"set:barge_thr:{barge_thr}")

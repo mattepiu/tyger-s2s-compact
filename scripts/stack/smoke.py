@@ -7,6 +7,7 @@
               endpoint fires and reply audio returns (speech -> endpoint -> audio out). The speech is one fixed
               sentence spoken by the MOUTH's TTS (the S message: no LLM), held in memory (or --wav). A fixed
               sentence has no inner pause for the endpoint to fire at, whatever model wrote the earlier replies.
+              Against a server that checks tokens (API mode), it signs its own: TYGER_API_SECRET in the env or .env.
   (default) : run both. Requires `run.sh` (EARS + MOUTH) to be up for --ears; only MOUTH for --mouth.
 
 Run: HF_HOME=/workspace/.hf_home .venv/bin/python scripts/stack/smoke.py [--mouth|--ears] [--wav x.wav]
@@ -18,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 import numpy as np
 from app.wire import send_msg, recv_msg
 from app.config import load_config
-from scripts.stack.page import PageSim
+from scripts.stack.page import PageSim, open_ws
 
 
 def mouth_turn(sock, transcript, label, keep_audio=False):
@@ -164,9 +165,8 @@ def test_ears(cfg, speech16):
     async def run():
         x = np.concatenate([np.zeros(8000, np.float32), speech16,
                             np.zeros(16000 * 2, np.float32)])  # 2 s trailing silence -> endpoint
-        url = f"http://127.0.0.1:{port}/ws"
         async with aiohttp.ClientSession() as sess:
-            async with sess.ws_connect(url, max_msg_size=0) as ws:
+            async with open_ws(sess, port) as ws:
                 endpoint = False; audio = 0; t_first = t_done = None
                 barged = False
                 page = PageSim(ws)            # a simulated page: tags the mic, plays the reply, reports it played

@@ -364,7 +364,9 @@ agent says it can't check live facts.
 
 **Check it:** `docker exec tyger .venv/bin/python scripts/stack/smoke.py` (add `--config config/local.yaml` with
 your own config). It runs a few turns through MOUTH, a barge-in, and speech through EARS. It runs inside the
-container because MOUTH listens there only. With `smart` on, a turn could reach OpenAI.
+container because MOUTH listens there only. With `smart` on, a turn could reach OpenAI. In API mode it signs its own
+token with the container's `TYGER_API_SECRET`, as your app's backend would, so it works with the secret set; so does
+`scripts/stack/load_ears.py`.
 
 ## RunPod + Cloudflare
 
@@ -431,7 +433,8 @@ curl -s -o /dev/null -w '%{http_code}\n' https://tyger.example.com/voices
 `401`: EARS answered and wants a token, so the tunnel works. `530` (Cloudflare's error 1033): no tunnel yet, because
 the stack is still starting or the tunnel token is wrong (the logs say which). `502`: the tunnel is up but can't
 reach EARS: check the hostname's service URL. The smoke test runs from a shell in the pod (the web terminal):
-`cd /app && .venv/bin/python scripts/stack/smoke.py`.
+`cd /app && .venv/bin/python scripts/stack/smoke.py`. It signs its own token with the pod's `TYGER_API_SECRET`; a
+"refused the WebSocket: HTTP 401" means the shell doesn't have the server's secret.
 
 - **Shared memory:** Docker's `--ipc=host` has no RunPod equivalent. If MOUTH fails at start with a shared-memory
   error, the pod's `/dev/shm` (`df -h /dev/shm`) is too small for vLLM.

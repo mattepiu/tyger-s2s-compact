@@ -219,6 +219,10 @@ README → "API mode" has the settings; this is how they work.
   `exp`), and an optional `origin` equal to the request's `Origin`; otherwise 401 with the reason, which is logged
   (never the token). `/voices` runs the same check without spending the `jti`, and answers CORS for any page.
 - **No origin check** (the user, 2026-10-13: the token is enough). Without the secret, anyone can connect.
+- **The stack scripts sign their own token** (`scripts/stack/page.py`, `open_ws`), one per conversation, when
+  `TYGER_API_SECRET` is in their env or the repo's `.env`, as an app's backend would: HS256, `aud` "tyger", `exp` a
+  minute ahead, a fresh `jti`. So smoke and the load tests run against a server in API mode, the Docker image's
+  included. A refused handshake raises without the URL, which holds the token.
 - **The request log** (`AccessLog`) has the method, the path without its query string, the status and the time.
   aiohttp's default logs the whole request line, which would log the token.
 - **Limits on a conversation** (`Conversation`): a WebSocket message over 64 KB closes it (aiohttp's
@@ -602,8 +606,8 @@ own web search.
   tests/ears/test_limits.py             the session limit (a reply finishes, then session_end), the mic buffer cap
   tests/ears/test_parts.py              AgentPlayback
   tests/ears/test_web.py                the web app: the pages and their files, API mode, no origin check, tokens,
-                                        CORS, the message cap, no token in EARS's own log
-  tests/ears/test_access.py             the token check on its own
+                                        CORS, the message cap, no token in EARS's own log; the stack scripts' tokens
+  tests/ears/test_access.py             the token check on its own, and on the stack scripts' tokens
   tests/ears/test_second_ear.py         the 2nd ear from the page's tags; the turn ends on the page's report
   tests/ears/test_asr_jobs.py           the ASR thread finishes its jobs, even on failure
   tests/ears/test_rules.py              the turn rules: endpoint, backchannel, barge-in

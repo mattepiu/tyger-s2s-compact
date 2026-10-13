@@ -45,7 +45,8 @@ Everything since the imported v1 baseline. It becomes the first release.
   rule that limits how often one IP starts conversations.
 - **Tests that need no GPU,** and a check of the web page in jsdom.
 - **A routing test** (`scripts/bench/escalation.py`): 119 synthetic cases, no API cost.
-- **Measurement scripts:** smoke and load tests on the running stack, GPU parity checks, stack comparisons.
+- **Measurement scripts:** smoke and load tests on the running stack (with the API secret set, they sign their own
+  token), GPU parity checks, stack comparisons.
 - **An echo meter in the EARS log:** each reply's line says how much of the agent's voice is left in the mic.
 
 ### Changed

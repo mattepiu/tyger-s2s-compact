@@ -3,12 +3,48 @@ browser or audio devices. Reply audio "plays" on the wall clock as it arrives, b
 arrives when nothing is queued; `downlink_s` later still, for a slow network); each mic block is sent as 20 ms
 blocks tagged with the reply sample that was playing when the block was captured; when a reply's queue drains the
 page reports `played:<id>:<samples>`; a barge or an endpoint stops playback. Backchannel audio (id 0) plays but is
-never tagged."""
-import asyncio, time
+never tagged.
 
+`open_ws` opens the WebSocket as the page does. When the server checks tokens (TYGER_API_SECRET in this env too, or in
+the repo's .env, which load_config reads), each conversation gets its own token, signed as an app's backend signs one
+(README -> "API mode"). The secret, the tokens and the URLs that hold them are never printed."""
+import asyncio, base64, contextlib, hashlib, hmac, json, secrets, time
+
+from app.ears.access import AUDIENCE, secret_from_env
 from app.ears.playback import AUDIO_HEADER, BACKCHANNEL_ID, LEAD_IN_S, MIC_HEADER, to_pcm16
 
 BLOCK = 320                      # 20 ms at 16 kHz, as the page's worklet sends them
+TOKEN_TTL_S = 60                 # a token's exp, after it's signed (EARS takes up to 300 s)
+
+
+def _b64url(raw):
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def sign_token(secret, ttl_s=TOKEN_TTL_S):
+    """A token for one conversation: HS256, aud tyger, exp `ttl_s` ahead, a fresh jti. Never print it."""
+    now = int(time.time())
+    header = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    claims = _b64url(json.dumps({"aud": AUDIENCE, "iat": now, "exp": now + ttl_s,
+                                 "jti": secrets.token_hex(16)}).encode())
+    sig = hmac.new(secret.encode(), f"{header}.{claims}".encode("ascii"), hashlib.sha256).digest()
+    return f"{header}.{claims}.{_b64url(sig)}"
+
+
+@contextlib.asynccontextmanager
+async def open_ws(sess, port):
+    """EARS's WebSocket on this box (an aiohttp ClientSession's), with a token when the server checks them. A refused
+    handshake raises without the URL: aiohttp's error names it, token included."""
+    import aiohttp
+    secret = secret_from_env()
+    url = f"http://127.0.0.1:{port}/ws" + (f"?token={sign_token(secret)}" if secret else "")
+    try:
+        ws = await sess.ws_connect(url, max_msg_size=0)
+    except aiohttp.ClientResponseError as e:
+        hint = " (no token, or one EARS refused: is TYGER_API_SECRET the server's?)" if e.status == 401 else ""
+        raise RuntimeError(f"EARS refused the WebSocket: HTTP {e.status}{hint}") from None
+    async with ws:
+        yield ws
 
 
 class PageSim:

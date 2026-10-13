@@ -1,8 +1,8 @@
 """Who may open a conversation (app/ears/access.py), GPU-free: the token check (HS256 only, the signature, aud, exp
 and its 5-minute cap, the jti used once, the optional origin). Tokens are made here with the stdlib, as the other app's backend would make
-them with `jose` (tests/fakes.py). The secrets and claims are made up.
+them with `jose` (tests/fakes.py), and as the stack scripts make theirs. The secrets and claims are made up.
 Run: .venv/bin/python tests/ears/test_access.py"""
-import os, sys, json
+import os, sys, json, time
 
 TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
@@ -85,6 +85,17 @@ def test_one_token_one_conversation():
     now[0] = NOW + 121
     assert refused(t, make_token(jti="later", exp=now[0] + 60)) is None
     assert "once" not in t.used and refused(t, token) == "expired"
+
+
+def test_the_stack_scripts_tokens():
+    """scripts/stack signs a token per conversation (page.sign_token) that the check takes, on the real clock: a
+    fresh jti each time, so each conversation the scripts open is let in; exp a minute ahead."""
+    from scripts.stack.page import sign_token
+    t = Tokens(SECRET)
+    first, second = t.check(sign_token(SECRET), None, use=True), t.check(sign_token(SECRET), None, use=True)
+    assert first["jti"] != second["jti"] and first["aud"] == "tyger"
+    assert 0 < first["exp"] - time.time() <= 60
+    assert refused(Tokens(SECRET), sign_token("another-secret")) == "signature"
 
 
 if __name__ == "__main__":

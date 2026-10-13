@@ -25,7 +25,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.wire import send_msg, recv_msg
 from app.config import load_config
-from scripts.stack.page import PageSim
+from scripts.stack.page import PageSim, open_ws
 
 HOP = 5120          # 320 ms @ 16 kHz, the EARS hop
 CHUNK = 1600        # client sends 100 ms at a time, like the page
@@ -88,7 +88,7 @@ async def conversation(idx, port, speech, turns, start_delay, out, downlink_s=0.
     reply_txt = ""      # the reply text so far (compared by hash only, never printed)
     v_end = voiced_end(speech)
     async with aiohttp.ClientSession() as sess:
-        async with sess.ws_connect(f"http://127.0.0.1:{port}/ws", max_msg_size=0) as ws:
+        async with open_ws(sess, port) as ws:
             first = await ws.receive()
             if json.loads(first.data).get("type") == "busy":
                 res["busy"] = True; out[idx] = res; return

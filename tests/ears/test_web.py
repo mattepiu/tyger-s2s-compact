@@ -1,8 +1,8 @@
 """EarsApp's HTTP side, GPU-free, over a real aiohttp test server with the fake EARS plugin: the pages (the new page's
 build at /, its files, the classic page at /classic, the classic page at / until the new one is built), the busy
 page and the voice list; API mode (no pages), no origin check, the token (401), /voices's CORS headers, the
-WebSocket message cap, and no token in the logs. Tokens are signed here as another app's backend would
-(tests/fakes.py); the secret is made up.
+WebSocket message cap, no token in the logs, and the stack scripts' own tokens. Tokens are signed here as another
+app's backend would (tests/fakes.py); the secret is made up.
 Run: .venv/bin/python tests/ears/test_web.py"""
 import os, sys, asyncio, copy, logging, tempfile, time
 from pathlib import Path
@@ -240,6 +240,37 @@ def test_secret_from_the_env():
         run(app(secret=None), fn)
     finally:
         del os.environ["TYGER_API_SECRET"]
+
+
+def test_the_stack_scripts_sign_their_own_token():
+    """scripts/stack's open_ws against a server that checks tokens: with the server's secret in the scripts' env, each
+    conversation opens with a token of its own; with another secret or none, the 401 raises with neither the URL nor
+    the token, in its message or its traceback."""
+    import traceback
+    from aiohttp import ClientSession
+    from scripts.stack.page import open_ws
+
+    async def fn(client):
+        port = client.server.port
+        async with ClientSession() as http:
+            for _ in range(2):                                     # a reused token would be a 401
+                async with open_ws(http, port) as ws:
+                    assert (await ws.receive_json())["type"] == "ready"
+            for env in ("another-secret", None):
+                os.environ.pop("TYGER_API_SECRET", None)
+                if env:
+                    os.environ["TYGER_API_SECRET"] = env
+                try:
+                    async with open_ws(http, port):
+                        raise AssertionError(f"opened with {env!r}")
+                except RuntimeError as e:
+                    said = "".join(traceback.format_exception(e))
+                    assert "HTTP 401" in str(e) and "token=" not in said and "eyJ" not in said, said
+    os.environ["TYGER_API_SECRET"] = SECRET
+    try:
+        run(app(max_sessions=4, secret=SECRET), fn)
+    finally:
+        os.environ.pop("TYGER_API_SECRET", None)
 
 
 def test_no_token_in_the_logs():
