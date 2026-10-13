@@ -1,7 +1,10 @@
-"""Load config/default.yaml + the repo's .env and check its plugin shape. Secrets (HF_TOKEN, OPENAI_API_KEY) come from
-the env / .env and are never written to logs."""
+"""Load config/default.yaml + the repo's .env and check its plugin shape. Secrets (HF_TOKEN, OPENAI_API_KEY,
+TYGER_API_SECRET) come from the env / .env and are never written to logs. A few `server:` settings can be set by env
+vars too (SERVER_ENV), and the env var wins over the file.
+
+`python -m app.config [--config PATH] KEY` prints a setting's effective value (run.sh asks for server.pages)."""
 from __future__ import annotations
-import difflib, os
+import difflib, json, os, re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]   # the repo
@@ -38,6 +41,56 @@ def _expand(obj):
 
 class ConfigError(ValueError):
     pass
+
+
+# The `server:` settings an env var overrides, as Docker sets them when it starts the container: the env var wins over
+# the file, and an empty one counts as unset. TYGER_API_SECRET, the token's secret, is env only (app/ears/access.py).
+SERVER_ENV = {"pages": "TYGER_PAGES", "allowed_origins": "TYGER_ALLOWED_ORIGINS", "max_session_s": "TYGER_MAX_SESSION_S"}
+SERVER_DEFAULTS = {"pages": True,                                                   # serve the pages (false: API mode)
+                   "allowed_origins": ["http://localhost:3000", "http://127.0.0.1:3000"],   # npm run dev in web/
+                   "max_session_s": 180}                                            # 0: no limit
+BOOLEANS = {"true": True, "1": True, "yes": True, "on": True, "false": False, "0": False, "no": False, "off": False}
+ORIGIN = re.compile(r"https?://(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*(:\d{1,5})?", re.I)   # a wildcard first label at most
+
+
+def server_env(cfg: dict) -> dict:
+    """Set cfg's `server:` keys from the env vars in SERVER_ENV that are set."""
+    srv = cfg.setdefault("server", {})
+    for key, var in SERVER_ENV.items():
+        raw = os.environ.get(var, "").strip()
+        if not raw:
+            continue
+        if key == "pages":
+            if raw.lower() not in BOOLEANS:
+                raise ConfigError(f"{var}={raw} is not true or false")
+            srv[key] = BOOLEANS[raw.lower()]
+        elif key == "allowed_origins":
+            srv[key] = [o.strip() for o in raw.split(",") if o.strip()]
+        else:
+            try:
+                srv[key] = float(raw)
+            except ValueError:
+                raise ConfigError(f"{var}={raw} is not a number of seconds") from None
+    return cfg
+
+
+def _check_server(srv: dict):
+    """The server settings, defaults filled in: pages a boolean, every allowed origin a scheme and host (a `*.` first
+    label for any subdomain) with an optional port and no path, the session limit seconds (0: none)."""
+    for key, default in SERVER_DEFAULTS.items():
+        srv.setdefault(key, list(default) if isinstance(default, list) else default)
+    if not isinstance(srv["pages"], bool):
+        raise ConfigError(f"`server.pages: {srv['pages']}` must be true or false ({SERVER_ENV['pages']})")
+    origins = srv["allowed_origins"]
+    bad = [o for o in origins if not (isinstance(o, str) and ORIGIN.fullmatch(o))] if isinstance(origins, list) \
+        else [origins]
+    if bad:
+        raise ConfigError(f"`server.allowed_origins` ({SERVER_ENV['allowed_origins']}): {bad[0]!r} is not an origin, "
+                          "e.g. https://app.example.com or https://*.example.com (scheme, host, optional port, no path)")
+    limit = srv["max_session_s"]
+    if isinstance(limit, bool) or not isinstance(limit, (int, float)) or limit < 0:
+        raise ConfigError(f"`server.max_session_s: {limit}` must be seconds, 0 for no limit "
+                          f"({SERVER_ENV['max_session_s']})")
 
 
 # reply: ordinary turns + the tool phase-B answer; filler: backchannels, tool lead-ins, still-looking lines (short,
@@ -101,6 +154,7 @@ def validate_config(cfg: dict) -> dict:
             seen[name] = role
     _check_block(REGISTRY, "tts", "tts", cfg.get("tts"))
     _check_mouth(cfg.get("mouth") or {})
+    _check_server(cfg.setdefault("server", {}))
     _check_block(REGISTRY, "ears", "ears", cfg.get("ears"))
     return cfg
 
@@ -149,7 +203,7 @@ def load_config(path: str | None = None) -> dict:
     p = Path(path) if path else DEFAULT
     load_env()                       # so ${HF_HOME} etc. are set before expansion
     os.environ.setdefault("HF_HOME", "/workspace/.hf_home")
-    return validate_config(_expand(yaml.safe_load(p.read_text())))
+    return validate_config(server_env(_expand(yaml.safe_load(p.read_text()))))
 
 
 def repo_path(p: str | None) -> Path | None:
@@ -158,3 +212,19 @@ def repo_path(p: str | None) -> Path | None:
         return None
     q = Path(p)
     return q if q.is_absolute() else ROOT / q
+
+
+def main():
+    import argparse
+    ap = argparse.ArgumentParser(description="a setting's effective value (the env vars included), as JSON")
+    ap.add_argument("--config", default=None)
+    ap.add_argument("key", help="e.g. server.pages")
+    a = ap.parse_args()
+    value = load_config(a.config)
+    for k in a.key.split("."):
+        value = value[k]
+    print(json.dumps(value))
+
+
+if __name__ == "__main__":
+    main()

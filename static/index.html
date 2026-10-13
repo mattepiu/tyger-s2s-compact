@@ -243,9 +243,12 @@ function addLinks(links){ if(!replyDiv) return;
 function onEvent(ev){
   const m=JSON.parse(ev.data);
   if(m.type==='busy'){ setStatus('busy — someone else is talking; try again shortly',false); return; }
-  if(m.type==='error'){ closeReason='the agent went away — press Start to reconnect'; return; }  // e.g. MOUTH restarted
+  if(m.type==='error'){ closeReason=m.error==='audio_too_fast' ? 'closed: the mic audio came faster than real time'
+      : 'the agent went away — press Start to reconnect'; return; }                                // e.g. MOUTH restarted
+  if(m.type==='session_end'){ closeReason=m.reason==='time_limit' ? "Time's up — start again" : 'the conversation ended';
+      return; }                                                          // the session limit: EARS closes next
   if(m.type==='ready'){ $('rt').textContent=`hop ${m.hop_ms}ms · ${m.sr/1000}kHz${m.mouth?' · mouth ✓':' · ears-only'}`+
-      (ctx?` · audio latency ${Math.round(1000*latency())}ms`:'');
+      (ctx?` · audio latency ${Math.round(1000*latency())}ms`:'')+(m.max_session_s?` · ends after ${m.max_session_s}s`:'');
     // always send the picked voice at session start: the MOUTH keeps its voice across sessions, so comparing
     // against EARS's config default (m.voice) could leave it on a stale voice while the picker shows another
     if(m.voices && m.voices.length){ populateVoices(m.voices, m.voice, m.labels);

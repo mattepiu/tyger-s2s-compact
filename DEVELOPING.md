@@ -28,7 +28,8 @@ app/
   ears/                    # the EARS process (python -m app.ears)
     __main__.py            #   loads the plugin, runs the web app
     web.py                 #   EarsApp: the pages, the voice list, one Conversation per WebSocket
-    conversation.py        #   Conversation: the turn-taking state machine and the floor queue
+    access.py              #   who may connect: the allowed origins, the token (a JWT, HS256), the request log
+    conversation.py        #   Conversation: the turn-taking state machine, the floor queue, the session limit
     playback.py            #   AgentPlayback: the reply as the page plays it, and the 2nd ear
   tools/
     registry.py            #   Tool, @tool / @agent_tool, build_tools, execute_tool
@@ -79,8 +80,9 @@ tests/                     # GPU-free: ears/, mouth/, plugins/, the config / pro
 static/index.html          # the classic page (/classic): mic capture (AudioWorklet), playback, the tags, the sliders
 web/                       # the page (/), Next.js, exported to static files in web/out/ (`npm run build`; run.sh
                            #   builds it when it's missing or stale), which EARS serves:
-                           #   lib/conversation.ts = the page's audio + WebSocket code, lib/talk.ts = what it shows
-                           #   (the phases), lib/tuning.ts = the live tuning (its panel: components/tuning.tsx),
+                           #   lib/tyger/client.ts = tyger's client (the audio + WebSocket code, one file with no
+                           #   imports, which other apps copy too), lib/talk.ts = what the page shows (the phases),
+                           #   lib/tuning.ts = the live tuning (its panel: components/tuning.tsx),
                            #   components/orb.tsx = the orb; OrbKit's files as copied from the Agents Kit registry
                            #   (orbkit-shdr-13, with their licence) in components/voice-agents/orbkit/;
                            #   `npm run dev` on :3000 for work on the page, passing /ws, /voices, /classic to EARS
@@ -91,8 +93,8 @@ run.sh, stop.sh            # start and stop the stack
 
 ### Two processes
 
-- **EARS** (`app/ears`) serves the pages (the page's static build at `/`, the classic page at `/classic`), the voice
-  list and the WebSocket on :7860, and runs the turn-taking plugin for every conversation (up to
+- **EARS** (`app/ears`) serves the pages (the page's static build at `/`, the classic page at `/classic`; none in API
+  mode), the voice list and the WebSocket on :7860, and runs the turn-taking plugin for every conversation (up to
   `server.max_sessions`, batched on one GPU thread).
 - **MOUTH** (`app/mouth`) runs the conversation: the LLM roles, the tools and the TTS. Its models are in-process:
   the LLM on a vLLM `AsyncLLM`, VoxCPM2 on a vLLM-Omni `AsyncOmni`, both on one asyncio loop (`EngineLoop`). There is
@@ -114,7 +116,7 @@ text side, by the chunker.
 ### The wire between EARS and MOUTH
 
 A frame is 1 kind byte, a 4-byte big-endian length, then the payload (`app/wire.py`). Control payloads are JSON;
-audio is float32 at 24 kHz. The page's own WebSocket is in README → "Run & reach it".
+audio is float32 at 24 kHz. The page's own WebSocket is in README → "Using tyger from your own app" (the protocol).
 
 | kind | from → to | carries |
 |---|---|---|
@@ -191,6 +193,32 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Run & rea
   The log line `2nd ear by arrival order +X ms ahead` still reports that offset, as a diagnostic only.
 - **Known limit (I-18).** With no echo in the mic, as with headphones, an "mm-hm" in a pause between the agent's
   sentences barges.
+
+### EARS: who may connect, and for how long
+
+README → "API mode" has the settings; this is how they work.
+- **Settings.** `server.pages`, `server.allowed_origins` and `server.max_session_s` come from the config, and an env
+  var each (`TYGER_PAGES`, `TYGER_ALLOWED_ORIGINS`, `TYGER_MAX_SESSION_S`) wins over the file (`app/config.py`,
+  `server_env`). They are checked and defaulted with the rest of the config. The token's secret, `TYGER_API_SECRET`,
+  is read from the env by EARS only, and never logged. EARS logs the settings it runs with at startup. `run.sh` asks
+  `python -m app.config server.pages` whether to build the page.
+- **Before the upgrade** (`EarsApp.refused`, `app/ears/access.py`):
+  - **the origin:** a browser's `Origin` must be this server's own (the host and port of the request's `Host`
+    header, whatever the scheme: TLS may end at a proxy) or match `allowed_origins` (`*.` for any subdomain);
+    none (a script) passes; otherwise 403;
+  - **the token**, when the secret is set: a JWT, HS256 only, the signature compared in constant time before any
+    claim is read; `aud` "tyger", `exp` in the future and at most 5 minutes (+10 s of clock skew) ahead, a `jti`
+    not used before (`Tokens.used` holds each until its `exp`), and an optional `origin` equal to the request's;
+    otherwise 401 with the reason, which is logged (never the token).
+  - `/voices` runs the same checks without spending the `jti`, and sends CORS headers to an allowed origin.
+- **The request log** (`AccessLog`) has the method, the path without its query string, the status and the time.
+  aiohttp's default logs the whole request line, which would log the token.
+- **Limits on a conversation** (`Conversation`): a WebSocket message over 64 KB closes it (aiohttp's
+  `max_msg_size`, close code 1009); mic audio more than `MAX_MIC_BUFFER_S` (5 s) ahead of the hops closes it with
+  `error: audio_too_fast`; at `max_session_s` (`ready` carries it) nothing new starts (no turn, backchannel or
+  announcement, and a turn held during a halt is dropped), a reply in progress may finish within `REPLY_GRACE_S`
+  (10 s), then `session_end` and the close. Closing the connection to MOUTH ends MOUTH's session, which cancels its
+  background tasks.
 
 ### MOUTH: one conversation
 
@@ -521,7 +549,8 @@ own web search.
     printing words.
 - **Voice clips, and anything derived from them, are personal data.** They stay in gitignored `voices/`, and are
   never committed, uploaded or sent to a hosted service.
-- **Secrets** (`HF_TOKEN`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) live in `.env` only. Never print them, and don't
+- **Secrets** (`HF_TOKEN`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TYGER_API_SECRET`) live in `.env` (or the
+  container's env) only. Never print them, and don't
   leave copies of `.env` around, e.g. in a scratch git worktree.
 - **Hosted runs.** A live run against a hosted model (`smart`, or any remote role) needs the user's OK each time.
 - **The heads release is private.** This is a serving project only: no training code.
@@ -557,8 +586,11 @@ own web search.
   tests/mouth/test_chunker.py           text chunking
   tests/ears/test_floor.py              floor requests on the Conversation state machine
   tests/ears/test_conversation.py       halting, the held endpoint, the reset after a barge, MOUTH's D
+  tests/ears/test_limits.py             the session limit (a reply finishes, then session_end), the mic buffer cap
   tests/ears/test_parts.py              AgentPlayback
-  tests/ears/test_web.py                the web app: the pages and their files, the busy page, voices
+  tests/ears/test_web.py                the web app: the pages and their files, API mode, origins, tokens, CORS, the
+                                        message cap, no token in EARS's own log
+  tests/ears/test_access.py             the origin and token checks on their own
   tests/ears/test_second_ear.py         the 2nd ear from the page's tags; the turn ends on the page's report
   tests/ears/test_asr_jobs.py           the ASR thread finishes its jobs, even on failure
   tests/ears/test_rules.py              the turn rules: endpoint, backchannel, barge-in
@@ -571,11 +603,13 @@ own web search.
   tests/plugins/test_hosted_anthropic.py          anthropic on stubbed streams
   ```
 - **The page's own check** (node ≥ 18): `cd tests/page && npm install && node page_check.mjs`. It covers the mic
-  worklet, the tags, the int16 frames, the played report, Stop → Start, the voice picker and a reply's links.
+  worklet, the tags, the int16 frames, the played report, Stop → Start, the voice picker, a reply's links and the
+  session's end.
 - **The new page's own check** (node ≥ 22.18, nothing to install): `node tests/page/web_check.mjs`. It runs the same
-  cases on `web/lib/conversation.ts`, then the phases the page shows (`web/lib/talk.ts`), a reply's links and the
-  live tuning (`web/lib/tuning.ts`). After
-  a change in `web/`, also run `cd web && npx tsc --noEmit && npm run build`.
+  cases on tyger's client (`web/lib/tyger/client.ts`), then what other apps use (no imports, the URL and token
+  options, the typed events, the voice, `session_end`), the phases the page shows (`web/lib/talk.ts`), a reply's
+  links and the live tuning (`web/lib/tuning.ts`). After a change in `web/`, also run
+  `cd web && npx tsc --noEmit && npm run build`.
 - **The whole stack on the fakes:** `CONFIG=config/fake.yaml ./run.sh`, no GPU and no downloads.
 - **GPU checks, with the stack stopped:**
   - `TYGER_CONTRACT_LOCAL=1 .venv/bin/python tests/plugins/test_contract.py`. It aborts at exit after passing (I-15).

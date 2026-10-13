@@ -1,6 +1,8 @@
 """Plugin config shape and loader (no GPU): the repo config loads, the pre-plugin shape is rejected with the keys
-that replace it, roles resolve. Run: .venv/bin/python tests/test_config.py"""
-import copy, os, sys
+that replace it, roles resolve; the server settings, their env vars (which win over the file) and their checks.
+Run: .venv/bin/python tests/test_config.py"""
+import copy, os, subprocess, sys
+from contextlib import contextmanager
 
 TESTS = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
@@ -166,6 +168,75 @@ def test_env_only_from_the_repo_or_the_path_given():
         finally:
             for k in keys:
                 os.environ.pop(k, None)
+
+
+SERVER_VARS = ("TYGER_PAGES", "TYGER_ALLOWED_ORIGINS", "TYGER_MAX_SESSION_S")
+
+
+@contextmanager
+def env(**values):
+    """The server's env vars as given, the others unset, for the block."""
+    old = {k: os.environ.get(k) for k in SERVER_VARS}
+    for k in SERVER_VARS:
+        os.environ.pop(k, None)
+    os.environ.update(values)
+    try:
+        yield
+    finally:
+        for k, v in old.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+
+
+def test_server_settings_from_the_file_or_the_defaults():
+    with env():
+        srv, fake = load_config()["server"], load_config(str(ROOT / "config/fake.yaml"))["server"]
+    dev = ["http://localhost:3000", "http://127.0.0.1:3000"]              # npm run dev in web/
+    assert (srv["pages"], srv["allowed_origins"], srv["max_session_s"]) == (True, dev, 180)
+    assert (fake["pages"], fake["allowed_origins"], fake["max_session_s"]) == (True, dev, 180)   # not in the file
+
+
+def test_env_vars_beat_the_file():
+    with env(TYGER_PAGES="false", TYGER_ALLOWED_ORIGINS=" https://app.example.com, https://*.example.org ,",
+             TYGER_MAX_SESSION_S="2.5"):
+        srv = load_config()["server"]
+    assert srv["pages"] is False and srv["max_session_s"] == 2.5
+    assert srv["allowed_origins"] == ["https://app.example.com", "https://*.example.org"]
+    for word, value in (("OFF", False), ("0", False), ("no", False), ("1", True), ("yes", True), ("on", True)):
+        with env(TYGER_PAGES=word):
+            assert load_config()["server"]["pages"] is value, word
+    with env(TYGER_PAGES="", TYGER_MAX_SESSION_S="0", TYGER_ALLOWED_ORIGINS=" "):   # empty: unset; 0: no limit
+        srv = load_config()["server"]
+    assert srv["pages"] is True and srv["max_session_s"] == 0 and srv["allowed_origins"][0] == "http://localhost:3000"
+    for var, value, needle in (("TYGER_PAGES", "maybe", "TYGER_PAGES=maybe"),
+                               ("TYGER_MAX_SESSION_S", "three minutes", "TYGER_MAX_SESSION_S"),
+                               ("TYGER_MAX_SESSION_S", "-1", "TYGER_MAX_SESSION_S"),
+                               ("TYGER_ALLOWED_ORIGINS", "https://app.example.com/", "TYGER_ALLOWED_ORIGINS")):
+        with env(**{var: value}):
+            try:
+                load_config()
+            except ConfigError as e:
+                assert needle in str(e), str(e)
+            else:
+                raise AssertionError(f"accepted {var}={value}")
+    out = subprocess.run([sys.executable, "-m", "app.config", "server.pages"], cwd=ROOT, capture_output=True,
+                         text=True, env={**os.environ, "TYGER_PAGES": "off"}).stdout
+    assert out.strip() == "false", out                                     # what run.sh asks
+
+
+def test_server_settings_checked():
+    for key, value, needle in (("pages", "yes", "`server.pages: yes`"), ("max_session_s", -5, "`server.max_session_s"),
+                               ("max_session_s", True, "`server.max_session_s"),
+                               ("allowed_origins", "https://app.example.com", "server.allowed_origins"),
+                               ("allowed_origins", ["https://app.example.com/path"], "/path"),
+                               ("allowed_origins", ["app.example.com"], "app.example.com"),
+                               ("allowed_origins", ["https://*"], "https://*"),
+                               ("allowed_origins", ["https://a.*.example.com"], "a.*")):
+        cfg = copy.deepcopy(BASE); cfg["server"][key] = value
+        rejects(cfg, needle)
+    cfg = copy.deepcopy(BASE); cfg["server"]["allowed_origins"] = ["http://localhost:8080", "https://*.example.com"]
+    validate_config(cfg)
 
 
 def test_registry_unknown_name():

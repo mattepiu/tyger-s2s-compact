@@ -18,6 +18,12 @@ held, no backchannel is playing, and the user has been quiet for mouth.tasks.ann
 `idle` frames). A user endpoint always wins: it starts a reply turn first and the request waits. On a grant the
 agent speaks exactly as for a reply.
 
+The session limit (server.max_session_s, 0 for none; `ready` carries it): once it passes, no new user turn, backchannel
+or announcement starts; a reply in progress may finish, for REPLY_GRACE_S at most; then the page gets
+{"type": "session_end", "reason": "time_limit"} and the socket closes, which ends the conversation like any other end
+(MOUTH cancels its background tasks when the connection closes). Mic audio that piles up past MAX_MIC_BUFFER_S ahead
+of the hops (a client sending faster than real time) closes the connection too.
+
 PRIVACY: no audio or transcript is written to disk or logs; only timings and event types. The page gets the user's
 own transcript back (as it grows on `partial`, then whole on `endpoint`), to show it.
 """
@@ -34,6 +40,8 @@ from app.wire import async_send_msg, async_recv_msg
 log = logging.getLogger("ears")
 PLAYBACK_TIMEOUT_S = 2.0                        # no `played` report this long past the server's guess: end the turn
 FRAME_MS = 80                                   # one FRAME event per 80 ms of user audio
+REPLY_GRACE_S = 10.0                            # at the session limit, a reply in progress may finish within this
+MAX_MIC_BUFFER_S = 5.0                          # mic audio not yet cut into hops, at most: past it, close
 
 
 class Conversation:
@@ -44,6 +52,8 @@ class Conversation:
         self.hop_n = ears.hop_samples
         tasks = (cfg.get("mouth") or {}).get("tasks", {})
         self.floor_frames = math.ceil(float(tasks.get("announce_after_silence_ms", 1200)) / FRAME_MS)
+        self.max_session_s = float(cfg["server"].get("max_session_s") or 0)         # 0: no limit
+        self.max_mic = int(MAX_MIC_BUFFER_S * ears.sr)
         self.mic = np.zeros(0, np.float32)               # user audio not yet cut into hops
         self.ear = np.zeros(0, np.float32)               # the 2nd ear for the same samples (from the page's tags)
         self.mic_pos = 0; self.hop_pos = 0               # mic samples received / cut into hops so far
@@ -60,6 +70,7 @@ class Conversation:
         self.floor_q = deque()                 # task ids waiting for the floor
         self.idle_frames = 0                   # both sides quiet for this many frames
         self.mouth_gone = False                # MOUTH's connection broke: the conversation is ending
+        self.ending = False                    # the session limit passed: nothing new starts
         self.turn_t0 = None; self.await_onset = False; self.barge_t0 = None   # timings for the logs
 
     # ---- the conversation's lifetime ----
@@ -69,6 +80,7 @@ class Conversation:
         log.info("conversation start (active=%d)", self.ears.active())
         pump = asyncio.create_task(self._pump_mouth()) if self.have_mouth else None
         hops = asyncio.create_task(self._hop_loop())
+        limit = asyncio.create_task(self._session_limit()) if self.max_session_s > 0 else None
         try:
             async for msg in self.ws:
                 await self._on_browser(msg)
@@ -76,6 +88,8 @@ class Conversation:
             hops.cancel()
             if pump:
                 pump.cancel()
+            if limit:
+                limit.cancel()
             if self.done_task is not None:
                 self.done_task.cancel()
             if self.have_mouth:
@@ -99,6 +113,7 @@ class Conversation:
         panel from them)."""
         return {"type": "ready", "hop_ms": int(self.hop_n / self.ears.sr * 1e3), "sr": self.ears.sr,
                 "mouth": self.have_mouth, "voices": self.voices, "voice": self.default_voice, "labels": self.labels,
+                "max_session_s": self.max_session_s,                                  # 0: no limit
                 "thresholds": self.ears.thresholds(self.session),
                 "sliders": [t.slider_spec() for t in self.ears.THRESHOLDS if t.slider is not None]}
 
@@ -111,6 +126,12 @@ class Conversation:
             if block is None:
                 return
             rid, at24, pcm = block
+            if len(self.mic) + len(pcm) > self.max_mic:          # faster than real time: the hops can't keep up
+                log.warning("mic audio %.1f s ahead of the hops: closing the conversation", len(self.mic) / self.ears.sr)
+                self.mic = np.zeros(0, np.float32); self.ear = np.zeros(0, np.float32)
+                await self.ws.send_json({"type": "error", "error": "audio_too_fast"})
+                await self.ws.close(code=1008)
+                return
             self.mic = np.concatenate([self.mic, pcm])
             self.ear = np.concatenate([self.ear, self.playback.agent_block(rid, at24, len(pcm), self.mic_pos)])
             self.mic_pos += len(pcm)
@@ -177,9 +198,10 @@ class Conversation:
             kind = e["kind"]
             if kind == "FRAME":
                 self._on_frame(e, peak); last = e
-            elif kind == "ENDPOINT" and not self.speaking:
+            elif kind == "ENDPOINT" and not self.speaking and not self.ending:
                 await self._on_endpoint(e)
-            elif kind == "BACKCHANNEL" and not self.speaking and not self.halting and not self.bc_active:
+            elif kind == "BACKCHANNEL" and not self.speaking and not self.halting and not self.bc_active \
+                    and not self.ending:
                 await self._on_backchannel(e)
             elif kind == "BARGE" and self.speaking:
                 await self._on_barge(e, hop_end)
@@ -247,7 +269,7 @@ class Conversation:
     async def _maybe_grant_floor(self):
         """A finished task's announcement gets the floor only when nobody else has it (module docstring)."""
         if not self.floor_q or self.speaking or self.halting or self.pending is not None or self.bc_active \
-                or self.idle_frames < self.floor_frames:
+                or self.idle_frames < self.floor_frames or self.ending:
             return
         tid = self.floor_q.popleft()
         self._start_speaking()
@@ -272,7 +294,7 @@ class Conversation:
         await self.ws.send_json({"type": "turn_done", "barged": barged})
         if self.halting:
             self.halting = False
-            if self.pending is not None:
+            if self.pending is not None and not self.ending:
                 transcript, self.pending = self.pending, None
                 await self._send_turn(transcript)
 
@@ -292,6 +314,24 @@ class Conversation:
             log.warning("no playback report from the page: turn ended by the timeout")
             await self._finish_turn(False)
         except asyncio.CancelledError:
+            pass
+
+    async def _session_limit(self):
+        """server.max_session_s after the start: nothing new starts, a reply in progress may finish (REPLY_GRACE_S at
+        most), then `session_end` and the close (module docstring)."""
+        try:
+            await asyncio.sleep(self.max_session_s)
+            self.ending = True
+            busy = self.speaking or self.halting
+            give_up = time.perf_counter() + REPLY_GRACE_S
+            while (self.speaking or self.halting) and time.perf_counter() < give_up:
+                await asyncio.sleep(0.05)
+            cut = self.speaking or self.halting
+            log.info("session limit %g s: conversation ended%s", self.max_session_s,
+                     ", the reply cut" if cut else " after the reply" if busy else "")
+            await self.ws.send_json({"type": "session_end", "reason": "time_limit"})
+            await self.ws.close()
+        except (asyncio.CancelledError, ConnectionError):
             pass
 
     # ---- MOUTH ----

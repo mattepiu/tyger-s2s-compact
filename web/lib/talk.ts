@@ -1,8 +1,8 @@
 // What the page shows, from the conversation's events: a pure reducer (every event comes with the time it came, ms on
 // performance.now()) and the phase the animation and the label follow.
-import type { Message } from "./conversation"
+import type { Link, Message } from "./tyger/client"
 
-export type Link = { label: string; url: string }
+export type { Link }
 // One line of the conversation: the user's words (the endpoint's) with the agent's backchannels while they spoke,
 // or the agent's (a reply, or a background task's result) with the sources it cited and whether the user cut it off.
 export type Said =

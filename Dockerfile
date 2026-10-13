@@ -12,6 +12,10 @@
 #           -v "$PWD/voices":/app/voices:ro \
 #           tyger-v1
 #         then SSH-forward 7860 and open http://localhost:7860  (see README for HTTPS).
+# API mode, for another app (README -> "API mode"): no pages (none are built in this image anyway), its origin, a
+# conversation's length and the token's secret, all as env vars:
+#           -e TYGER_PAGES=false -e TYGER_ALLOWED_ORIGINS=https://app.example.com \
+#           -e TYGER_MAX_SESSION_S=180 -e TYGER_API_SECRET=...
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

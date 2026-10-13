@@ -4,7 +4,12 @@ WebSocket per conversation, each a Conversation on the shared EARS plugin. Visit
 
 The pages: `/` is the new page, the static build of web/ (`npm run build` exports it to web/out/; run.sh builds it),
 with every other file of that build at its own path (/_next/... included). `/classic` is the classic page
-(static/index.html). Until the new page is built, `/` serves the classic page too."""
+(static/index.html). Until the new page is built, `/` serves the classic page too. With server.pages off (API mode,
+TYGER_PAGES=false), EARS answers only /ws and /voices.
+
+Who may connect (app/ears/access.py) is checked before the WebSocket upgrade: the page's origin (403), then, with
+TYGER_API_SECRET set, the token (401). /voices sends CORS headers to the allowed origins, and needs a token too when
+the secret is set (checking it there doesn't use it up)."""
 from __future__ import annotations
 import logging
 from pathlib import Path
@@ -12,7 +17,8 @@ from pathlib import Path
 from aiohttp import web
 
 from app.config import ROOT
-from app.ears.conversation import Conversation
+from app.ears.access import SECRET_ENV, Origins, TokenRefused, Tokens, secret_from_env
+from app.ears.conversation import MAX_MIC_BUFFER_S, Conversation
 from app.plugins import plugin_class
 from app.prompts import Characters, load_prompts
 
@@ -21,7 +27,8 @@ CLASSIC = ROOT / "static" / "index.html"
 BUILD = ROOT / "web" / "out"                     # the new page's static export
 NO_CACHE = {"Cache-Control": "no-cache"}         # the pages: always the current build
 IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}   # /_next/static/: content-hashed names
-BUSY_HTML =("<!doctype html><meta charset=utf-8><title>tyger - busy</title>"
+MAX_MSG_BYTES = 64 * 1024                        # a WebSocket message's cap (a 20 ms mic block is 648 bytes)
+BUSY_HTML = ("<!doctype html><meta charset=utf-8><title>tyger - busy</title>"
              "<body style='font:16px system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem'>"
              "<h1>tyger is busy</h1><p>All conversation slots are in use right now "
              "&mdash; please try again shortly.</p></body>")
@@ -34,13 +41,30 @@ def list_voices(cfg):
 
 
 class EarsApp:
-    def __init__(self, cfg, ears, build=BUILD):
+    def __init__(self, cfg, ears, build=BUILD, secret=None):
+        """`secret`: the token's secret; None reads TYGER_API_SECRET (unset or empty: no token check)."""
         self.cfg = cfg; self.ears = ears              # ears: the EARS plugin (app/plugins/base.py EarsPlugin)
         self.characters = Characters(cfg, load_prompts(cfg))      # the picker's labels: "Mira (mira)"
         self.voices, self.default_voice = list_voices(cfg)
+        srv = cfg["server"]
+        self.pages = srv["pages"]
+        self.origins = Origins(srv["allowed_origins"])
+        secret = secret_from_env() if secret is None else secret
+        self.tokens = Tokens(secret) if secret else None
         self.build = Path(build).resolve()
         self.told_unbuilt = False
-        self.new_page()                               # says so at startup when it isn't built
+        limit = float(srv["max_session_s"])
+        log.info("settings: pages %s; allowed origins %s, and this server's own; conversations end after %s; token "
+                 "check %s; messages up to %d KB, mic audio buffered up to %.0f s",
+                 "on" if self.pages else "off (API mode: /ws and /voices only)",
+                 ", ".join(srv["allowed_origins"]) or "none", f"{limit:g} s" if limit else "no limit",
+                 f"on ({SECRET_ENV} set)" if self.tokens else f"off ({SECRET_ENV} unset)", MAX_MSG_BYTES // 1024,
+                 MAX_MIC_BUFFER_S)
+        if self.pages:
+            if self.tokens:
+                log.warning("%s is set and the pages are on: the pages EARS serves have no token, so they can't open "
+                            "a conversation. Run with TYGER_PAGES=false (server.pages: false)", SECRET_ENV)
+            self.new_page()                           # says so at startup when it isn't built
 
     def labels(self):
         """{voice: its picker entry, the character's name then the voice}."""
@@ -48,9 +72,10 @@ class EarsApp:
 
     def application(self):
         app = web.Application()
-        app.add_routes([web.get("/", self.index), web.get("/classic", self.classic),
-                        web.get("/voices", self.voice_list), web.get("/ws", self.websocket),
-                        web.get("/{path:.+}", self.asset)])           # last: the new page's other files
+        app.add_routes([web.get("/voices", self.voice_list), web.get("/ws", self.websocket)])
+        if self.pages:
+            app.add_routes([web.get("/", self.index), web.get("/classic", self.classic),
+                            web.get("/{path:.+}", self.asset)])       # last: the new page's other files
         return app
 
     def new_page(self):
@@ -84,17 +109,46 @@ class EarsApp:
             raise web.HTTPNotFound()
         return web.FileResponse(f, headers=IMMUTABLE if rel.startswith("_next/static/") else NO_CACHE)
 
+    def refused(self, request, use, headers=None):
+        """The response that refuses this request, 403 for its origin or 401 for its token, or None when it may go
+        on. A refused token's reason is logged, never the token."""
+        origin = request.headers.get("Origin")
+        if not self.origins.allows(origin, request.host):
+            log.warning("refused %s: origin %.100s isn't allowed", request.path, origin)
+            return web.Response(status=403, text="origin not allowed", headers=headers)
+        if self.tokens is not None:
+            try:
+                self.tokens.check(request.query.get("token"), origin, use)
+            except TokenRefused as e:
+                log.warning("refused %s: token %s", request.path, e.reason)
+                return web.Response(status=401, text=f"token refused: {e.reason}", headers=headers)
+        return None
+
+    def cors(self, request):
+        """CORS headers for an allowed page from another origin (an app fetching /voices)."""
+        origin = request.headers.get("Origin")
+        if origin and not Origins.same(origin, request.host) and self.origins.allows(origin, request.host):
+            return {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
+        return {"Vary": "Origin"}
+
     async def voice_list(self, request):
         """The voice picker's list, so a pick before Start is remembered. Re-scans the voices dir: clips added after
         startup show up on a refresh, no restart needed."""
+        no = self.refused(request, use=False, headers=self.cors(request))   # the app can read why
+        if no is not None:
+            return no
         try:
             self.voices, self.default_voice = list_voices(self.cfg)
         except Exception as e:
             log.warning("voice re-discovery failed: %s", e)
-        return web.json_response({"voices": self.voices, "voice": self.default_voice, "labels": self.labels()})
+        return web.json_response({"voices": self.voices, "voice": self.default_voice, "labels": self.labels()},
+                                 headers=self.cors(request))
 
     async def websocket(self, request):
-        ws = web.WebSocketResponse(max_msg_size=0)
+        no = self.refused(request, use=True)          # before the upgrade: one token opens one conversation
+        if no is not None:
+            return no
+        ws = web.WebSocketResponse(max_msg_size=MAX_MSG_BYTES)   # a bigger message closes the socket (1009)
         await ws.prepare(request)
         session = self.ears.open()               # this conversation's plugin session (+ its own thresholds)
         if session is None:

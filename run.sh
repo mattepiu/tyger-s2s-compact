@@ -5,6 +5,7 @@
 #      over TCP (:8770).
 #   2. EARS   (app.ears): nemotron + endpoint head + the web app (:7860): the new page at /, the classic page at
 #      /classic. The new page is web/'s static build (web/out/), made here first when it's missing or out of date.
+#      In API mode (TYGER_PAGES=false) there are no pages and no build: only /ws and /voices (README -> "API mode").
 # MOUTH starts first so its engines claim their (pinned) GPU memory before EARS loads (DEVELOPING.md -> "GPU memory").
 #
 # Reach it: the web app serves on :7860 (config/default.yaml server.port). The mic needs a secure context, so either
@@ -49,7 +50,12 @@ build_page() {
   fi
   (cd web && npm run build) || echo "the page build failed (above): starting anyway"
 }
-build_page
+# server.pages, with TYGER_PAGES over it (API mode: no pages, so no Node needed); a config error stops here, with its key
+if [ "$("$PY" -m app.config "${CFG_ARGS[@]}" server.pages)" = "true" ]; then
+  build_page
+else
+  echo "API mode (server.pages / TYGER_PAGES off): no pages, so no page build; EARS serves /ws and /voices only"
+fi
 
 PIDS=()
 cleanup() { for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done; }

@@ -29,6 +29,13 @@ Everything since the imported v1 baseline. It becomes the first release.
   as you say them, the agent's backchannels in a bubble beside them, its reply with its sources. A history
   holds the whole conversation. A Tuning panel over the page has the meters and the sliders, to tune while you
   talk. `run.sh` builds it.
+- **API mode: run the server without its pages** (`TYGER_PAGES=false`), for another app to call.
+- **A client for your own app** (`web/lib/tyger/`): one TypeScript file with no dependencies that captures the mic,
+  plays the agent and talks to the server, as tyger's own page does.
+- **Allowed origins** (`TYGER_ALLOWED_ORIGINS`): only the pages of the sites you list can connect from a browser.
+- **Conversations end after 3 minutes by default (configurable):** `TYGER_MAX_SESSION_S`, 0 for no limit.
+- **Your app's backend can hand the browser a short-lived token, so only your app can open a conversation**
+  (`TYGER_API_SECRET`).
 - **Tests that need no GPU,** and a check of the web page in jsdom.
 - **A routing test** (`scripts/bench/escalation.py`): 119 synthetic cases, no API cost.
 - **Measurement scripts:** smoke and load tests on the running stack, GPU parity checks, stack comparisons.

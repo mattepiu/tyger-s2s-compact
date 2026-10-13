@@ -2,9 +2,9 @@
 plugins (app/plugins/*/fake.py); FakeMouth carries the attributes Session reads from Mouth. For the LLM plugins'
 call formats: stream_speakable and scripted_stream feed a model's text in small deltas. For EARS: FakePage is the
 browser's side of the WebSocket, behaving like static/index.html, and MouthServer a TCP server standing in for
-MOUTH. Test text and audio are synthetic.
+MOUTH; make_token signs a token as another app's backend would. Test text and audio are synthetic.
 """
-import os, sys, asyncio, json, threading, time
+import os, sys, asyncio, base64, hashlib, hmac, json, threading, time
 from contextlib import contextmanager
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -216,7 +216,7 @@ class FakePage:
         if self.next_play <= t1 + 1e-6:                    # the last chunk queued: the reply has played out
             self.command(f"played:{rid}:{self.queued[rid]}")
 
-    async def close(self):                                 # like aiohttp: closing ends the message loop
+    async def close(self, code=1000):                      # like aiohttp: closing ends the message loop
         self.closed = True; self.q.put_nowait(None)
 
     def types(self):
@@ -252,3 +252,23 @@ class MouthServer:
     async def drop(self):
         """MOUTH goes away (restart / crash): close its end of the connection."""
         self.writer.close(); await self.writer.wait_closed()
+
+
+# ---- EARS's token (app/ears/access.py), as the other app's backend signs it with jose's SignJWT --------------------
+def b64url(raw):
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def make_token(secret, now=None, header=None, sign=True, **over):
+    """A JWT: HS256, aud tyger, exp 2 min ahead of `now`, a jti; `over` changes claims (None drops one)."""
+    now = time.time() if now is None else now
+    c = {"aud": "tyger", "exp": now + 120, "iat": now, "jti": f"jti-{time.perf_counter_ns()}"}
+    for k, v in over.items():
+        if v is None:
+            c.pop(k, None)
+        else:
+            c[k] = v
+    h = b64url(json.dumps(header or {"alg": "HS256", "typ": "JWT"}).encode())
+    p = b64url(json.dumps(c).encode())
+    sig = b64url(hmac.new(secret.encode(), f"{h}.{p}".encode(), hashlib.sha256).digest()) if sign else ""
+    return f"{h}.{p}.{sig}"

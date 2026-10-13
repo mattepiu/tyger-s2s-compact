@@ -27,8 +27,8 @@ browser speaker ◀────┘      24 kHz audio, streamed as it decodes
 ```
 
 Two processes, **one venv** (`.venv`, `requirements.txt`). **One GPU, up to 4 conversations at once**
-(`server.max_sessions`); the next visitor gets a "busy" page. It's a demo server with no auth (see `ISSUES.md`
-I-11 before exposing it beyond an SSH tunnel).
+(`server.max_sessions`); the next visitor gets a "busy" page, and a conversation ends after 3 minutes. Another app
+can use it too, with its own page and a token from its backend ("API mode", "Using tyger from your own app").
 
 ## How it works
 
@@ -82,6 +82,8 @@ Copy `.env.example` to `.env` (gitignored) and fill in:
 - **`ANTHROPIC_API_KEY`** — only if `llm.smart` is the `anthropic` plugin instead.
 - **`HF_TOKEN`** — pulls the **private** turn-taking heads release (`ears.heads` in `config/default.yaml`). If a token
   already exists at `$HF_HOME/token`, leave this blank.
+- **`TYGER_API_SECRET`** — only for API mode: the secret your app's backend signs conversation tokens with ("API
+  mode"). Unset, there's no token check. A long random string, e.g. `openssl rand -base64 32`.
 
 Never commit `.env`.
 
@@ -177,8 +179,132 @@ cd web && npm install && npm run dev   # http://localhost:3000; /ws, /voices and
 Forward port 3000 the same way as 7860. Run `npm run build` (or restart `run.sh`) when you're done, so :7860 serves
 the change.
 
-**The page's WebSocket** (`/ws`; for a client of your own; `app/ears/playback.py` has the details). All binary
-frames are little-endian, with int16 audio:
+## API mode
+
+To use tyger from another app (its own page, e.g. a Next.js app, calling this server), run it without its pages and
+let only that app in. Four settings, each in `config/default.yaml`'s `server:` block and as an env var, which wins
+over the file (Docker sets them when it starts the container). EARS logs the values it runs with at startup.
+
+| Setting | Env var | Default | What it does |
+|---|---|---|---|
+| `server.pages` | `TYGER_PAGES` | `true` | `false`: no pages, only `/ws` and `/voices` (`/` and `/classic` are 404s), and `run.sh` builds nothing, so no Node is needed |
+| `server.allowed_origins` | `TYGER_ALLOWED_ORIGINS` (comma-separated) | `http://localhost:3000`, `http://127.0.0.1:3000` (`npm run dev`) | the other sites whose pages may connect, e.g. `https://app.example.com` or `https://*.example.com` (any subdomain, not the bare domain) |
+| `server.max_session_s` | `TYGER_MAX_SESSION_S` | `180` | a conversation's length in seconds; `0`: no limit |
+| — | `TYGER_API_SECRET` | unset | the token's secret; env only, never in the config file, never logged |
+
+For example: `TYGER_PAGES=false TYGER_ALLOWED_ORIGINS=https://app.example.com TYGER_API_SECRET=... ./run.sh`, or the
+same as `-e` options to `docker run`.
+
+**Allowed origins.** A browser sends its page's origin when it opens the WebSocket, and EARS refuses an origin that
+isn't allowed with a 403, before the upgrade. The pages EARS serves itself are always allowed (the same host as the
+request). A request with no `Origin` (a script, not a browser) passes. `/voices` sends CORS headers to the allowed
+origins. **This stops other websites' pages from using the server from a visitor's browser, but not a script, which
+can send any `Origin` it likes. The token is the real protection:** set `TYGER_API_SECRET` before the server is
+reachable from the internet.
+
+**The token.** With `TYGER_API_SECRET` set, every conversation needs a token, made by your app's backend for a user it
+has signed in, and handed to the browser:
+- a JWT signed with HS256 and the same secret, carrying `aud: "tyger"`, `exp` at most 5 minutes ahead and a unique
+  `jti`; optionally `origin`, which must then match the page's origin exactly;
+- sent as `?token=…` on `/ws` (browsers can't set headers on a WebSocket). EARS never logs it, nor any query string;
+- one token opens one conversation (EARS remembers its `jti` until it expires); a refused one gets a 401 before the
+  upgrade (bad signature, another algorithm or `none`, wrong audience, expired, `exp` too far ahead, origin mismatch,
+  `jti` used);
+- `/voices` needs a valid token too (`/voices?token=…`); checking it there doesn't use it up. The `ready` message
+  carries the voice list anyway.
+
+The pages EARS serves have no way to get a token, so with the secret set, run with `TYGER_PAGES=false` (EARS warns at
+startup otherwise). For development, leave the secret unset: then there's no token check.
+
+**The session limit.** `ready` carries `max_session_s`, so a page can show a countdown. At the limit no new turn
+starts, a reply in progress may finish (10 s at most), then EARS sends `{"type": "session_end", "reason":
+"time_limit"}` and closes. The conversation's background tasks end with it, as on any end. Both pages and the client
+say "Time's up — start again", and a new conversation can start. Your own test sessions are limited too: turn it off
+with `TYGER_MAX_SESSION_S=0`.
+
+**Size limits.** A WebSocket message over 64 KB closes the connection (1009); a 20 ms mic block is 648 bytes. Mic
+audio piling up more than 5 s ahead of real time (sent faster than it's spoken) closes it too, with
+`{"type": "error", "error": "audio_too_fast"}`.
+
+## Using tyger from your own app
+
+**The client.** `web/lib/tyger/client.ts` is tyger's browser client: one file, no dependencies, no framework, used by
+tyger's own page too. Copy the `web/lib/tyger/` folder into your app (or import it). It captures the mic, plays the
+agent, and talks to the server:
+
+```ts
+import { TygerClient } from "@/lib/tyger/client"
+
+const tyger = new TygerClient({
+  url: "wss://tyger.example.com/ws",                          // default: the page's own origin, /ws
+  token: async () => {                                        // called at each start; omit it without a secret
+    const r = await fetch("/api/tyger-token", { method: "POST" })
+    if (!r.ok) throw new Error(`token: ${r.status}`)
+    return (await r.json()).token
+  },
+  voice: "mira",                                              // the character to talk to (optional)
+  on: {
+    ready: (m) => showVoices(m.voices, m.labels, m.max_session_s),   // m.max_session_s: for a countdown
+    partial: (words) => showUserWords(words),                 // the user's words so far
+    transcript: (text) => addUserTurn(text),                  // the user's turn, whole
+    reply: (text) => showReply(text),                         // the reply so far: replaces the last
+    links: (links) => showSources(links),                     // {label, url}: shown, never spoken
+    close: (why) => ended(why),                               // "" after stop(); else why ("Time's up — start again.")
+    error: (why) => couldNotStart(why),                       // no mic, no token...
+  },
+})
+await tyger.start()      // on a click: the browser asks for the mic
+tyger.setVoice("rex")    // switch characters from the next turn
+tyger.stop()
+```
+
+The events: `open`, `ready` (the voices, their labels, the session limit), `partial`, `transcript`, `reply`, `links`,
+`backchannel` and `backchannelDone` (the agent's "mm-hm"s), `barge` (the user cut in), `turnDone`, `taskDone` (a
+background task's result is said next), `sessionEnd`, `playing` (the agent's audio started / ended), `close`,
+`error`, and `message` with every JSON message as it came. The voice list is in `ready`; before a conversation,
+`GET /voices` (with `?token=…` when the secret is set) returns `{"voices", "voice", "labels"}`.
+
+**What a client must do,** and this one does all three:
+- tag every 20 ms mic block with the reply sample it was playing when the block was captured;
+- report `played:<id>:<samples>` once a reply has played out (that ends the agent's turn);
+- stop playback at once on `barge`.
+
+**It must play the agent's audio itself,** on the same AudioContext as its mic capture. That is what makes the tags
+right (DEVELOPING.md → "The 2nd ear"). An app that plays the audio another way (an `<audio>` element, another
+context) breaks them, and barge-in then takes the agent's own echo for the user cutting in.
+
+**HTTPS.** Browsers give the mic only to pages on HTTPS (or localhost), and an HTTPS page can only open `wss://`, so
+put the server behind TLS too (e.g. Caddy: `tyger.example.com { reverse_proxy localhost:7860 }`).
+
+**Allow your app's origin** on the server: `TYGER_ALLOWED_ORIGINS=https://app.example.com`.
+
+**The token, from your backend.** A Next.js route handler that checks your app's own session, then signs a token with
+[`jose`](https://github.com/panva/jose) (`npm install jose`). The secret is a server-only env var with the same value
+as the server's `TYGER_API_SECRET`:
+
+```ts
+// app/api/tyger-token/route.ts
+import { SignJWT } from "jose"
+import { getSignedInUser } from "@/lib/auth"                    // your app's own session check
+
+const secret = new TextEncoder().encode(process.env.TYGER_API_SECRET)   // server-only: never NEXT_PUBLIC_
+
+export async function POST() {
+  const user = await getSignedInUser()
+  if (!user) return new Response("Sign in first", { status: 401 })
+  const token = await new SignJWT({ origin: "https://app.example.com" })   // optional: only this page may use it
+    .setProtectedHeader({ alg: "HS256" })
+    .setAudience("tyger")
+    .setJti(crypto.randomUUID())                                 // one token, one conversation
+    .setIssuedAt()
+    .setExpirationTime("60s")                                    // at most 5 minutes
+    .sign(secret)
+  return Response.json({ token })
+}
+```
+
+**The protocol,** for a client of your own (`app/ears/playback.py` has the details). The WebSocket is `/ws`
+(`?token=…` when the server checks tokens). All binary frames are little-endian, with int16 audio:
 - **mic → EARS:** `[int32 reply id][int32 reply sample, or -1][int16 mic samples at 16 kHz]`. The tag is the reply
   sample (24 kHz) the user was hearing at the block's first mic sample, or -1 when no reply was playing. The page
   sends 20 ms blocks, captured with an AudioWorklet on the same AudioContext that plays the reply.
@@ -187,9 +313,11 @@ frames are little-endian, with int16 audio:
   which the page plays but never tags.
 - **text → EARS:** `played:<id>:<samples>` when a reply's queue has drained; `reset`, `voice:<name>`,
   `set:<threshold>:<value>`.
-- **JSON → page:** `ready`, `state`, `partial` (the user's words so far in their turn, when they change),
-  `endpoint` (with the user's `transcript`), `reply`, `links`, `backchannel` / `backchannel_done` (`aborted`:
-  dropped unvoiced), `barge`, `turn_done`, `task_done`, and a few more.
+- **JSON → page:** `ready` (with `voices`, `labels` and `max_session_s`), `state`, `partial` (the user's words so far
+  in their turn, when they change), `endpoint` (with the user's `transcript`), `reply`, `links`, `backchannel` /
+  `backchannel_done` (`aborted`: dropped unvoiced), `barge`, `turn_done`, `task_done`, `session_end` (`reason`:
+  `time_limit`; the socket closes next), `busy` and `error` (`mouth_lost`, `audio_too_fast`; the socket closes next),
+  and a few more.
 
 ## Plugins
 
@@ -273,7 +401,8 @@ tokens. Without `llm.smart` the agent answers what it knows and says plainly tha
 ## Privacy
 
 No audio or transcript is written to disk or logs. Logs carry only timings and event types (endpoint source,
-onset ms, barge, backchannel, tool name). Voice reference clips and their transcripts stay on the box. The page gets
+onset ms, barge, backchannel, tool name). EARS's request log has paths, never query strings, so a conversation's
+token isn't logged either. Voice reference clips and their transcripts stay on the box. The page gets
 the user's own words back (as they speak, on `partial`, and each turn's transcript, on `endpoint`) to show them.
 
 **Hosted plugins send text off the box**, and only because the config names one: a hosted `reply` gets every
@@ -290,6 +419,9 @@ for that data.
 
 - **Up to 4 conversations** per GPU (`server.max_sessions`); more visitors get a busy page. On a healthy 5090, 4
   conversations keep EARS real time (hop lag p50 47–87 / p90 124–170 ms on two boxes).
+- **A conversation ends after 3 minutes** by default (`TYGER_MAX_SESSION_S`, 0 for no limit).
+- **No per-user or per-IP cap:** whoever holds tokens (or reaches a server without a secret) can take all 4 slots.
+  Your app's backend decides who gets a token.
 - **English only:** every prompt asks for English, so the agent answers in English whatever language it hears.
 - `set_reminder` / `send_message` are **placeholders** — the model says they aren't connected yet.
 - The user waits **~0.8–1.0 s** from the end of their speech to the first reply audio at 1 conversation and

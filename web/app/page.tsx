@@ -1,6 +1,6 @@
 "use client"
-// tyger's page: talk, and see what it's doing. The conversation (lib/conversation.ts) is the classic page's
-// (static/index.html), its protocol unchanged; this page shows it differently: an orb in the middle whose state follows
+// tyger's page: talk, and see what it's doing. The conversation is tyger's client (lib/tyger/client.ts, the one other
+// apps use too), the classic page's audio code and protocol (static/index.html); this page shows it differently: an orb in the middle whose state follows
 // the conversation (lib/talk.ts has the phases), the phase as a word, the exchange as text (the user's words, the
 // agent's backchannels and reply, the sources it cited) and all of it in the history, the characters, one mic button,
 // and the live tuning (the turn-taking meters and thresholds, lib/tuning.ts) in a panel over it on demand. The classic
@@ -11,7 +11,7 @@ import { Characters, MicButton, type Character } from "@/components/controls"
 import { Orb } from "@/components/orb"
 import { Exchange, History } from "@/components/transcript"
 import { TuningPanel } from "@/components/tuning"
-import { Conversation } from "@/lib/conversation"
+import { TygerClient } from "@/lib/tyger/client"
 import { initial, phaseOf, reduce, type Action, type Phase } from "@/lib/talk"
 import { noTuning, tune } from "@/lib/tuning"
 
@@ -46,7 +46,7 @@ export default function Page() {
   const [voice, setVoice] = useState("")
   const [history, setHistory] = useState(false)
   const [tuningOpen, setTuningOpen] = useState(false)
-  const conv = useRef<Conversation | null>(null)
+  const conv = useRef<TygerClient | null>(null)
   useTicks(talk.conn === "on")
 
   // The picker: the saved pick if it's still offered, else EARS's default. Returns the voice picked.
@@ -64,18 +64,17 @@ export default function Page() {
   }, [populate])
 
   useEffect(() => {
-    const c = conv.current = new Conversation({
-      opened: () => dispatch({ kind: "opened" }),
-      closed: (why) => dispatch({ kind: "closed", why }),
-      failed: (why) => dispatch({ kind: "closed", why }),
+    const c = conv.current = new TygerClient({ on: {
+      open: () => dispatch({ kind: "opened" }),
+      close: (why) => dispatch({ kind: "closed", why }),      // why: busy, gone, time's up ("" after Stop)
+      error: (why) => dispatch({ kind: "closed", why }),
       playing: (on) => dispatch({ kind: "playing", on, now: performance.now() }),
       message: (m) => {
-        // always send the picked voice at session start: MOUTH keeps its voice across sessions, so EARS's default
-        // (m.voice) could leave it on another voice than the one shown
-        if (m.type === "ready") { const v = populate(m.voices, m.voice, m.labels); if (v) c.send("voice:" + v) }
+        // the picked voice, sent at every start (the client does): the server's default (m.voice) may be another
+        if (m.type === "ready") { const v = populate(m.voices, m.voice, m.labels); if (v) c.setVoice(v) }
         dispatch({ kind: "message", m, now: performance.now() })
       },
-    })
+    } })
     return () => c.stop()
   }, [populate, dispatch])
 
@@ -83,7 +82,7 @@ export default function Page() {
   const pick = (v: string) => {
     setVoice(v)
     try { localStorage.setItem("tyger_voice", v) } catch {}
-    conv.current?.send("voice:" + v)
+    conv.current?.setVoice(v)
   }
   const setThreshold = (name: string, value: number) => {   // shown at once; EARS echoes it back
     toTuning({ kind: "set", name, value })

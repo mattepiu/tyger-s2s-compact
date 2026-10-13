@@ -1,10 +1,12 @@
-// The new page's own check (web/), GPU-free and without a browser: web/lib/conversation.ts with page_check.mjs's fake
-// audio APIs and its cases (the worklet's 16 kHz blocks, the playback tags, the int16 frames, the `played` report only
-// once the queue drains, none after a stop, Stop -> Start without a reload), plus what's new there (reply audio
-// playing / drained, the voices' meters, the reason a conversation closed, an old socket's late close); and
-// web/lib/talk.ts, what the page shows (the phases; the user's words, the backchannels, the replies and the links they
-// cite). Audio is synthetic (a sine, silence).
+// The new page's own check (web/), GPU-free and without a browser: tyger's client, web/lib/tyger/client.ts (the page's
+// and other apps'), with page_check.mjs's fake audio APIs and its cases (the worklet's 16 kHz blocks, the playback tags,
+// the int16 frames, the `played` report only once the queue drains, none after a stop, Stop -> Start without a reload),
+// plus what's new there (reply audio playing / drained, the voices' meters, the reason a conversation closed, an old
+// socket's late close) and what other apps use (no imports, the server URL and the token options, the typed events,
+// the voice, the session's end); and web/lib/talk.ts, what the page shows (the phases; the user's words, the
+// backchannels, the replies and the links they cite). Audio is synthetic (a sine, silence).
 //   node tests/page/web_check.mjs        # node >= 22.18 (runs the TypeScript as is); no npm install needed
+import fs from "fs";
 import vm from "vm";
 
 let checks = 0, fails = 0;
@@ -32,7 +34,8 @@ G.AudioContext = class {
 Object.defineProperty(G, "navigator", { configurable: true, value: { mediaDevices: { getUserMedia: async () => ({
   getAudioTracks: () => [{ getSettings: () => ({ latency: 0.01 }), stop() {} }], getTracks: () => [] }) } } });
 
-const { Conversation, MIC_WORKLET } = await import("../../web/lib/conversation.ts");
+const CLIENT = new URL("../../web/lib/tyger/client.ts", import.meta.url);
+const { TygerClient, MIC_WORKLET } = await import(CLIENT);
 const T = await import("../../web/lib/talk.ts");
 const U = await import("../../web/lib/tuning.ts");
 
@@ -68,10 +71,10 @@ for (const sr of [48000, 44100]) {
 
 // ---- the conversation: tags, frames, reports ------------------------------------------------------------------
 const log = [];                                       // the page's side: every event, in order
-const conv = new Conversation({
-  opened: () => log.push(["opened"]), closed: why => log.push(["closed", why]), failed: why => log.push(["failed", why]),
+const conv = new TygerClient({ on: {
+  open: () => log.push(["opened"]), close: why => log.push(["closed", why]), error: why => log.push(["failed", why]),
   message: m => log.push(["message", m.type]), playing: on => log.push(["playing", on]),
-});
+} });
 const playing = () => log.filter(e => e[0] === "playing").map(e => e[1]);
 await conv.start();
 await sleep(10);
@@ -178,6 +181,52 @@ ok(/connection closed/.test(log.at(-1)[1]), `closed unasked: ${log.at(-1)}`);
 G.navigator.mediaDevices.getUserMedia = async () => { throw new Error("Permission denied"); };
 log.length = 0; await conv.start();
 ok(log.at(-1)[0] === "failed" && /Permission denied/.test(log.at(-1)[1]), `no mic: ${log.at(-1)}`);
+
+// ---- the client, for other apps: one file with no imports, its options, its events, the session's end ------------
+G.navigator.mediaDevices.getUserMedia = async () => ({
+  getAudioTracks: () => [{ getSettings: () => ({ latency: 0.01 }), stop() {} }], getTracks: () => [] });
+const src = fs.readFileSync(CLIENT, "utf8");
+ok(!/^\s*import\s|require\(/m.test(src), "the client imports nothing: copy its folder and it works");
+const ev2 = [], api = new TygerClient({ url: "https://tyger.example.com/ws", token: "abc.def.ghi", voice: "aria", on: {
+  open: () => ev2.push("open"), ready: m => ev2.push(`ready:${m.max_session_s}`), partial: t => ev2.push(`partial:${t}`),
+  transcript: t => ev2.push(`transcript:${t}`), reply: t => ev2.push(`reply:${t}`),
+  links: l => ev2.push(`links:${l.map(x => x.url)}`), backchannel: t => ev2.push(`bc:${t}`),
+  backchannelDone: (t, a) => ev2.push(`bcdone:${t}:${a}`), barge: () => ev2.push("barge"),
+  turnDone: b => ev2.push(`turn_done:${b}`), taskDone: n => ev2.push(`task:${n}`), sessionEnd: r => ev2.push(`end:${r}`),
+  close: why => ev2.push(`close:${why}`), error: why => ev2.push(`error:${why}`), message: m => ev2.push(`(${m.type})`),
+} });
+await api.start(); await sleep(10);
+const aws = G._ws, say = m => aws.onmessage({ data: JSON.stringify(m) });
+ok(aws.url === "wss://tyger.example.com/ws?token=abc.def.ghi", `the server URL (https taken as wss), with the token: ${aws.url}`);
+say({ type: "ready", max_session_s: 180, voices: ["mira", "aria"], voice: "mira" });
+ok(aws.sent.filter(x => typeof x === "string").join() === "voice:aria", `the voice asked for, at the start: ${aws.sent}`);
+api.setVoice("kai"); api.setVoice("kai");
+ok(aws.sent.filter(x => typeof x === "string").join() === "voice:aria,voice:kai", `a switch, sent once: ${aws.sent}`);
+for (const m of [{ type: "partial", text: "What's the" }, { type: "backchannel", text: "Mm-hm." },
+                 { type: "backchannel_done", text: "Mm-hm.", aborted: false }, { type: "endpoint", transcript: "What's the time?" },
+                 { type: "reply", text: "It's noon." }, { type: "links", links: [{ label: "x", url: "https://x.example/" }] },
+                 { type: "turn_done", barged: false }, { type: "barge", yield: 0.8 }, { type: "task_done", task: 2 },
+                 { type: "state", state: "LISTEN" }, { type: "session_end", reason: "time_limit" }]) say(m);
+aws.onclose();
+const typed = ev2.filter(e => !e.startsWith("("));
+ok(typed.join("|") === "open|ready:180|partial:What's the|bc:Mm-hm.|bcdone:Mm-hm.:false|transcript:What's the time?|" +
+   "reply:It's noon.|links:https://x.example/|turn_done:false|barge|task:2|end:time_limit|close:Time's up — start again.",
+   `the typed events, in order: ${typed.join(" | ")}`);
+ok(ev2.filter(e => e.startsWith("(")).length === 12, `and every message as it came: ${ev2.filter(e => e.startsWith("(")).length}`);
+let calls = 0;
+const fresh = new TygerClient({ token: async () => `t${++calls}`, on: { close: why => ev2.push(`close:${why}`) } });
+await fresh.start(); await sleep(10);
+ok(G._ws.url === "ws://localhost:7860/ws?token=t1", `the page's own /ws, a token from the function: ${G._ws.url}`);
+fresh.stop(); await fresh.start(); await sleep(10);
+ok(G._ws.url.endsWith("?token=t2") && calls === 2, `the function is called at each start: ${G._ws.url}`);
+fresh.stop(); ev2.length = 0;
+await fresh.start(); G._ws.onopen = null; G._ws.onclose();     // refused before the upgrade (401 / 403): never opened
+ok(/refused this page/.test(ev2.at(-1)), `never opened, with a token: maybe refused: ${ev2.at(-1)}`);
+const before = G._ws, errs = [];
+const broken = new TygerClient({ token: async () => { throw new Error("401 from /api/tyger-token"); }, on: { error: w => errs.push(w) } });
+await broken.start();
+ok(errs.length === 1 && /token/.test(errs[0]) && G._ws === before && broken.ctx === null,
+   `no token: an error, no connection, the audio stopped: ${errs}`);
 
 // ---- what the page shows (talk.ts): the phases --------------------------------------------------------------------
 let s = T.initial, now = 1000;
@@ -288,6 +337,11 @@ ev({ type: "partial", text: "" });                                              
 ok(s.words === "", "words taken back");
 s = T.reduce(s, { kind: "closed", why: "" });
 ok(s.words === "", "Stop clears the words so far");
+s = T.reduce(s, { kind: "connecting" }); s = T.reduce(s, { kind: "opened" });
+s = T.reduce(s, { kind: "closed", why: "Time's up — start again." });                    // the session limit
+ok(s.conn === "off" && s.note === "Time's up — start again." && T.phaseOf(s, now) === "off", `time's up: ${s.note}`);
+s = T.reduce(s, { kind: "connecting" });
+ok(s.conn === "connecting" && s.note === "", "and a new conversation can start");
 
 // ---- live tuning (tuning.ts): the plugin's sliders and this conversation's values, the meters ----------------------
 // the sliders as nemotron-tyger's THRESHOLDS declare them (app/plugins/ears/nemotron_tyger/plugin.py), and the fake

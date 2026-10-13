@@ -122,6 +122,23 @@ ok(at === -1, `nothing tagged after a stop: ${at}`);
 W.eval("onEvent")({ data: JSON.stringify({ type: "ready", hop_ms: 320, sr: 16000, mouth: true, voices: [], sliders: [], thresholds: {} }) });
 ok(W.document.getElementById("rt").textContent.includes("audio latency 40ms"), W.document.getElementById("rt").textContent);
 
+// ---- the session limit: `ready` says it, `session_end` then the close says time's up, and Start works again ------
+{
+  const onEvent = W.eval("onEvent"), status = () => W.document.getElementById("status").textContent;
+  onEvent({ data: JSON.stringify({ type: "ready", hop_ms: 320, sr: 16000, mouth: true, voices: [], sliders: [], thresholds: {},
+                                   max_session_s: 180 }) });
+  ok(W.document.getElementById("rt").textContent.includes("ends after 180s"), W.document.getElementById("rt").textContent);
+  onEvent({ data: JSON.stringify({ type: "session_end", reason: "time_limit" }) });
+  W._ws.onclose();
+  ok(status() === "Time's up — start again", `time's up: ${status()}`);
+  ok(!W.document.getElementById("start").disabled && W.document.getElementById("stop").disabled, "Start is offered again");
+  await W.eval("start()"); await sleep(10);
+  ok(W._ws !== ws && status() === "connected · listening", `a new conversation: ${status()}`);
+  W.eval("ws").onmessage({ data: JSON.stringify({ type: "error", error: "audio_too_fast" }) }); W._ws.onclose();
+  ok(/faster than real time/.test(status()), `audio too fast: ${status()}`);
+  await W.eval("start()"); await sleep(10);
+}
+
 // ---- Stop, then Start again without a reload: EARS counts reply ids from 1 on the new connection -------------
 ctx.currentTime = 13.0;
 playChunk(frame(1, 24000));                           // something still queued when the user presses Stop

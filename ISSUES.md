@@ -6,7 +6,8 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
 - The write-ups of fixed issues (I-01 to I-17, L-03, L-04, O-04) are in git history: this file at `4d4c2e3`. I-19,
   I-22 and I-23 left when the agent became English only: this file at `1b8e6ff`. O-06 (run.sh now limits the
   kernel compilers): this file at `9caeca9`. I-21 was dropped by the user on 2026-10-13: the voice reads digits and
-  "°C" well. Its write-up: this file at `ce52f66`.
+  "°C" well. Its write-up: this file at `ce52f66`. I-11 (no auth, no limits on :7860) left on 2026-10-13 with API
+  mode: allowed origins, a token, the session limit and the size caps. Its write-up: this file at `17e88cd`.
 - Each issue says how sure it is: **confirmed** (in code or on the box), **likely**, or **hypothesis** (measure
   before fixing).
 
@@ -18,7 +19,6 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
 | I-09 | EARS | low | check on the stack | A lost MOUTH ends the conversation on the fakes; not checked on the real stack |
 | I-14 | ops | low | open (P fixes it) | `run.sh` giving up on a slow first start orphans the LLM engine on the GPU |
 | I-15 | tests | low | open | The local contract test aborts at exit after the EARS engine ran in the process |
-| I-11 | security | low (demo) / high (public) | open | No auth and no limits on :7860 |
 | L-01 | perf | lever | partly done | The encoder re-encodes the full 8 s window, twice, every hop |
 | L-02 | latency | lever | open | Decisions land on 320 ms hops |
 | O-01 | ops | — | needs the user | The endpoint thresholds were never tuned live |
@@ -133,16 +133,6 @@ isn't affected.
 **Fix options:** find the thread (`threading.enumerate()` and `faulthandler` at exit; this container has no ptrace).
 As a stopgap, end the test's `__main__` with `os._exit(code)` after flushing.
 
-### I-11 — No auth and no limits on :7860 (low for the SSH-tunnel demo, high if public)
-Anyone who reaches the port can hold all 4 slots and spend the OpenAI key, grow memory without bound by sending audio
-faster than real time or in huge frames, and list voice names at `/voices`.
-
-**Fix, before any exposure beyond an SSH tunnel:**
-- token or basic auth, at the proxy or in the app;
-- a WebSocket message-size limit around 64 KB;
-- drop or close a connection whose buffer exceeds a few seconds;
-- a per-IP session cap.
-
 ### O-01 — The endpoint thresholds were never tuned live (needs the user)
 `ep_thr` 0.9146 and `ep_deb` 2 ship at the training defaults; offline thresholds ran ~2× high on a live mic.
 `barge_thr` was set to 0.4 live on 2026-10-10. It's the biggest risk to how the product feels.
@@ -158,7 +148,8 @@ non-Docker fresh-box install has been run end to end. It needs a host with Docke
 best done after P, from the Dockerfile P leaves.
 
 The user plans to run the server in Docker, called from another Next.js app, and will build the image on their own
-side (2026-10-13). The API-mode settings (pages, allowed origins, session limit) are env vars for that reason.
+side (2026-10-13). The API-mode settings (pages, allowed origins, session limit) and the token's secret are env vars
+for that reason (README → "API mode"); the Dockerfile's header shows them.
 
 The steps:
 1. Build the image.
@@ -253,7 +244,8 @@ ordinary dependencies. There are no extras and no engine packages: tyger targets
 - **Publishing.** Don't upload anywhere, not even TestPyPI: the user publishes.
 - **Making the heads public.** That is the user's decision. While the release stays private, the package works only
   for HF accounts that have access, and `tyger check` must say so plainly.
-- **I-11 (auth).** `serve` keeps binding to 127.0.0.1 by default, as the config does now.
+- **API mode** (allowed origins, the token, the limits: README → "API mode"). `serve` keeps them as they are, env
+  vars included.
 
 **Done when:**
 1. **The build is clean.** `uv build` makes a wheel and an sdist.
