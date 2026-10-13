@@ -7,16 +7,16 @@
 //     echoed back (`threshold`), the meters moving while the user speaks;
 //   * no page errors.
 // Logs message types, counts and lengths only: never the transcript or the reply text.
-// Needs the stack (./run.sh) and the new page (cd web && npm run dev) running. Once:
+// Needs the stack running (./run.sh: EARS serves the page's build on :7860). Once:
 //   cd scripts/web && npm install && npx playwright install --with-deps chromium
-// then: node scripts/web/live_check.mjs [page URL, default http://127.0.0.1:3000/]
+// then: node scripts/web/live_check.mjs [page URL, default http://127.0.0.1:7860/; http://127.0.0.1:3000/ for npm run dev]
 import { chromium } from "playwright"
 import { execFileSync } from "child_process"
 import { dirname, resolve } from "path"
 import { fileURLToPath } from "url"
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
-const URL = process.argv[2] || "http://127.0.0.1:3000/"
+const URL = process.argv[2] || "http://127.0.0.1:7860/"
 let checks = 0, fails = 0
 const ok = (cond, msg) => { checks++; if (!cond) fails++; console.log(cond ? "ok  " : "FAIL", msg) }
 

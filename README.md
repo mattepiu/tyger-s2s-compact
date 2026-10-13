@@ -128,9 +128,12 @@ Paths inside a config are relative to the repo root. `CONFIG=<file> ./run.sh` ru
 ## Run & reach it
 
 ```bash
-./run.sh     # starts MOUTH (both engines + TTS warmup), waits for it, then EARS + the web app on :7860
+./run.sh     # builds the page if needed, starts MOUTH (both engines + TTS warmup), waits for it, then EARS on :7860
 CONFIG=/path/to/other.yaml ./run.sh   # alternate config for both processes
 ```
+
+Everything is on **one port, :7860**: the page at `/`, the classic page at `/classic`, the voice list at `/voices`
+and the conversations' WebSocket at `/ws`.
 
 Startup from a warm cache is ~2.1 min (VoxCPM2 ~45 s, Gemma 4 E4B ~40 s, TTS warmup incl. batch sizes 2–4
 ~25 s, EARS ~15 s). The very first start also downloads the models (~25 GB) and pays one-time compiles (VoxCPM2's
@@ -142,11 +145,7 @@ Browsers only allow the mic over **HTTPS or localhost**, so either:
 - **HTTPS** behind a reverse proxy (e.g. Caddy: `tyger.example.com { reverse_proxy localhost:7860 }`). The
   page upgrades the WebSocket to `wss` automatically when served over HTTPS.
 
-The page shows the live tuning sliders (endpoint τ / debounce, barge, backchannel) while they're being tuned (O-01);
-`?nodebug` hides them for a clean demo. The voice picker shows either way. Browser DSP (echo cancellation, noise
-suppression, auto gain) is on.
-
-**The new page (a trial, `web/`).** A friendlier page with:
+**The page** (`/`, built from `web/`):
 - one mic button, and the characters as tabs;
 - an orb in the middle ([OrbKit](https://github.com/zzzzshawn/orbkit)'s Ion, MIT, from the
   [Agents Kit](https://agents-ui.github.io/agents-kit/voice) registry). Its state follows the conversation (idle,
@@ -154,16 +153,27 @@ suppression, auto gain) is on.
   character has its own colours;
 - the exchange as text: your words as you say them, the agent's backchannels in a bubble beside them, its reply with
   the sources it cited; and the whole conversation in a history;
-- the live tuning in a panel over the page ("Tuning"): the meters with their thresholds and the sliders, as on the
-  classic page, so you can tune while you talk.
+- the live tuning in a panel over the page ("Tuning"): the meters with their thresholds and the sliders (endpoint τ /
+  debounce, barge, backchannel), so you can tune while you talk (O-01).
 
-It's the same WebSocket and the same audio code as the classic page. Run it beside the stack (node ≥ 22):
+It's a Next.js app exported to static files (`web/out/`), which EARS serves. **`run.sh` builds it** (`npm ci`, then
+`npm run build`) when the build is missing or older than the page's sources, and installs the page's packages only
+when they're missing or the lockfile changed. That needs Node ≥ 22 with `npm` on the PATH; without it, `run.sh` says
+so and starts anyway, and `/` serves the classic page until the page is built. To build it by hand:
+`cd web && npm ci && npm run build`. EARS picks up a new build without a restart.
+
+**The classic page** (`/classic`, `static/index.html`, linked from the page as "Classic view") is the plain one: a
+start button, the voice picker, the meters and the tuning sliders (`?nodebug` hides the sliders). Both pages run the
+same audio code and the same WebSocket, with the browser's echo cancellation, noise suppression and auto gain on.
+
+**Working on the page:** run it in dev mode beside the stack, with hot reload:
 
 ```bash
-cd web && npm install && npm run dev   # http://localhost:3000; /ws and /voices pass through to EARS on :7860
+cd web && npm install && npm run dev   # http://localhost:3000; /ws, /voices and /classic pass through to EARS on :7860
 ```
 
-Forward port 3000 the same way as 7860. The classic page is one click away from it ("Classic view").
+Forward port 3000 the same way as 7860. Run `npm run build` (or restart `run.sh`) when you're done, so :7860 serves
+the change.
 
 **The page's WebSocket** (`/ws`; for a client of your own; `app/ears/playback.py` has the details). All binary
 frames are little-endian, with int16 audio:

@@ -24,7 +24,7 @@ const LABELS: Record<Phase, string> = {
   speaking: "",                // the character's name
   barge: "Go ahead",
 }
-const CLASSIC = process.env.NEXT_PUBLIC_CLASSIC || "/"
+const CLASSIC = "/classic"     // EARS serves the classic page there (`npm run dev` passes it through)
 
 type Voices = { list: string[]; labels: Record<string, string> }
 const nameOf = (label: string | undefined, voice: string) => (label || voice).replace(/\s*\([^)]*\)$/, "")  // "Ori (ori)"

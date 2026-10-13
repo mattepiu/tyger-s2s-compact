@@ -1,19 +1,12 @@
-"""EARS's small parts on their own, GPU-free: AgentPlayback (the reply at the EARS rate, the server's playback guess)
-and EarsApp (the page, the busy page, the voice list) over a real aiohttp test server with the fake EARS plugin.
+"""EARS's small parts on their own, GPU-free: AgentPlayback (the reply at the EARS rate, the server's playback
+guess). The web app's HTTP side is in test_web.py.
 Run: .venv/bin/python tests/ears/test_parts.py"""
-import os, sys, asyncio, copy, time
+import os, sys, time
 
 TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.dirname(TESTS), TESTS]                      # the repo (app/) and tests/ (fakes.py)
 import numpy as np  # noqa: E402
-from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
-from app.config import load_config  # noqa: E402
 from app.ears.playback import AgentPlayback  # noqa: E402
-from app.ears.web import EarsApp  # noqa: E402
-from app.plugins.base import PluginContext  # noqa: E402
-from app.plugins.ears.fake import EnergyEars  # noqa: E402
-
-ROOT = os.path.dirname(TESTS)
 
 
 def test_playback_estimate():
@@ -59,38 +52,6 @@ def test_second_ear_does_not_depend_on_chunk_edges():
     pb = AgentPlayback(16000); pb.start(); pb.add(a24[:24000], 0); pb.start()   # a new reply starts clean
     pb.add(a24, 0)
     assert np.allclose(pb.audio[:pb.n16], whole, atol=1e-5)
-
-
-def app(max_sessions=1):
-    cfg = copy.deepcopy(load_config(os.path.join(ROOT, "config/fake.yaml")))
-    cfg["server"]["max_sessions"] = max_sessions
-    cfg["server"]["mouth_port"] = 1                             # nothing there: EARS-only conversations
-    return EarsApp(cfg, EnergyEars(cfg["ears"], PluginContext(None, cfg, "fake")))
-
-
-def test_page_busy_page_and_voices():
-    async def go():
-        ears = app(max_sessions=1)
-        async with TestClient(TestServer(ears.application())) as client:
-            assert (await client.get("/")).status == 200
-            v = await (await client.get("/voices")).json()
-            assert v == {"voices": ["fake"], "voice": "fake", "labels": {"fake": "Ori (fake)"}}   # the picker
-            ws1 = await client.ws_connect("/ws")
-            ready = await ws1.receive_json()
-            assert ready["type"] == "ready" and ready["mouth"] is False and ready["hop_ms"] == 320
-            assert ready["voices"] == v["voices"] and ready["labels"] == v["labels"]
-            assert [x["name"] for x in ready["sliders"]] == ["endpoint_silence_frames"]   # the plugin's own spec
-            assert ready["thresholds"] == {"endpoint_silence_frames": 6}
-            assert (await client.get("/")).status == 503                    # the one slot is taken
-            ws2 = await client.ws_connect("/ws")
-            assert (await ws2.receive_json()) == {"type": "busy"}
-            await ws1.close()
-            for _ in range(50):                                             # the slot frees when it ends
-                if not ears.ears.full():
-                    break
-                await asyncio.sleep(0.02)
-            assert (await client.get("/")).status == 200
-    asyncio.run(go())
 
 
 if __name__ == "__main__":

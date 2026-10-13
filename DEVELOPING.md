@@ -27,7 +27,7 @@ app/
     tasks.py               #   background tasks on the smart model (TaskRunner, TaskSlots)
   ears/                    # the EARS process (python -m app.ears)
     __main__.py            #   loads the plugin, runs the web app
-    web.py                 #   EarsApp: the page, the voice list, one Conversation per WebSocket
+    web.py                 #   EarsApp: the pages, the voice list, one Conversation per WebSocket
     conversation.py        #   Conversation: the turn-taking state machine and the floor queue
     playback.py            #   AgentPlayback: the reply as the page plays it, and the 2nd ear
   tools/
@@ -71,17 +71,19 @@ config/
   engines/voxcpm2.yaml     # vLLM-Omni's engine config for VoxCPM2
 scripts/
   stack/                   # against the running stack: smoke, load tests, the simulated page, the cut-in check
-  web/                     # the new page against the running stack, in headless Chromium (live_check.mjs)
+  web/                     # the page (web/) against the running stack, in headless Chromium (live_check.mjs)
   validate/                # GPU parity checks of EARS (the stack stopped); reference.py is the plain reference
   bench/                   # measurements, and the routing eval (escalation.py + escalation_set.yaml)
 tests/                     # GPU-free: ears/, mouth/, plugins/, the config / prompts / tools tests, fakes.py;
                            #   page/ holds the pages' own checks (node): page_check.mjs (jsdom), web_check.mjs
-static/index.html          # the page: mic capture (AudioWorklet), playback, the tags, the debug sliders
-web/                       # the new page (a trial, Next.js): lib/conversation.ts = the page's audio + WebSocket code,
-                           #   lib/talk.ts = what it shows (the phases), lib/tuning.ts = the live tuning (its
-                           #   panel: components/tuning.tsx), components/orb.tsx = the orb; OrbKit's
-                           #   files as copied from the Agents Kit registry (orbkit-shdr-13, with their licence) in
-                           #   components/voice-agents/orbkit/; `npm run dev` on :3000 passes /ws to EARS
+static/index.html          # the classic page (/classic): mic capture (AudioWorklet), playback, the tags, the sliders
+web/                       # the page (/), Next.js, exported to static files in web/out/ (`npm run build`; run.sh
+                           #   builds it when it's missing or stale), which EARS serves:
+                           #   lib/conversation.ts = the page's audio + WebSocket code, lib/talk.ts = what it shows
+                           #   (the phases), lib/tuning.ts = the live tuning (its panel: components/tuning.tsx),
+                           #   components/orb.tsx = the orb; OrbKit's files as copied from the Agents Kit registry
+                           #   (orbkit-shdr-13, with their licence) in components/voice-agents/orbkit/;
+                           #   `npm run dev` on :3000 for work on the page, passing /ws, /voices, /classic to EARS
 run.sh, stop.sh            # start and stop the stack
 ```
 
@@ -89,8 +91,9 @@ run.sh, stop.sh            # start and stop the stack
 
 ### Two processes
 
-- **EARS** (`app/ears`) serves the page and its WebSocket on :7860, and runs the turn-taking plugin for every
-  conversation (up to `server.max_sessions`, batched on one GPU thread).
+- **EARS** (`app/ears`) serves the pages (the page's static build at `/`, the classic page at `/classic`), the voice
+  list and the WebSocket on :7860, and runs the turn-taking plugin for every conversation (up to
+  `server.max_sessions`, batched on one GPU thread).
 - **MOUTH** (`app/mouth`) runs the conversation: the LLM roles, the tools and the TTS. Its models are in-process:
   the LLM on a vLLM `AsyncLLM`, VoxCPM2 on a vLLM-Omni `AsyncOmni`, both on one asyncio loop (`EngineLoop`). There is
   no HTTP hop to either.
@@ -551,7 +554,8 @@ own web search.
   tests/mouth/test_chunker.py           text chunking
   tests/ears/test_floor.py              floor requests on the Conversation state machine
   tests/ears/test_conversation.py       halting, the held endpoint, the reset after a barge, MOUTH's D
-  tests/ears/test_parts.py              AgentPlayback and the web app (busy page, voices)
+  tests/ears/test_parts.py              AgentPlayback
+  tests/ears/test_web.py                the web app: the pages and their files, the busy page, voices
   tests/ears/test_second_ear.py         the 2nd ear from the page's tags; the turn ends on the page's report
   tests/ears/test_asr_jobs.py           the ASR thread finishes its jobs, even on failure
   tests/ears/test_rules.py              the turn rules: endpoint, backchannel, barge-in
@@ -596,12 +600,13 @@ own web search.
 
   The scripts talk to EARS through a simulated page (`scripts/stack/page.py`). Compare with the last row of
   "Benchmarks" below for the same card.
-- **The new page, live** (any config; the stack and `cd web && npm run dev` running): once,
+- **The page, live** (any config; the stack running, so EARS serves the page's build): once,
   `cd scripts/web && npm install && npx playwright install --with-deps chromium`; then
-  `node scripts/web/live_check.mjs`. One real spoken turn through the page in headless Chromium (load_ears's
-  utterance, made by MOUTH's TTS, as the mic) with the Tuning panel open. It checks the words as spoken, the
-  transcript, the reply's text and audio, the `played` report, a slider's round trip to EARS and the meters, and
-  logs message types and lengths only.
+  `node scripts/web/live_check.mjs` (:7860; pass `http://127.0.0.1:3000/` to check `npm run dev` instead). After a
+  change in `web/`, rebuild first (`cd web && npm run build`). One real spoken turn through the page in headless
+  Chromium (load_ears's utterance, made by MOUTH's TTS, as the mic) with the Tuning panel open. It checks the words as
+  spoken, the transcript, the reply's text and audio, the `played` report, a slider's round trip to EARS and the
+  meters, and logs message types and lengths only.
 - **Comparing two stacks:** `scripts/bench/stack.sh TAG CONFIG STACK_LOG` runs the same sequence each time, and
   `scripts/bench/summary.py TAG [TAG...]` lines the runs up. `llm_weights.py` gives the LLM's GPU memory per module
   and its decode speed; `tts_voice.py` the cloned voice's first audio per request.

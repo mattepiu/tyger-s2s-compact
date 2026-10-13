@@ -3,7 +3,8 @@
 #   1. MOUTH  (app.mouth): the orchestrator + BOTH models in-process on vLLM engines -- the LLM (Gemma 4 E4B,
 #      vLLM AsyncLLM) and VoxCPM2 (vLLM-Omni AsyncOmni). Chunks the reply and streams TTS audio back to EARS
 #      over TCP (:8770).
-#   2. EARS   (app.ears): nemotron + endpoint head + the web app (:7860).
+#   2. EARS   (app.ears): nemotron + endpoint head + the web app (:7860): the new page at /, the classic page at
+#      /classic. The new page is web/'s static build (web/out/), made here first when it's missing or out of date.
 # MOUTH starts first so its engines claim their (pinned) GPU memory before EARS loads (DEVELOPING.md -> "GPU memory").
 #
 # Reach it: the web app serves on :7860 (config/default.yaml server.port). The mic needs a secure context, so either
@@ -27,6 +28,28 @@ PY="$VENV/bin/python"
 CFG_ARGS=(); [ -n "${CONFIG:-}" ] && CFG_ARGS=(--config "$CONFIG")   # another config (default: config/default.yaml)
 MOUTH_PORT="${MOUTH_PORT:-8770}"   # must match config/default.yaml server.mouth_port
 [ -x "$PY" ] || { echo "venv not found at $VENV (see README install)"; exit 1; }
+
+# The new page: build it when web/out/ has no build or one older than the page's sources; install its packages only
+# when they're missing or the lockfile changed. Without npm, or if the build fails, start anyway: EARS then serves the
+# last build, or the classic page at / as well.
+build_page() {
+  local index=web/out/index.html served="the classic page"
+  if [ -f "$index" ]; then
+    local newer; newer=$(find web/app web/components web/lib web/*.json web/*.mjs -newer "$index" -print -quit || true)
+    [ -z "$newer" ] && return 0
+    served="the new page's last build"
+  fi
+  if ! command -v npm >/dev/null; then
+    echo "npm not found: the new page can't be built, so / serves $served (README -> \"Run & reach it\")"; return 0
+  fi
+  echo "=== building the page (web/) ==="
+  local installed=web/node_modules/.package-lock.json       # npm's record of what it installed
+  if [ ! -f "$installed" ] || [ web/package-lock.json -nt "$installed" ]; then
+    (cd web && npm ci --no-audit --no-fund) || { echo "npm ci failed: / serves $served"; return 0; }
+  fi
+  (cd web && npm run build) || echo "the page build failed (above): starting anyway"
+}
+build_page
 
 PIDS=()
 cleanup() { for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done; }
