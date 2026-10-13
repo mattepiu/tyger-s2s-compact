@@ -59,11 +59,12 @@ tts:                       # VoxCPM2, in-process vLLM-Omni AsyncOmni inside the 
 voices:
   dir: voices              # repo-relative dir of *.wav reference clips (+ optional <name>.txt transcript);
                            # gitignored -- voice clips are personal data, never committed
-  default: ori             # active voice name (stem of the chosen wav); falls back to the first clip
-  character: ori           # who every voice speaks as: a character in config/prompts.yaml -> persona.characters
+  default: mira            # active voice name (stem of the chosen wav); falls back to the first clip
+  character: mira          # who every voice speaks as: a character in config/prompts.yaml -> persona.characters
   characters:              # the exceptions, voice name -> character; picking that voice in the page switches to it
-    mike: mike             #   (mike and andrew are drafts)
-    andrew: andrew
+    aria: aria             #   mira and aria: women's voices; kai and rex: men's
+    kai: kai
+    rex: rex
 
 mouth:
   prompts: config/prompts.yaml       # every prompt MOUTH sends to an LLM (loader: app/prompts/)

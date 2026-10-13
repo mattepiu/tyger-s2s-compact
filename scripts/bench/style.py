@@ -7,7 +7,7 @@ and the routes taken (a turn answered with a tool call is counted, not scored). 
 turn as MOUTH sends it (messages.reply_prefix in the config's mode, with its tools), so there are no hosted calls and
 no cost. Needs the GPU free (stop run.sh). The turns are synthetic; `--show` prints some replies to read.
 
-  .venv/bin/python scripts/bench/style.py [--samples 3] [--prompts a.yaml,b.yaml] [--character ori] [--no-expert]
+  .venv/bin/python scripts/bench/style.py [--samples 3] [--prompts a.yaml,b.yaml] [--character mira,aria] [--no-expert]
       [--show 8]
 """
 import sys, re, argparse, collections, logging, random
@@ -111,10 +111,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
     ap.add_argument("--prompts", default=None, help="comma-separated prompt files to compare (default: config's)")
-    ap.add_argument("--character", default=None, help="default: the config's default character (voices.character)")
+    ap.add_argument("--character", default=None, help="comma-separated characters, each run on the same model load "
+                    "(default: the config's default character, voices.character)")
     ap.add_argument("--samples", type=int, default=3)
     ap.add_argument("--no-expert", action="store_true", help="the prompt and tools without a smart model")
-    ap.add_argument("--show", type=int, default=8, help="replies to print per prompt file")
+    ap.add_argument("--show", type=int, default=8, help="replies to print per prompt file and character")
     a = ap.parse_args()
     cfg = load_config(a.config)
     block = dict(cfg["llm"]["reply"])
@@ -125,12 +126,12 @@ def main():
     for pf in (a.prompts.split(",") if a.prompts else [cfg["mouth"].get("prompts") or "config/prompts.yaml"]):
         cfg["mouth"]["prompts"] = str(repo_path(pf))
         p = load_prompts(cfg)
-        character = a.character or Characters(cfg, p).default
-        results = run(llm, p, character, expert, tasks, a.samples, int(cfg["mouth"].get("max_gen", 192)),
-                      int(block.get("max_num_seqs", 8)))
-        mode = "tasks" if tasks else "expert" if expert else "no expert"
-        report(results, f"{name}, prompts {Path(pf).name}, character {character} ({mode}), {len(TURNS)} turns x "
-                        f"{a.samples}", a.show)
+        for character in (a.character.split(",") if a.character else [Characters(cfg, p).default]):
+            results = run(llm, p, character, expert, tasks, a.samples, int(cfg["mouth"].get("max_gen", 192)),
+                          int(block.get("max_num_seqs", 8)))
+            mode = "tasks" if tasks else "expert" if expert else "no expert"
+            report(results, f"{name}, prompts {Path(pf).name}, character {character} ({mode}), {len(TURNS)} turns x "
+                            f"{a.samples}", a.show)
     llm.shutdown()
 
 

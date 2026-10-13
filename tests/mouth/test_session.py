@@ -344,9 +344,9 @@ def test_no_expert_without_smart():
     s, m = make_session(FakeLLM())
     run_turn(s, "hello")
     msgs = s.m.llm.calls[0][1]
-    ori = m.characters.default
-    assert msgs[0]["content"] == PROMPTS.system(ori, "system", "voice_tools") and msgs[-1]["content"] == "hello"
-    assert msgs[:-1] == reply_prefix(PROMPTS, ori, False)           # system + the lookup few-shot turns
+    mira = m.characters.default
+    assert msgs[0]["content"] == PROMPTS.system(mira, "system", "voice_tools") and msgs[-1]["content"] == "hello"
+    assert msgs[:-1] == reply_prefix(PROMPTS, mira, False)          # system + the lookup few-shot turns
     assert not any(c["name"] == "ask_expert" for x in msgs if x.get("tool_calls") for c in x["tool_calls"])
     assert "ask_expert" not in [t["function"]["name"] for t in m.tools]
 
@@ -360,25 +360,40 @@ def test_voice_switch_changes_the_character_next_turn():
     """The page picks another voice (V): the next turn's reply and expert requests open with that voice's character
     (voices.characters), and the conversation's history stays."""
     llm, smart = FakeLLM(), FakeLLM()
-    s, m = make_session(llm, FakeTTS(n=2), smart=smart, voices={"character": "ori", "characters": {"alt": "mike"}})
+    s, m = make_session(llm, FakeTTS(n=2), smart=smart, voices={"character": "mira", "characters": {"alt": "rex"}})
     run_turn(s, "hello there")
-    assert persona_of(llm.calls[-1][1]) == "ori"
+    assert persona_of(llm.calls[-1][1]) == "mira"
     s._dispatch(b"V", json.dumps({"voice": "alt"}).encode())
-    assert s.voice_name == "alt" and s.character == "mike"
-    llm.text["reply"] = ASK                                        # this turn escalates: the expert speaks as Mike too
+    assert s.voice_name == "alt" and s.character == "rex"
+    llm.text["reply"] = ASK                                        # this turn escalates: the expert speaks as Rex too
     run_turn(s, "and how much would that be?")
     reply = next(msgs for kind, msgs in llm.calls if kind == "reply" and msgs[-1]["content"].startswith("and how"))
-    assert persona_of(reply) == "mike" and persona_of(smart.calls[-1][1]) == "mike"
+    assert persona_of(reply) == "rex" and persona_of(smart.calls[-1][1]) == "rex"
     assert any(x["role"] == "user" and x["content"] == "hello there" for x in reply), "history kept"
 
 
 def test_unlisted_voice_gets_the_default_character():
     llm = FakeLLM()
-    s, m = make_session(llm, voices={"character": "ori", "characters": {"alt": "mike"}})
+    s, m = make_session(llm, voices={"character": "mira", "characters": {"alt": "kai"}})
     s.set_voice("alt"); run_turn(s, "hi")
-    assert persona_of(llm.calls[-1][1]) == "mike"
+    assert persona_of(llm.calls[-1][1]) == "kai"
     s.set_voice("new"); run_turn(s, "hi again")                    # a voice with no entry: the default character
-    assert s.character == "ori" and persona_of(llm.calls[-1][1]) == "ori"
+    assert s.character == "mira" and persona_of(llm.calls[-1][1]) == "mira"
+
+
+def test_each_shipped_voice_speaks_as_its_character():
+    """With config/default.yaml's voices block: the session starts as Mira, and picking each voice on the page (V)
+    makes the next turn speak as that voice's character."""
+    from app.config import ROOT, load_config
+    llm = FakeLLM()
+    s, m = make_session(llm, voices=load_config(str(ROOT / "config/default.yaml"))["voices"])
+    m.VOICES = ("mira", "aria", "kai", "rex")                      # the clips in voices/
+    run_turn(s, "hi")
+    assert s.character == "mira" and persona_of(llm.calls[-1][1]) == "mira"
+    for voice in ("aria", "kai", "rex", "mira"):
+        s._dispatch(b"V", json.dumps({"voice": voice}).encode())
+        run_turn(s, f"hi {voice}")
+        assert (s.voice_name, s.character, persona_of(llm.calls[-1][1])) == (voice, voice, voice)
 
 
 def test_expert_prompt_has_shots_and_tool():

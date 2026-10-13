@@ -27,7 +27,7 @@ const LABELS: Record<Phase, string> = {
 const CLASSIC = "/classic"     // EARS serves the classic page there (`npm run dev` passes it through)
 
 type Voices = { list: string[]; labels: Record<string, string> }
-const nameOf = (label: string | undefined, voice: string) => (label || voice).replace(/\s*\([^)]*\)$/, "")  // "Ori (ori)"
+const nameOf = (label: string | undefined, voice: string) => (label || voice).replace(/\s*\([^)]*\)$/, "")  // "Mira (mira)"
 
 function useTicks(on: boolean) {              // re-render 10 times a second while talking: the phases have timers
   const [, setTick] = useState(0)

@@ -21,11 +21,12 @@ const PARAMS = { coreGain: 0 }  // no glowing nucleus: it read as a red dot in t
 // By voice: the filaments' colour near the middle (inner) and at the glass (arc).
 type Colors = { inner: string; arc: string }
 const COLORS: Record<string, Colors> = {
-  ori: { inner: "#a78bfa", arc: "#5a5cff" },      // violet
-  mike: { inner: "#67e8f9", arc: "#0e8fd6" },     // cyan
-  andrew: { inner: "#fcd34d", arc: "#f05a14" },   // amber
+  mira: { inner: "#a78bfa", arc: "#5a5cff" },     // violet
+  aria: { inner: "#f9a8d4", arc: "#e0367a" },     // rose
+  kai: { inner: "#67e8f9", arc: "#0e8fd6" },      // cyan
+  rex: { inner: "#fcd34d", arc: "#f05a14" },      // amber
 }
-const OTHER = COLORS.ori
+const OTHER = COLORS.mira                         // any other voice speaks as Mira, the default
 
 type Volumes = { input?: number; output?: number }
 

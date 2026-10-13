@@ -140,7 +140,7 @@ await sleep(40);
 ok(W._ws.sent.includes("played:1:2400"), `the new reply 1's report counts only its own samples: ${W._ws.sent.filter(m => typeof m === "string")}`);
 
 // ---- the voice picker: shown for everyone (each voice is a character), the sliders only in debug ---------------
-const VOICES = { voices: ["andrew", "ori"], voice: "ori", labels: { andrew: "Andrew (andrew)", ori: "Ori (ori)" } };
+const VOICES = { voices: ["aria", "mira"], voice: "mira", labels: { aria: "Aria (aria)", mira: "Mira (mira)" } };
 async function pickerPage(query) {
   const d = new JSDOM(html, { runScripts: "dangerously", url: "http://localhost:7860/" + query,
     beforeParse(W) {
@@ -153,14 +153,14 @@ async function pickerPage(query) {
 for (const query of ["", "?nodebug"]) {
   const P = await pickerPage(query), sel = P.document.getElementById("voice"), at = query || "(no query)";
   ok(!sel.hidden, `the voice picker shows ${at}`);
-  ok([...sel.options].map(o => o.textContent).join() === "Andrew (andrew),Ori (ori)",
+  ok([...sel.options].map(o => o.textContent).join() === "Aria (aria),Mira (mira)",
      `entries name the character, then the voice ${at}: ${[...sel.options].map(o => o.textContent)}`);
   ok(P.document.getElementById("tune").hidden === (query === "?nodebug"), `the sliders show only in debug ${at}`);
   P.eval("ws = new WebSocket('ws://localhost:7860/ws')");
   P.eval("onEvent")({ data: JSON.stringify({ type: "ready", hop_ms: 320, sr: 16000, mouth: true, sliders: [], thresholds: {}, ...VOICES }) });
   ok(P._ws.sent.includes("voice:" + sel.value), `the picked voice is sent at the start ${at}: ${P._ws.sent}`);
-  sel.value = "andrew"; sel.dispatchEvent(new P.Event("change"));
-  ok(P._ws.sent.at(-1) === "voice:andrew", `picking a voice sends voice:<name> ${at}: ${P._ws.sent}`);
+  sel.value = "aria"; sel.dispatchEvent(new P.Event("change"));
+  ok(P._ws.sent.at(-1) === "voice:aria", `picking a voice sends voice:<name> ${at}: ${P._ws.sent}`);
 }
 
 // ---- the links a reply cites (I-25): under it, http(s) only, as text; a new reply starts without them -----------

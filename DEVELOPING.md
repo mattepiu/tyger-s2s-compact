@@ -332,17 +332,20 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Run & rea
 - **Characters.** The reply system prompts (`system.voice_tools`, `escalation.system`, `tasks.reply_system`) and
   the smart model's (`smart.system`) open with a character: a few lines on who the agent is, its name, maker and
   manner (`persona.characters` in `config/prompts.yaml`). Then comes the prompt as it was (`Prompts.system`).
-  - Ori is the default, from the user's Ori prompt. Mike and Andrew are drafts for the user to rewrite.
+  - Four characters, one per voice (2026-10-13): Mira, the default, and Aria, with women's voices; Kai and Rex, with
+    men's. Each is about 90 words. They replaced Ori and the drafts Mike and Andrew.
   - The expert's answers are spoken in the same voice, so the smart prompt gets the character too. The fillers
     (lead-ins, still-looking lines, backchannels) and the background task's prompt don't.
-  - The user's full Ori prompt (2026-10-12: a long style base, opinions, "extremely knowledgeable") was measured
-    first and failed the routing gate: 17.4% missed escalations, 12.5% with Ori-style few-shot lines. E4B then
-    answered explanations, advice and code itself. A few lines before the old prompt keep routing where it was.
+  - Keep a character to a few lines, and measure routing for a new one (`escalation.py --character`). A long persona
+    (the user's full Ori prompt, 2026-10-12: a long style base, opinions, "extremely knowledgeable") failed the
+    routing gate: 17.4% missed escalations, 12.5% with Ori-style few-shot lines. E4B then answered explanations,
+    advice and code itself. A few lines before the old prompt keep routing where it was.
 - **The character follows the voice.** Config `voices.character` is every voice's character, and
   `voices.characters` maps a voice to another one. A voice that isn't listed gets the default. A character that
   isn't in the prompts file stops startup with the key named (`Characters`, checked in both processes). When the
   page picks another voice (`voice:<name>` → `V`), the next turn speaks as that voice's character, and history
-  stays. The picker labels each voice with its character, e.g. "Ori (ori)".
+  stays. The picker labels each voice with its character, e.g. "Mira (mira)". A clip that `voices.characters`
+  doesn't list speaks as the default character, Mira.
 - **The few-shot turns are shared** by every character, so their style carries into each one.
 - **Few-shot turns, not quoted examples.** Small models copy a quoted example word for word. Qwen3-4B said "Sure,
   let me check that for you." on every tool turn, and the first backchannel prompt's 'mm-hm' nearly every time.
@@ -614,9 +617,10 @@ own web search.
   stubbed): `.venv/bin/python scripts/bench/escalation.py --samples 8`, with and without `--no-expert`. It covers
   local, tool, expert and background routes on 119 synthetic English cases, plus spoken markup. The gate for any
   prompt or model change: at most 10% missed escalations, and no regression in tool calls or spoken markup.
-  `--character NAME` routes with another character's persona (default: the config's).
+  `--character mira,aria,kai,rex` routes with each of those characters in turn, on one model load (default: the
+  config's).
 - **Style** (stack stopped, no hosted calls): `.venv/bin/python scripts/bench/style.py --samples 3`, with
-  `--prompts a.yaml,b.yaml` to compare prompt files and `--character NAME`. It counts, over 36 synthetic
+  `--prompts a.yaml,b.yaml` to compare prompt files and `--character a,b`. It counts, over 36 synthetic
   conversational turns, the local replies with markup (digits, symbols, emoji, parentheticals or action lines), with
   more than three sentences, and with a disfluency or filler word, and prints a few to read.
 - **The expert, live:** `scripts/stack/barged_round.py` (cut in on the expert's lead-in) calls OpenAI, so it needs the
@@ -647,11 +651,15 @@ only within one box and config.
 | 2026-10-11 | after the cleanup (English only), no `smart`, same box | 204 ms | 473–517 ms (3 runs) | 935–959 / 1057–1096 ms (2 / 3 runs) | 30.1 GB |
 | 2026-10-12 | `9caeca9`, no `smart`, voice `ori`, a fresh container on an RTX 5090 (this round's baseline) | 202 ms | 458–520 ms (3 runs) | 835–846 / 870–975 ms | 30.3 GB |
 | 2026-10-12 | `e7b7eea`, Ori's character, same box | 215 ms | 459–514 ms (3 runs) | 836–892 / 920–974 ms (the reply varies: 2–10 texts a run) | 30.2 GB |
+| 2026-10-13 | `477c061`, no `smart`, voice `mira` with Ori's character, a new container on an RTX 5090 (this round's baseline) | 204 ms | 404–433 ms (3 runs) | 717–771 / 797–849 ms | 30.2 GB |
+| 2026-10-13 | the four characters (Mira's), same box | 276 ms (one sample) | 426–454 ms (3 runs) | 730 / 777–780 ms (one reply text again) | 30.2 GB |
 
 The voice changes the end-of-speech numbers: `load_ears.py` speaks its utterance in the default voice, and with the
 `ori` clip the endpoint comes ~100 ms sooner than on the last box. Since the characters, `load_ears.py`'s "count to
 ten" reply is no longer the same text every turn (2–10 distinct texts in a run, was 1), so its end-of-speech → audio
-varies more. Run it with the default voice every time (the user, 2026-10-13), and compare 3-run medians.
+varies more. Run it with the default voice every time (the user, 2026-10-13), and compare 3-run medians. With Mira's
+character it's one text again, and the box of 2026-10-13 (driver 595.58, a 24-core Threadripper) gives ~100 ms less
+than the box before.
 
 "End of speech → first audio" is what the user hears as the response gap. About 600–850 ms of it is endpoint
 detection, which live tuning of the endpoint thresholds is meant to cut (O-01).
@@ -667,8 +675,18 @@ decode runs near the bandwidth ratio, and EARS has less compute on the PRO 5000.
 | GPU peak at 4 sessions | 30.2 GB | 29.9 GB |
 
 **Routing** (`scripts/bench/escalation.py --samples 8`, Gemma E4B, the default English prompts, the RTX 5090 of
-2026-10-11): with `smart` and tasks on, 119 cases, 100.0% right and 0.0% missed escalations, every live-fact sample
-to the expert; without the expert, 44 cases, 100.0% right.
+2026-10-13), per character: with `smart` and tasks on, 119 cases; without the expert, 44 cases.
+
+| Character | Right | Missed escalations | Tool → local | Without the expert |
+|---|---|---|---|---|
+| Mira (2 runs) | 98.4%, 99.1% | 2.4%, 1.6% | 1.4%, 0.0% | 100.0% |
+| Aria | 99.1% | 1.6% | 0.0% | 100.0% |
+| Kai | 98.8% | 1.9% | 0.0% | 100.0% |
+| Rex | 99.4% | 0.9% | 1.4% | 100.0% |
+| Ori (gone; same box, for comparison) | 99.7% | 0.5% | 0.0% | 99.4% |
+
+The misses are mostly explanations answered locally (how TCP's handshake works, why the sky is blue "with the actual
+physics"); a "tool → local" of 1.4% is one sample of a message request in 72.
 
 **Responders measured against Gemma 4 E4B** (the gate: at most 10% of hard questions answered locally):
 

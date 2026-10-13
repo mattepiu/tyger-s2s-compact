@@ -134,7 +134,7 @@ function populateVoices(list, cur, labels){ const sel=$('voice'); if(!list||!lis
   let saved=null; try{saved=localStorage.getItem('tyger_voice');}catch(e){}
   const want=(saved && list.includes(saved)) ? saved : (cur||list[0]);
   sel.innerHTML=''; list.forEach(v=>{ const o=document.createElement('option'); o.value=v;
-    o.textContent=(labels&&labels[v])||v; if(v===want)o.selected=true; sel.appendChild(o); });   // "Ori (ori)"
+    o.textContent=(labels&&labels[v])||v; if(v===want)o.selected=true; sel.appendChild(o); });   // "Mira (mira)"
   sel.hidden=false; }
 // populate the picker on page load (before Start) so a pick is shown + remembered even without the WS
 fetch('/voices').then(r=>r.json()).then(d=>populateVoices(d.voices,d.voice,d.labels)).catch(()=>{});

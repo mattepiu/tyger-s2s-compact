@@ -18,7 +18,8 @@ real), and scores that answer's speech the same way.
 
   .venv/bin/python scripts/bench/escalation.py [--samples 8] [--no-expert] [--opt temperature=0.5] [--plugin NAME]
       [--split heldout] [--prompts config/prompts.yaml,/path/candidate.yaml]   several prompt files: one model load
-      [--character ori]   the character the reply prompts open with (default: the config's default)
+      [--character mira,aria]   the characters the reply prompts open with, one after the other on one model load
+                                (default: the config's default)
 """
 import sys, re, json, argparse, logging, collections
 from concurrent.futures import ThreadPoolExecutor
@@ -160,6 +161,39 @@ def report(results, title):
             "narration": issues["narration"], "spoke": spoken, "pb_narration": pb_issues["narration"], "pb_n": len(pb)}
 
 
+def run(llm, p, character, cases, a, title, max_new, workers, expert, tasks):
+    """One prompt file with one character: the rates (also per split), then the misrouted cases and the speech
+    issues, printed."""
+    results = evaluate(llm, p, character, cases, a.samples, max_new, workers, expert=expert, tasks=tasks)
+    out = report(results, title)
+    for split in SPLITS if a.split == "all" else ():
+        part = [r for r in results if r[0]["split"] == split]
+        if part:
+            out[split] = report(part, f"{title}: {split} only")
+    wrong = collections.defaultdict(list); said = collections.defaultdict(list)
+    for c, got, text, pbtext in results:
+        for issue in speech_issues(pbtext or ""):
+            said[c["id"]].append(f"after tool, {issue}: {pbtext.strip()[:90]!r}")
+        if not right(c, got):
+            wrong[c["id"]].append(got)
+            if text.strip() and len(said[c["id"] + ":misrouted"]) < 2:
+                said[c["id"] + ":misrouted"].append(text.strip()[:90])
+        for issue in speech_issues(text):
+            said[c["id"]].append(f"{issue}: {text.strip()[:90]!r}")
+    out["wrong"] = wrong; out["speech"] = said
+    print("\nmisrouted (id, expected, got per sample):")
+    for c in cases:
+        if c["id"] in wrong:
+            print(f"  {c['id']} [{c['split']}] {c['route']} -> {','.join(wrong[c['id']])}: {c['user']}")
+            for t in said.get(c["id"] + ":misrouted", []):
+                print(f"      said: {t!r}")
+    print("\nspeech issues (id: issue: what it would say):")
+    for c in cases:
+        for line in said.get(c["id"], [])[:2]:  # (misrouted samples' text is listed above)
+            print(f"  {c['id']}: {line}")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
@@ -173,7 +207,8 @@ def main():
                     "ask_expert); expert cases are skipped")
     ap.add_argument("--no-tasks", action="store_true", help="the prompt and tools without background tasks, "
                     "even if config/default.yaml has them on; background cases are skipped")
-    ap.add_argument("--character", default=None, help="default: the config's default character (voices.character)")
+    ap.add_argument("--character", default=None, help="comma-separated characters, each evaluated on the same model "
+                    "load (default: the config's default character, voices.character)")
     ap.add_argument("--opt", action="append", default=[], help="override a reply-block option, e.g. "
                     "gpu_memory_utilization=0.8 (YAML value)")
     a = ap.parse_args()
@@ -195,38 +230,12 @@ def main():
     for pf in (a.prompts.split(",") if a.prompts else [cfg["mouth"].get("prompts") or "config/prompts.yaml"]):
         cfg["mouth"]["prompts"] = str(repo_path(pf))
         p = load_prompts(cfg)
-        character = a.character or Characters(cfg, p).default
-        results = evaluate(llm, p, character, cases, a.samples, int(cfg["mouth"].get("max_gen", 192)),
-                           int(block.get("max_num_seqs", 8)), expert=expert, tasks=tasks)
-        mode = "tasks" if tasks else "expert" if expert else "no expert"
-        title = (f"{name}, prompts {Path(pf).name}, character {character} ({mode}), split {a.split}, "
-                 f"{len(cases)} cases x {a.samples}")
-        out[pf] = report(results, title)
-        for split in SPLITS if a.split == "all" else ():
-            part = [r for r in results if r[0]["split"] == split]
-            if part:
-                out[pf][split] = report(part, f"{title}: {split} only")
-        wrong = collections.defaultdict(list); said = collections.defaultdict(list)
-        for c, got, text, pbtext in results:
-            for issue in speech_issues(pbtext or ""):
-                said[c["id"]].append(f"after tool, {issue}: {pbtext.strip()[:90]!r}")
-            if not right(c, got):
-                wrong[c["id"]].append(got)
-                if text.strip() and len(said[c["id"] + ":misrouted"]) < 2:
-                    said[c["id"] + ":misrouted"].append(text.strip()[:90])
-            for issue in speech_issues(text):
-                said[c["id"]].append(f"{issue}: {text.strip()[:90]!r}")
-        out[pf]["wrong"] = wrong; out[pf]["speech"] = said
-        print("\nmisrouted (id, expected, got per sample):")
-        for c in cases:
-            if c["id"] in wrong:
-                print(f"  {c['id']} [{c['split']}] {c['route']} -> {','.join(wrong[c['id']])}: {c['user']}")
-                for t in said.get(c["id"] + ":misrouted", []):
-                    print(f"      said: {t!r}")
-        print("\nspeech issues (id: issue: what it would say):")
-        for c in cases:
-            for line in said.get(c["id"], [])[:2]:  # (misrouted samples' text is listed above)
-                print(f"  {c['id']}: {line}")
+        for character in (a.character.split(",") if a.character else [Characters(cfg, p).default]):
+            mode = "tasks" if tasks else "expert" if expert else "no expert"
+            title = (f"{name}, prompts {Path(pf).name}, character {character} ({mode}), split {a.split}, "
+                     f"{len(cases)} cases x {a.samples}")
+            out[f"{pf}:{character}"] = run(llm, p, character, cases, a, title, int(cfg["mouth"].get("max_gen", 192)),
+                                           int(block.get("max_num_seqs", 8)), expert, tasks)
     if a.json:
         Path(a.json).write_text(json.dumps(out, ensure_ascii=False, indent=1))
     llm.shutdown()

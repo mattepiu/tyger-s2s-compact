@@ -36,7 +36,7 @@ def list_voices(cfg):
 class EarsApp:
     def __init__(self, cfg, ears, build=BUILD):
         self.cfg = cfg; self.ears = ears              # ears: the EARS plugin (app/plugins/base.py EarsPlugin)
-        self.characters = Characters(cfg, load_prompts(cfg))      # the picker's labels: "Ori (ori)"
+        self.characters = Characters(cfg, load_prompts(cfg))      # the picker's labels: "Mira (mira)"
         self.voices, self.default_voice = list_voices(cfg)
         self.build = Path(build).resolve()
         self.told_unbuilt = False

@@ -51,16 +51,18 @@ def test_reply_shots_checked():
 def test_persona_checked():
     d = copy.deepcopy(P.d); d["persona"]["characters"] = {}
     expect_error(d, "persona.characters")
-    d = copy.deepcopy(P.d); del d["persona"]["characters"]["ori"]["name"]
-    expect_error(d, "persona.characters.ori", "{name, text}")
+    d = copy.deepcopy(P.d); del d["persona"]["characters"]["mira"]["name"]
+    expect_error(d, "persona.characters.mira", "{name, text}")
 
 
 def test_character_opens_every_reply_and_smart_prompt():
     """Every reply system prompt (each mode) and the smart model's open with the character's lines, then the
-    prompt as it was; one character at a time; Ori is the first character, the default."""
+    prompt as it was; one character at a time. The four characters (2026-10-13): Mira first, the default; Ori, Mike
+    and Andrew are gone."""
     from app.mouth.messages import reply_prefix, smart_messages
-    assert P.characters()[0] == "ori" and P.character_name("ori") == "Ori"
-    assert len(P.characters()) >= 2, "a second character, to hear a voice switch"
+    assert P.characters() == ["mira", "aria", "kai", "rex"], P.characters()
+    assert [P.character_name(c) for c in P.characters()] == ["Mira", "Aria", "Kai", "Rex"]
+    assert not {"ori", "mike", "andrew"} & set(P.d["persona"]["characters"])
     for c in P.characters():
         text = P.d["persona"]["characters"][c]["text"]
         systems = {("system", "voice_tools"): reply_prefix(P, c, False)[0]["content"],
@@ -78,18 +80,32 @@ def test_characters_by_voice():
     too) gets the default; a character the prompts file lacks stops start-up with the key named."""
     from app.config import ConfigError
     from app.prompts import Characters
-    ch = Characters({"voices": {"character": "ori", "characters": {"mike": "mike"}}}, P)
-    assert (ch.of("mike"), ch.of("ori"), ch.of("added-later")) == ("mike", "ori", "ori")
-    assert ch.label("mike") == "Mike (mike)" and ch.label("ref") == "Ori (ref)"
-    assert Characters({"voices": {}}, P).default == "ori"                   # unset: the file's first character
+    ch = Characters({"voices": {"character": "kai", "characters": {"breezy": "aria"}}}, P)
+    assert (ch.of("breezy"), ch.of("kai"), ch.of("added-later")) == ("aria", "kai", "kai")
+    assert ch.label("breezy") == "Aria (breezy)" and ch.label("ref") == "Kai (ref)"
+    assert Characters({"voices": {}}, P).default == "mira"                  # unset: the file's first character
     for voices, key in (({"character": "nobody"}, "`voices.character: nobody`"),
-                        ({"characters": {"mike": "mikey"}}, "`voices.characters.mike: mikey`")):
+                        ({"characters": {"aria": "arya"}}, "`voices.characters.aria: arya`")):
         try:
             Characters({"voices": voices}, P)
         except ConfigError as e:
-            assert key in str(e) and "ori" in str(e), str(e)
+            assert key in str(e) and "mira" in str(e), str(e)
         else:
             raise AssertionError(f"accepted {voices}")
+
+
+def test_shipped_voices():
+    """config/default.yaml: Mira's voice is the default and Mira every voice's character, and aria, kai and rex each
+    speak as their own. A voice it doesn't list (an old clip left in voices/, e.g. ori) speaks as Mira."""
+    from app.config import ROOT, load_config
+    from app.prompts import Characters
+    cfg = load_config(str(ROOT / "config/default.yaml"))
+    assert cfg["voices"]["default"] == "mira" and cfg["voices"]["character"] == "mira"
+    ch = Characters(cfg, P)
+    assert {v: ch.of(v) for v in ("mira", "aria", "kai", "rex", "ori")} == \
+        {"mira": "mira", "aria": "aria", "kai": "kai", "rex": "rex", "ori": "mira"}
+    assert [ch.label(v) for v in ("mira", "aria", "kai", "rex", "ori")] == \
+        ["Mira (mira)", "Aria (aria)", "Kai (kai)", "Rex (rex)", "Mira (ori)"]
 
 
 def test_missing_character_stops_mouth_start():

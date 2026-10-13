@@ -93,11 +93,13 @@ voice name; `voices.default` picks the active one (falls back to the first clip)
 quality, uses the whole clip); without it the clip is trimmed to `tts.ref_max_s` (10 s). **Reference clips and
 transcripts are personal data: keep them on the box, and never commit, upload, or redistribute them.**
 
-**Each voice can have its own character.** A character is a few lines on who the agent is: its name, personality
-and humour (`persona.characters` in `config/prompts.yaml`). Ori is the default character; Mike and Andrew are drafts
-to rewrite. `voices.character` gives every voice its character, and `voices.characters` maps a voice to another
-one (`mike: mike`). The page's voice picker shows for everyone, each voice labelled with its character
-("Ori (ori)"). Picking another voice switches the character from the next turn, and the conversation goes on.
+**Each voice has its own character.** A character is a few lines on who the agent is: its name, personality and
+humour (`persona.characters` in `config/prompts.yaml`). There are four, one per voice: **Mira** (the default) and
+**Aria**, with women's voices, and **Kai** and **Rex**, with men's. Their clips are `voices/mira.wav`, `aria.wav`,
+`kai.wav` and `rex.wav`. `voices.character` gives every voice its character (`mira`), and `voices.characters` maps a
+voice to another one (`aria: aria`); any other clip in `voices/` speaks as Mira. The page shows the characters as
+tabs (the classic page as a picker, "Mira (mira)"). Picking another one switches the character from the next turn,
+and the conversation goes on.
 
 ### 4. Configure
 

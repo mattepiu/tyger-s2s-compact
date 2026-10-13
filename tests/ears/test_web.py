@@ -115,7 +115,7 @@ def test_page_busy_page_and_voices():
     async def fn(client):
         assert (await client.get("/")).status == 200
         v = await (await client.get("/voices")).json()
-        assert v == {"voices": ["fake"], "voice": "fake", "labels": {"fake": "Ori (fake)"}}   # the picker
+        assert v == {"voices": ["fake"], "voice": "fake", "labels": {"fake": "Mira (fake)"}}   # the picker
         ws1 = await client.ws_connect("/ws")
         ready = await ws1.receive_json()
         assert ready["type"] == "ready" and ready["mouth"] is False and ready["hop_ms"] == 320

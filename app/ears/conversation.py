@@ -40,7 +40,7 @@ class Conversation:
     def __init__(self, ws, ears, session, cfg, voices=(), default_voice=None, labels=None):
         self.ws = ws; self.ears = ears; self.session = session; self.cfg = cfg
         self.voices = list(voices); self.default_voice = default_voice
-        self.labels = labels or {}                       # voice -> its picker entry, e.g. "Ori (ori)"
+        self.labels = labels or {}                       # voice -> its picker entry, e.g. "Mira (mira)"
         self.hop_n = ears.hop_samples
         tasks = (cfg.get("mouth") or {}).get("tasks", {})
         self.floor_frames = math.ceil(float(tasks.get("announce_after_silence_ms", 1200)) / FRAME_MS)

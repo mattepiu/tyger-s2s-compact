@@ -35,7 +35,7 @@ Everything since the imported v1 baseline. It becomes the first release.
 
 ### Changed
 - **The new page is the default at `/`; the classic page moved to `/classic`.** Both are on the one port, :7860.
-- **The agent is Ori,** a warm, witty character with a chill vibe; the expert answers in the same voice.
+- **Four characters, one per voice: Mira (the default), Aria, Kai and Rex.** The expert answers in the same voice.
 - **Each voice can have its own character:** picking a voice on the page switches who you're talking to, and the
   picker shows for everyone.
 - **English only:** the agent answers in English, whatever language it hears.
