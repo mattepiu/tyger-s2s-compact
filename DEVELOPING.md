@@ -408,15 +408,16 @@ README → "API mode" has the settings; this is how they work.
   - the LLM: 3 GiB (`llm.reply.kv_cache_gib`, `max_num_seqs` 8, `max_model_len` 8192).
 
   `gpu_memory_utilization` is then only vLLM's start-up free-memory check.
-- **The peak at 4 conversations is ~30 GB:**
+- **The peak at 4 conversations is ~28 GB** (27.9 GB measured, 2026-10-13, tyger-s2s):
   - **the LLM, ~15 GB:** 10.4 GiB of weights, of which the per-layer embedding table is about half and stays bf16;
     the 3 GiB KV; CUDA graphs. bf16 weights wouldn't fit beside the rest. Offloading the embedding table to the CPU
     was rejected as too slow;
   - **VoxCPM2, ~9.2 GB:** ~4.5 GB of bf16 weights, the 2 GiB KV, a CUDA context, and working memory for 4 streams;
-  - **EARS, ~6 GB:** roughly nemotron in fp32 (2.4 GB; bf16 changed an event and wasn't faster), the heads
-    (~1.2 GB), their KV ring (2048 frames × 28 layers × 4 conversations ≈ 0.9 GB), graphs and allocator headroom.
-    `run.sh` sets `expandable_segments` for EARS; without it the cache fragmented past 9 GiB.
-- **Headroom.** A 5090 (32.6 GB) is left with ~2.5 GB, and a 48 GB RTX PRO 5000 with ~19 GB. Measure before adding
+  - **EARS, ~3.8 GB** (measured, after the load tests): nemotron in fp32 (2.4 GB; bf16 changed an event and wasn't
+    faster), the GRU (56 MB), its state (9 KiB a conversation), a CUDA context and working memory. With
+    nemotron-tyger-1.0 it was ~6 GB: its heads (~1.2 GB), their KV ring (2048 frames × 28 layers × 4 conversations
+    ≈ 0.9 GB) and graphs. `run.sh` sets `expandable_segments` for EARS; without it the cache fragmented past 9 GiB.
+- **Headroom.** A 5090 (32.6 GB) is left with ~4.7 GB, and a 48 GB RTX PRO 5000 with ~21 GB. Measure before adding
   anything.
 - **No memory work is planned** (the user, 2026-10-13: it fits the 5090). The figures above are estimates, not
   measurements. Don't cut anything unless the stack grows past the card.
@@ -712,6 +713,7 @@ only within one box and config.
 | 2026-10-12 | `e7b7eea`, Ori's character, same box | 215 ms | 459–514 ms (3 runs) | 836–892 / 920–974 ms (the reply varies: 2–10 texts a run) | 30.2 GB |
 | 2026-10-13 | `477c061`, no `smart`, voice `mira` with Ori's character, a new container on an RTX 5090 (this round's baseline) | 204 ms | 404–433 ms (3 runs) | 717–771 / 797–849 ms | 30.2 GB |
 | 2026-10-13 | the four characters (Mira's), same box | 276 ms (one sample) | 426–454 ms (3 runs) | 730 / 777–780 ms (one reply text again) | 30.2 GB |
+| 2026-10-13 | `94dc9e7`, EARS on `tyger-s2s` (ep_thr 0.915, barge 0.5, bc 0.4), same box | — | 431–475 ms (3 runs) | 711 / 746 ms | 27.9 GB |
 
 The voice changes the end-of-speech numbers: `load_ears.py` speaks its utterance in the default voice, and with the
 `ori` clip the endpoint comes ~100 ms sooner than on the last box. Since the characters, `load_ears.py`'s "count to
