@@ -1,7 +1,8 @@
 """NemotronAsr: everything specific to nemotron-3.5-asr (the checkpoint and revision the heads release pins, or
-ears.nemotron). Its processor and model, its log-mel features computed on the GPU, the layer-15 encode the tyger
-heads read (equal-length windows batched; all-zero windows cached), and transcription through its own greedy RNN-T
-decoder as a CUDA graph (rnnt.py), on a CUDA stream of its own so it never stalls the hop clock.
+ears.nemotron; tyger-s2s passes the copy its bundle carries). Its processor and model, its log-mel features computed
+on the GPU, the layer-15 encode the tyger heads read (equal-length windows batched; all-zero windows cached), and
+transcription through its own greedy RNN-T decoder as a CUDA graph (rnnt.py), on a CUDA stream of its own so it never
+stalls the hop clock.
 """
 from __future__ import annotations
 import threading
@@ -17,13 +18,13 @@ class _StopAtL15(Exception):
 
 
 class NemotronAsr:
-    def __init__(self, model_id=MODEL_ID, revision=None, device="cuda", max_batch=4, cuda_graph=True):
-        from transformers import AutoModel, AutoProcessor
+    def __init__(self, model, proc, device="cuda", max_batch=4, cuda_graph=True):
+        """model, proc: nemotron-3.5-asr's model (fp32) and processor, as loaded (from_hub, or a bundle's copy)."""
         self.device = device
-        self.proc = AutoProcessor.from_pretrained(model_id, revision=revision)
+        self.proc = proc
         self.fe = self.proc.feature_extractor
         self.fe.mel_filters = self.fe.mel_filters.to(device)   # features are computed on the GPU (self.features)
-        self.model = AutoModel.from_pretrained(model_id, revision=revision, dtype=torch.float32).to(device).eval()
+        self.model = model.to(device).eval()
         self.enc = self.model.encoder
         self._zero_enc = {}                    # window length -> L15 of an all-zero window
         # The heads read layer 15 of 24: their encodes stop there (a hook on that layer raises), ~1/3 less encoder
@@ -35,6 +36,13 @@ class NemotronAsr:
         self.rnnt = GraphedRNNT(self.model, max_batch=max_batch, max_frames=int(TURN_MAX_S / FRAME_S) + 8)
         if cuda_graph:
             self.rnnt.capture()
+
+    @classmethod
+    def from_hub(cls, model_id=MODEL_ID, revision=None, **kw):
+        """The checkpoint from the Hub (or a local directory) at `revision`."""
+        from transformers import AutoModel, AutoProcessor
+        return cls(AutoModel.from_pretrained(model_id, revision=revision, dtype=torch.float32),
+                   AutoProcessor.from_pretrained(model_id, revision=revision), **kw)
 
     def _l15_hook(self, mod, args, out):
         if getattr(self._tls, "stop", False):

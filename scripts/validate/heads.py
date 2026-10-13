@@ -35,7 +35,7 @@ def real_inputs(heads, n=4):
     n_win = int(WINDOW_S * SR)
     clip = lambda i: np.pad(np.asarray(ds[i]["audio"]["array"], np.float32), (0, n_win))[:n_win]  # noqa: E731
     fe = heads.frontend
-    asr = NemotronAsr(fe["repo_id"], fe["revision"], max_batch=1, cuda_graph=False)
+    asr = NemotronAsr.from_hub(fe["repo_id"], fe["revision"], max_batch=1, cuda_graph=False)
     users, agents = [clip(k) for k in range(n)], [0.6 * clip(k + n) for k in range(n)]
     hu, ha = torch.stack(asr.encode(users)), torch.stack(asr.encode(agents))
     energy = np.stack([rules.frame_energy(u) for u in users])

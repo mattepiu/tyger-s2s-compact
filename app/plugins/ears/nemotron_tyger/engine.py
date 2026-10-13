@@ -2,7 +2,8 @@
 
 Per tick: each conversation's (user, agent) 8 s windows go through nemotron-3.5-asr to layer 15 together (NemotronAsr,
 equal-length windows batched), then the tyger heads step frame by frame for all of them at once (HeadBatch: a KV ring
-slot per conversation, CUDA graphs), and each frame's outputs become events by the turn rules (rules.py). Transcription
+slot per conversation, CUDA graphs; tyger-s2s brings its GRU's GruBatch), and each frame's outputs become events by the
+turn rules (rules.py). Transcription
 runs on the ASR thread (Job queue): an ENDPOINT's hop resolves when its transcript is ready; long turns are
 transcribed in segments as they grow (I-05); the rolling partial of the turn (for backchannels, and the user's words
 so far for the page) lands asynchronously.
@@ -39,15 +40,21 @@ class EarsEngine:
                  nemotron_revision=None):
         """heads_dir: a TYGER-S2S-endpointer release (release.heads_release). The encoder is the one the release
         pins (its config's frontend), unless `nemotron` names another checkpoint."""
-        self.device = device; self.slots = slots
         self.heads = TygerHeads.from_pretrained(heads_dir, device=device)
         fe = self.heads.frontend
         model_id, revision = (nemotron, nemotron_revision) if nemotron else (fe["repo_id"], fe["revision"])
-        self.asr = NemotronAsr(model_id, revision, device=device, max_batch=slots, cuda_graph=cuda_graph)
-        self.head = HeadBatch(self.heads, slots, ring_len, device, cuda_graph=cuda_graph)
+        asr = NemotronAsr.from_hub(model_id, revision, device=device, max_batch=slots, cuda_graph=cuda_graph)
+        head = HeadBatch(self.heads, slots, ring_len, device, cuda_graph=cuda_graph)
         log.info("EARS engine: %d slots, ring %d frames, heads %s, encoder %s@%s, head CUDA graph=%s", slots,
                  ring_len, self.heads.config.get("version"), model_id, (revision or "latest")[:8],
-                 self.head.graph is not None)
+                 head.graph is not None)
+        self._start(asr, head, slots, device)
+
+    def _start(self, asr, head, slots, device):
+        """What every engine runs on: the ASR (a NemotronAsr), the heads' batched step (`head`: reset_slot(slot), and
+        step(entries) -> (slots, 8): state logits x4, then the hazard, yield, backchannel and endpoint probabilities),
+        and the ASR thread."""
+        self.asr = asr; self.head = head; self.slots = slots; self.device = device
         self.asr_q: queue.Queue = queue.Queue()
         self.t_enc = self.t_head = self.t_asr = 0.0          # busy seconds, reset by the stats log
         threading.Thread(target=self._asr_loop, name="ears-asr", daemon=True).start()
