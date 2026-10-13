@@ -375,7 +375,10 @@ README → "API mode" has the settings; this is how they work.
   the smart model's (`smart.system`) open with a character: a few lines on who the agent is, its name, maker and
   manner (`persona.characters` in `config/prompts.yaml`). Then comes the prompt as it was (`Prompts.system`).
   - Four characters, one per voice (2026-10-13): Mira, the default, and Aria, with women's voices; Kai and Rex, with
-    men's. Each is about 90 words. They replaced Ori and the drafts Mike and Andrew.
+    men's. Each is about 90 words, Mira 74. They replaced Ori and the drafts Mike and Andrew.
+  - Mira's replies ran longest, so the user cut a sentence ("You like ideas that take a minute to sink in…"). On
+    `style.py --samples 3`, one load: 28 → 23 words on average, replies over three sentences 10% → 0%; Aria 18, Kai
+    21, Rex 20.
   - The expert's answers are spoken in the same voice, so the smart prompt gets the character too. The fillers
     (lead-ins, still-looking lines, backchannels) and the background task's prompt don't.
   - Keep a character to a few lines, and measure routing for a new one (`escalation.py --character`). A long persona
@@ -727,11 +730,12 @@ decode runs near the bandwidth ratio, and EARS has less compute on the PRO 5000.
 | GPU peak at 4 sessions | 30.2 GB | 29.9 GB |
 
 **Routing** (`scripts/bench/escalation.py --samples 8`, Gemma E4B, the default English prompts, the RTX 5090 of
-2026-10-13), per character: with `smart` and tasks on, 119 cases; without the expert, 44 cases.
+2026-10-13 unless noted), per character: with `smart` and tasks on, 119 cases; without the expert, 44 cases.
 
 | Character | Right | Missed escalations | Tool → local | Without the expert |
 |---|---|---|---|---|
-| Mira (2 runs) | 98.4%, 99.1% | 2.4%, 1.6% | 1.4%, 0.0% | 100.0% |
+| Mira, one sentence shorter (2026-10-13, the RTX PRO 4500 box, in the Docker image) | 99.2% | 1.4% | 0.0% | 100.0% |
+| Mira before it: on that load; on the RTX 5090 (2 runs) | 98.6%; 98.4%, 99.1% | 2.3%; 2.4%, 1.6% | 0.0%; 1.4%, 0.0% | 100.0% |
 | Aria | 99.1% | 1.6% | 0.0% | 100.0% |
 | Kai | 98.8% | 1.9% | 0.0% | 100.0% |
 | Rex | 99.4% | 0.9% | 1.4% | 100.0% |
