@@ -401,7 +401,8 @@ browser ── https ──> your app (Cloudflare Workers): signs a token for a 
 and `wss`, with its own certificate. The pod exposes no port, and the hostname stays the same when the pod restarts
 or moves. RunPod's own options don't fit: its HTTPS proxy cuts connections after 100 s (a conversation can last
 180 s), and its TCP ports have no TLS and change when the pod resets. The browser talks to the tunnel directly, not
-through your Worker. **It hasn't run on RunPod yet** (O-02): the first deploy is the test.
+through your Worker. **It runs on RunPod** (2026-10-14, an RTX PRO 4500 SE pod with 16 vCPUs of an AMD EPYC 9335):
+through the tunnel, `/voices` answered 401 and the smoke test passed in the pod.
 
 **1. The tunnel,** once, in the Cloudflare dashboard (your domain on Cloudflare): Zero Trust → Networks → Tunnels →
 Create a tunnel → Cloudflared. Name it (`tyger`), copy its token (the long string after `--token` in the install
@@ -420,9 +421,11 @@ build (e.g. `config/local.yaml`), and set `CONFIG` to it below.
 
 **3. The pod** (Pods → Deploy):
 - an RTX 5090 on Secure Cloud, on a host with CUDA 13 (the CUDA filter; a driver ≥ 590), in a region near your
-  users: every turn crosses that distance;
-- your image, `<DOCKER_USER>/tyger-s2s-vllm:<tag>`; a container disk of ~30 GB (the image is ~17 GB unpacked, 8.4 GB to pull) and a volume disk of
-  ~60 GB at `/workspace`, the pod's own (no network volume): the models, ~25 GB, and the compiled kernels;
+  users: every turn crosses that distance. An RTX PRO 4500 runs it too, with a longer wait for each reply ("Known
+  limits");
+- your image, `<DOCKER_USER>/tyger-s2s-vllm:<tag>`; a container disk of ~30 GB (the image is ~17 GB unpacked, 8.4 GB
+  to pull) and a volume disk of ~60 GB at `/workspace`, the pod's own (no network volume): the models, ~25 GB, and
+  the compiled kernels;
 - **no exposed ports**: remove the template's defaults, the tunnel needs none;
 - these env vars, the secrets as RunPod secrets (Secrets; in the env as `{{ RUNPOD_SECRET_<name> }}`):
 
@@ -607,11 +610,11 @@ for that data.
 
 ## Known limits (v1)
 
-- **Up to 4 conversations** per GPU (`server.max_sessions`); more visitors get a busy page. On a healthy 5090, 4
-  conversations keep EARS real time (hop lag p50 56 / p90 117 ms on an RTX PRO 4500, 2026-10-13).
+- **Up to 4 conversations** per GPU (`server.max_sessions`); more visitors get a busy page. 4 conversations keep
+  EARS real time: hop lag p50 36 ms on an RTX 5090, 56 ms (p90 117 ms) on an RTX PRO 4500 (2026-10-13).
 - **A conversation ends after 3 minutes** by default (`TYGER_MAX_SESSION_S`, 0 for no limit).
 - **No per-user cap in the server:** whoever holds tokens (or reaches a server without a secret) can take all 4
-  slots. Your app's backend decides who gets a token, and a Cloudflare rule limits how often one IP starts
+  slots. Your app's backend decides who gets a token, and a Cloudflare rule can limit how often one IP starts
   conversations ("RunPod + Cloudflare", step 6).
 - **English only:** every prompt asks for English, so the agent answers in English whatever language it hears.
 - `set_reminder` / `send_message` are **placeholders** — the model says they aren't connected yet.
@@ -622,4 +625,3 @@ for that data.
   endpoint on a plain turn on the 5090 (smoke test, cloned voice), ~440 ms on the PRO 4500; with 4 busy sessions,
   430–475 and 690–730 ms p50.
 - Endpoint thresholds are not yet live-tuned (see Configure).
-- The Docker image has run on one host (an RTX PRO 4500, 2026-10-13), not yet on RunPod (ISSUES.md, O-02).

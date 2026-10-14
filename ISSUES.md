@@ -7,7 +7,8 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
   I-22 and I-23 left when the agent became English only: this file at `1b8e6ff`. O-06 (run.sh now limits the
   kernel compilers): this file at `9caeca9`. I-21 was dropped by the user on 2026-10-13: the voice reads digits and
   "°C" well. Its write-up: this file at `ce52f66`. I-11 (no auth, no limits on :7860) left on 2026-10-13 with API
-  mode: a token, the session limit and the size caps. Its write-up: this file at `17e88cd`.
+  mode: a token, the session limit and the size caps. Its write-up: this file at `17e88cd`. O-02 (the Docker image)
+  left on 2026-10-14, once it ran on RunPod. Its write-up: this file at `a3208d7`.
 - Each issue says how sure it is: **confirmed** (in code or on the box), **likely**, or **hypothesis** (measure
   before fixing).
 
@@ -24,7 +25,6 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
 | L-01 | perf | lever | partly done | The encoder re-encodes the full 8 s window, twice, every hop |
 | L-02 | latency | lever | open | Decisions land on 320 ms hops |
 | O-01 | ops | — | needs the user | The endpoint thresholds were never tuned live |
-| O-02 | ops | — | partly done | The image is built and checked on one host; not run on RunPod yet |
 | O-03 | ops | — | needs the user | `main` is over 130 commits behind `plugins` |
 | O-05 | ops | — | partly done | No CI |
 | P | packaging | — | planned (parked) | The pip package `tyger-s2s` |
@@ -194,26 +194,6 @@ biggest risk to how the product feels.
   ≤ 450 ms (p90 ≤ 550), with no more endpoints inside utterances.
 - Afterwards, freeze the values into `config/default.yaml` and re-run `scripts/stack/load_ears.py`.
 
-### O-02 — The image is built and checked on one host; not run on RunPod yet (partly done)
-**Done (2026-10-13, an RTX PRO 4500 Blackwell host with Docker 29.8; README → "Docker"):** built from the final code,
-started cold and warm, smoke inside on the default config, without OpenAI and in API mode, the benchmarks without
-OpenAI, and API mode's checks (no pages, the token, the session limit, nothing secret in the log). The first build
-found three gaps, fixed in the image: no CUDA toolkit for FlashInfer's kernel builds (now on
-`nvidia/cuda:13.0.1-devel-ubuntu24.04`), OpenCV's X libraries, and `tzdata`. And `run.sh` now keeps torch inductor's
-and the CUDA driver's caches with the others, so a new container on warm volumes starts in ~2 min, not ~5.5.
-- **Shared memory:** without `--ipc=host`, on Docker's default 64 MB `/dev/shm`, the stack starts and passes smoke,
-  using ~12 KB. So a pod's `/dev/shm` of 64 MB or more is enough.
-- **The tunnel,** from the box to a test hostname (a dashboard tunnel the user made, outside their Terraform): it
-  registered, and `/voices` (401 / 200) and a `wss` conversation went through it. The first run found cloudflared
-  logging `CLOUDFLARE_TUNNEL_TOKEN` in clear at start; `run.sh` now gives it the token as `TUNNEL_TOKEN` alone.
-
-**Left: RunPod** (README → "RunPod + Cloudflare"): the user deploys. A pod with its own volume disk at `/workspace`,
-no network volume (the user, 2026-10-13): a new pod starts cold (~11 min on the test box), the same pod's later starts
-in ~2 min. Check there: `df -h /dev/shm` (64 MB or more), the logs to "EARS ready" and "Registered tunnel connection",
-`curl` on `/voices` (401), and smoke from the pod's terminal (it signs its own token). The production tunnel is made
-by hand in the dashboard too (the user, 2026-10-13), outside their Terraform: its hostname's CNAME must stay out of
-Terraform's records. Its token goes to RunPod as a secret.
-
 ### O-03 — `main` is over 130 commits behind `plugins` (needs the user)
 All work since 2026-10-02 is on `plugins`. `main` is an ancestor of it (a fast-forward), and `voxcpm2` and
 `origin/setup/new-box` are already merged into it. Fast-forward `main` and delete the two old branches when the
@@ -295,8 +275,8 @@ ordinary dependencies. There are no extras and no engine packages: tyger targets
   `tyger/static/`.
 - **The new page** (`web/`, served by EARS from its static build): the wheel ships the build, so building it needs
   Node at release time only, never at install.
-- **Dockerfile.** Install the wheel and set `ENTRYPOINT ["tyger", "serve"]`. A box that is itself a Docker container
-  can't build it (O-02).
+- **Dockerfile.** Install the wheel and set `ENTRYPOINT ["tyger", "serve"]`. Build and check it on a host with
+  Docker, as README → "Docker" says: a box that is itself a container can't build it.
 
 **Not part of this task:**
 - **Publishing.** Don't upload anywhere, not even TestPyPI: the user publishes.
