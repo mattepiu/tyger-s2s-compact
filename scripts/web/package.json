@@ -1,0 +1,9 @@
+{
+  "name": "tyger-web-live-check",
+  "private": true,
+  "description": "The new page against the running stack, in headless Chromium (live_check.mjs)",
+  "type": "module",
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}

@@ -1,0 +1,228 @@
+"""Prompts: every piece of text MOUTH sends to an LLM lives in config/prompts.yaml (DEVELOPING.md -> "Prompts").
+
+Read once at MOUTH start and validated: required keys present, each template's placeholders exactly the ones the
+code passes, shots a list of [user, assistant] pairs, tool descriptions only for tools and parameters that exist,
+the characters. An invalid file stops start-up with the key named. Every LLM role reads the same file
+(mouth.prompts). Not reloaded live: restart MOUTH after editing.
+
+The reply and smart system prompts open with a character, a few lines on who the agent is (one per voice:
+Characters), then the prompt itself (Prompts.system).
+"""
+from __future__ import annotations
+from pathlib import Path
+from string import Template
+
+# templates: (section, key) -> the placeholders the code passes
+TEMPLATES = {
+    ("tool_leadin", "user"): {"transcript"},
+    ("still_looking", "user"): {"transcript", "said"},
+    ("backchannel", "no_repeat"): {"acks"},
+    ("backchannel", "user_short"): {"partial"},
+    ("backchannel", "user"): {"partial"},
+    ("expert_leadin", "user"): {"transcript"},
+    ("expert_still", "user"): {"transcript", "said"},
+    ("smart", "user"): {"transcript", "question"},
+    ("smart", "results"): {"results"},
+    ("tasks", "user"): {"goal", "transcript"},
+    ("tasks", "looked_up"): {"results"},
+    ("tasks", "status_block"): {"tasks"},
+    ("tasks", "status_running"): {"id", "goal", "seconds"},
+    ("tasks", "status_done"): {"id", "goal", "summary"},
+    ("tasks", "status_announced"): {"id", "goal", "summary"},
+    ("tasks", "status_partial"): {"id", "goal", "summary"},
+    ("tasks", "status_failed"): {"id", "goal"},
+    ("tasks", "status_cancelled"): {"id", "goal"},
+    ("tasks", "result_note"): {"id", "goal", "result"},
+    ("tasks", "failed_note"): {"id", "goal"},
+    ("tasks", "expert_context"): {"results"},
+    ("task_failed", "user"): {"goal"},
+}
+# plain text, sent as written
+TEXTS = [("system", "voice_tools"), ("tool_leadin", "system"), ("still_looking", "system"),
+         ("still_looking", "said_none"), ("backchannel", "system"), ("backchannel", "user_empty"),
+         ("markers", "interrupted"), ("markers", "empty_reply"), ("warmup", "user"),
+         ("spoken", "error"), ("spoken", "refusal"),
+         ("escalation", "system"), ("escalation", "tool_result"), ("escalation", "interrupted"),
+         ("expert_leadin", "system"), ("expert_still", "system"), ("expert_still", "said_none"), ("smart", "system"),
+         ("smart", "limit"), ("tasks", "reply_system"), ("tasks", "system"), ("tasks", "limit"), ("tasks", "cap_concurrent"), ("tasks", "cap_session"),
+         ("tasks", "cap_global"), ("tasks", "unknown_task"), ("tasks", "continued"), ("tasks", "result_pending"),
+         ("task_failed", "system")]
+SHOTS = ["tool_leadin", "still_looking", "backchannel", "expert_leadin", "expert_still", "task_failed"]
+# the system prompts that open with the character (Prompts.system): the reply prompt of each mode, and the smart
+# model's (the expert answers in the same voice)
+PERSONA_SYSTEMS = [("system", "voice_tools"), ("escalation", "system"), ("tasks", "reply_system"), ("smart", "system")]
+
+
+class PromptError(ValueError):
+    pass
+
+
+class Prompts:
+    """The prompts file, validated."""
+    def __init__(self, data: dict, source: str = "config/prompts.yaml"):
+        self.d = data; self.source = source
+        self._validate()
+
+    def _fail(self, key, what):
+        raise PromptError(f"{self.source}: `{key}` {what}")
+
+    def _get(self, section, key=None):
+        node = self.d.get(section)
+        if key is None:
+            return node
+        return node.get(key) if isinstance(node, dict) else None
+
+    def _validate(self):
+        from app.tools import CANCEL, START, TOOLS, names
+        if self.d.get("version") != 1:
+            self._fail("version", "must be 1")
+        for sec, key in TEXTS:
+            if not isinstance(self._get(sec, key), str):
+                self._fail(f"{sec}.{key}", "is missing or not text")
+        for (sec, key), want in TEMPLATES.items():
+            t = self._get(sec, key)
+            if not isinstance(t, str):
+                self._fail(f"{sec}.{key}", "is missing or not text")
+            tpl = Template(t)
+            if not tpl.is_valid():
+                self._fail(f"{sec}.{key}", "has a bad placeholder (write $$ for a literal $)")
+            got = set(tpl.get_identifiers())
+            if got != want:
+                self._fail(f"{sec}.{key}", f"must use exactly {sorted('$' + w for w in want)}, "
+                                           f"uses {sorted('$' + g for g in got)}")
+        for sec in SHOTS:
+            shots = self._get(sec, "shots")
+            if not isinstance(shots, list) or not all(
+                    isinstance(p, list) and len(p) == 2 and all(isinstance(s, str) for s in p) for p in shots):
+                self._fail(f"{sec}.shots", "must be a list of [user, assistant] text pairs")
+        shots = self._get("escalation", "shots")
+        if not isinstance(shots, list) or not all(
+                isinstance(t, dict) and isinstance(t.get("user"), str) and
+                (set(t) == {"user", "reply"} and isinstance(t["reply"], str) or
+                 set(t) == {"user", "expert", "answer"} and isinstance(t["expert"], str) and isinstance(t["answer"], str))
+                for t in shots):
+            self._fail("escalation.shots", "must be a list of {user, reply} or {user, expert, answer} turns (text)")
+        lookups = set(names("base"))
+        ts = self.d.get("reply_shots")
+        if not isinstance(ts, list) or not all(
+                isinstance(t, dict) and isinstance(t.get("user"), str) and (
+                    set(t) == {"user", "reply"} and isinstance(t["reply"], str) or
+                    set(t) == {"user", "call", "result", "answer"} and isinstance(t["answer"], str)
+                    and isinstance(t["call"], dict) and t["call"].get("name") in lookups
+                    and isinstance(t["call"].get("arguments"), dict)) for t in ts):
+            self._fail("reply_shots", "must be a list of {user, reply} or {user, call: {name, arguments}, result, "
+                                      "answer} turns (calls to the lookup / action tools of app/tools/)")
+        ts = self._get("tasks", "shots")
+        if not isinstance(ts, list) or not all(
+                isinstance(t, dict) and isinstance(t.get("user"), str) and (
+                    set(t) == {"user", "reply"} and isinstance(t["reply"], str) or
+                    set(t) == {"user", "call", "result", "answer"} and isinstance(t["answer"], str)
+                    and isinstance(t["call"], dict) and t["call"].get("name") in (START, CANCEL)
+                    and isinstance(t["call"].get("arguments"), dict)) for t in ts):
+            self._fail("tasks.shots", "must be a list of {user, reply} or {user, call: {name: start_task|cancel_task, "
+                                      "arguments}, result, answer} turns")
+        chars = self._get("persona", "characters")
+        if not isinstance(chars, dict) or not chars:
+            self._fail("persona.characters", "must map each character's key to its {name, text}")
+        for key, c in chars.items():
+            if not isinstance(c, dict) or set(c) != {"name", "text"} or not all(isinstance(v, str) for v in c.values()):
+                self._fail(f"persona.characters.{key}", "must be {name, text}: the picker's name and the character")
+        tools = self.d.get("tools")
+        if not isinstance(tools, dict):
+            self._fail("tools", "is missing")
+        props_of = {n: t.parameters["properties"] for n, t in TOOLS.items()}
+        for name, props in props_of.items():
+            entry = tools.get(name)
+            if not isinstance(entry, dict) or not isinstance(entry.get("description"), str):
+                self._fail(f"tools.{name}.description", "is missing")
+            for p, desc in (entry.get("params") or {}).items():
+                if p not in props or not isinstance(desc, str):
+                    self._fail(f"tools.{name}.params.{p}", "is not a text description of a parameter of the tool")
+        for name in tools:
+            if name not in props_of:
+                self._fail(f"tools.{name}", "is not a tool in app/tools/")
+
+    def text(self, section, key) -> str:
+        return self.d[section][key]
+
+    def characters(self) -> list[str]:
+        """The characters' keys, in file order."""
+        return list(self.d["persona"]["characters"])
+
+    def character_name(self, character) -> str:
+        return self.d["persona"]["characters"][character]["name"]
+
+    def system(self, character, section, key) -> str:
+        """A system prompt that opens with the character (PERSONA_SYSTEMS): its lines, then the prompt."""
+        assert (section, key) in PERSONA_SYSTEMS, (section, key)
+        return self.d["persona"]["characters"][character]["text"] + "\n\n" + self.d[section][key]
+
+    def shots(self, section) -> list[tuple[str, str]]:
+        return [tuple(p) for p in self.d[section]["shots"]]
+
+    def fill(self, section, key, **values) -> str:
+        """A template with the code's values; a missing or extra value fails loudly."""
+        want = TEMPLATES[(section, key)]
+        if set(values) != want:
+            raise PromptError(f"`{section}.{key}` takes {sorted(want)}, got {sorted(values)}")
+        return Template(self.d[section][key]).substitute(values)
+
+    def turns(self, section) -> list[dict]:
+        """Structured few-shot turns: reply_shots (user + reply, or user + call + result + answer),
+        escalation.shots (user + expert + answer, or user + reply) or tasks.shots (user + call + result + answer)."""
+        node = self.d[section]
+        return [dict(t) for t in (node if isinstance(node, list) else node["shots"])]
+
+    def tool_text(self) -> dict:
+        return self.d["tools"]
+
+
+class Characters:
+    """Which character each voice speaks as: config `voices.character` for every voice (unset: the prompts file's
+    first character) and `voices.characters` for the exceptions ({voice name: character}). Each is checked against
+    the prompts file's persona.characters, so a character that doesn't exist stops start-up with the key named. A
+    voice that isn't listed (a clip added later included) gets the default."""
+    def __init__(self, cfg: dict, prompts: Prompts):
+        from app.config import ConfigError
+        v = cfg.get("voices") or {}
+        known = prompts.characters()
+        self.prompts = prompts
+        self.default = v.get("character") or known[0]
+        self.by_voice = dict(v.get("characters") or {})
+        for key, character in [("voices.character", self.default)] + \
+                [(f"voices.characters.{voice}", c) for voice, c in self.by_voice.items()]:
+            if character not in known:
+                raise ConfigError(f"`{key}: {character}` is not a character in {prompts.source} "
+                                  f"(persona.characters: {', '.join(known)})")
+
+    def of(self, voice) -> str:
+        """The character `voice` speaks as."""
+        return self.by_voice.get(voice, self.default)
+
+    def label(self, voice) -> str:
+        """The voice picker's entry: the character's name, then the voice."""
+        return f"{self.prompts.character_name(self.of(voice))} ({voice})"
+
+
+def _read(path: Path) -> dict:
+    import yaml
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise PromptError(f"prompts file not found: {path}") from None
+    if not isinstance(data, dict):
+        raise PromptError(f"{path}: not a mapping")
+    return data
+
+
+def load_prompts(cfg: dict) -> Prompts:
+    """The configured prompts file (mouth.prompts, default config/prompts.yaml), validated."""
+    from app.config import CONFIG_DIR, repo_path
+    path = repo_path((cfg.get("mouth") or {}).get("prompts")) or CONFIG_DIR / "prompts.yaml"
+    return Prompts(_read(path), path.name)
+
+
+def default_prompts() -> Prompts:
+    """The repo's config/prompts.yaml (tests and tools)."""
+    from app.config import CONFIG_DIR
+    return Prompts(_read(CONFIG_DIR / "prompts.yaml"))

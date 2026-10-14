@@ -1,0 +1,20 @@
+# tyger v1 — ONE venv for both processes (MOUTH: Gemma 4 E4B + VoxCPM2 on vLLM / vLLM-Omni; EARS: nemotron +
+# endpoint head). transformers comes in via vllm (5.14.x) and satisfies nemotron's >= 5.13.
+#
+#   uv venv .venv --python 3.12
+#   uv pip install --python .venv/bin/python -r requirements.txt --torch-backend=auto
+#
+# --torch-backend=auto picks the CUDA build of torch for the driver (cu130 on an RTX 5090 / Blackwell).
+# Tested on: torch 2.13.0+cu130, transformers 5.14.1, Python 3.12.
+vllm==0.30.0
+vllm-omni==0.30.0
+voxcpm==2.0.3            # VoxCPM2 runtime; needed by the vLLM-Omni stage worker but not pulled in by vllm-omni
+accelerate==1.12.0       # vllm-omni 0.30.0 pins exactly 1.12.0
+safetensors==0.8.0
+huggingface_hub
+soundfile==0.14.0
+librosa==1.0.0
+aiohttp==3.14.3          # EARS web app + WebSocket
+PyYAML==6.0.3
+openai==3.24.0           # the `openai-responses` LLM plugin (also a vllm dependency; pinned for hosted configs)
+anthropic==1.11.0         # the `anthropic` LLM plugin (Claude Messages API)

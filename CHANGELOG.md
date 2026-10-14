@@ -1,0 +1,103 @@
+# Changelog
+
+All notable changes to tyger are listed here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [Unreleased]
+
+Everything since the imported v1 baseline. It becomes the first release.
+
+### Added
+- **4 conversations on one GPU**, batched in both processes; the next visitor gets a "busy" page.
+- **Voice cloning** with VoxCPM2 from a reference clip in `voices/`, with an optional transcript.
+- **Plugins:** the LLM, the TTS and the turn-taking model are chosen in `config/default.yaml`.
+- **An expert:** the local model hands hard questions to a hosted model (`ask_expert`), and its answer streams
+  straight to the voice.
+- **Live facts** (weather, news, prices) through the expert's web search. Its sources show as links under the
+  answer on the page and are never read out.
+- **Background tasks:** research that takes minutes runs while you keep talking, and the agent tells you the result
+  at the next pause.
+- **Interrupted lookups carry on:** cut in before hearing an answer, and it's still found and told to you later.
+- **`openai-responses` plugin:** OpenAI's Responses API with web search, the default expert.
+- **`anthropic` plugin:** Claude as the alternative expert (not yet tested against the API).
+- **`fake` plugins** and `config/fake.yaml`: the whole stack runs on a CPU, with no downloads.
+- **All prompts in one file,** `config/prompts.yaml`, checked at startup.
+- **Config checks:** a typo in the config stops startup and names the key.
+- **Tuning sliders** on the page (`?nodebug` hides them), built from the turn-taking plugin's thresholds.
+- **A new page** (`web/`): one mic button and the characters as tabs. An orb in the middle (OrbKit's Ion)
+  follows the conversation and the voices, in each character's own colours. The exchange shows as text: your words
+  as you say them, the agent's backchannels in a bubble beside them, its reply with its sources. A history
+  holds the whole conversation. A Tuning panel over the page has the meters and the sliders, to tune while you
+  talk. `run.sh` builds it.
+- **API mode: run the server without its pages** (`TYGER_PAGES=false`), for another app to call.
+- **A client for your own app** (`web/lib/tyger/`): one TypeScript file with no dependencies that captures the mic,
+  plays the agent and talks to the server, as tyger's own page does.
+- **Conversations end after 3 minutes by default (configurable):** `TYGER_MAX_SESSION_S`, 0 for no limit.
+- **Your app's backend can hand the browser a short-lived token, so only your app can open a conversation**
+  (`TYGER_API_SECRET`).
+- **Docker instructions** (README → "Docker"): the run command with its volumes and shared memory, API mode, a
+  config without OpenAI, the smoke test inside the container; and a `.dockerignore` that keeps `.env` out of the
+  build. The image is public on Docker Hub, `ylankgz/tyger-s2s-vllm`, with the four (synthetic) voices in it.
+- **A Cloudflare Tunnel from the container** (README → "RunPod + Cloudflare"): with `CLOUDFLARE_TUNNEL_TOKEN` set,
+  `run.sh` starts `cloudflared` (in the image) once EARS is up, and Cloudflare serves your hostname over HTTPS and
+  `wss`, with no open port. The README walks through RunPod, a Next.js app on Cloudflare Workers, and a Cloudflare
+  rule that limits how often one IP starts conversations.
+- **Tests that need no GPU,** and a check of the web page in jsdom.
+- **A routing test** (`scripts/bench/escalation.py`): 119 synthetic cases, no API cost.
+- **Measurement scripts:** smoke and load tests on the running stack (with the API secret set, they sign their own
+  token), GPU parity checks, stack comparisons.
+- **An echo meter in the EARS log:** each reply's line says how much of the agent's voice is left in the mic.
+- **The Apache-2.0 licence** for the code (`LICENSE`).
+
+### Changed
+- **Turn-taking from one model, `tyger`:** nemotron ASR and a small GRU turn-taker in one file
+  (`nineninesix/tyger`), in place of the tyger 1.0 heads. EARS needs about half the GPU memory, and a step for 4
+  conversations takes 27 ms instead of 42. The model is public on Hugging Face.
+- **The new page is the default at `/`; the classic page moved to `/classic`.** Both are on the one port, :7860.
+- **Four characters, one per voice: Mira (the default), Aria, Kai and Rex.** The expert answers in the same voice.
+- **Each voice can have its own character:** picking a voice on the page switches who you're talking to, and the
+  picker shows for everyone.
+- **English only:** the agent answers in English, whatever language it hears.
+- **Responder: Gemma 4 E4B,** FP8 at load, replaces Qwen3-4B, for reliable tool calls.
+- **TTS: VoxCPM2** replaces MOSS-TTS-Realtime: first audio per request ~480 → ~80 ms.
+- **Two processes in one venv,** instead of three in three. Both of MOUTH's models run in-process on vLLM.
+- **Replies reach the TTS in whole sentences,** so the intonation doesn't restart mid-sentence.
+- **Tool lead-ins start sooner and fit the request** ("Checking the time in Tokyo."), and "still looking" lines
+  cover slow tools.
+- **Backchannels react to what you're saying,** instead of a canned "mm-hm".
+- **Barge-in follows what you actually heard:** the page tags the mic with what it was playing.
+- **A turn ends when the page has played the whole reply,** not when generation ends.
+- **Cut-ins get through sooner:** the barge-in threshold went from 0.5 to 0.4.
+- **Half the bandwidth:** int16 audio both ways, and the mic is captured with an AudioWorklet.
+- **Faster turn-taking:** audio features on the GPU, and a speech decoder 3–5× faster.
+- **The voice clip is encoded once** and kept in memory.
+- **Code layout:** `app/` is split into `ears/`, `mouth/`, `plugins/`, `prompts/`, `runtime/` and `tools/`, and the
+  configs are in `config/`.
+- **Docs:** README, DEVELOPING, CHANGELOG and ISSUES replace the old notes and design docs.
+
+### Fixed
+- **Backchannels no longer say the same thing twice** while you stay on one topic.
+- An interrupted reply stays in the conversation history, cut to what you heard.
+- The first words of an interruption are kept: the first 3 words are recognised 83% of the time, up from 14%.
+- Interrupting during a tool call stops the agent at once, instead of after up to 15 s.
+- Turns longer than 20 s are transcribed whole, not just their last 20 s.
+- Tool calls stay in history, so later turns keep using tools instead of making answers up.
+- A tool or expert answer is no longer lost when you cut in before hearing it.
+- The agent's own voice, echoed into the mic, no longer counts as you interrupting.
+- A backchannel that was still being made when the reply started is cancelled.
+- When MOUTH goes away, the page says so instead of going silent.
+- A first start no longer risks running the machine out of memory while it compiles GPU kernels.
+- The expert's typographic apostrophes and quotes (’ “ ”) reach the voice as written, not as spaces ("I’d" was said
+  "I d").
+
+### Removed
+- **The tyger 1.0 heads** (`nemotron-tyger-1.0`, a Qwen3-0.6B decoder on nemotron): `tyger` replaces them.
+- **The silence fallback:** only the turn-taking model ends a turn.
+- **The weather and web-search tools,** and Tavily: live facts go to the expert's web search.
+
+## v1 baseline — 2026-10-02
+
+Imported from the research code (`dbb8088`):
+- three processes in three venvs;
+- MOSS-TTS-Realtime (first audio ~480 ms), and Qwen3-4B on a vLLM HTTP server;
+- one conversation per GPU, using ~30.5 GB.

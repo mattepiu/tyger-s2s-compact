@@ -1,0 +1,44 @@
+# VoxCPM2's engine config (vLLM-Omni's "deploy config") for tyger: up to 4 live conversations sharing the GPU with
+# the LLM (+ EARS). Based on vllm_omni/deploy/voxcpm2.yaml (vllm-omni 0.30.0); changes: max_num_seqs 8->4,
+# KV 6GiB->2GiB, gpu_memory_utilization 0.9->0.35 (start-up check only; KV is pinned by kv_cache_memory_bytes),
+# max_tokens 4096->2048, unified decode graph off (see below). max_model_len is upstream's 4096 again (2026-10-06,
+# user): one request (ref clip + one text chunk + its audio, 6.25 tokens/s) needs ~200-300 tokens.
+# Measured at 1 session (RTX 5090): ~7.4 GB loaded, ~0.6 GB more after warmup; first-audio ~113 ms, RTF 0.12-0.2.
+async_chunk: false
+dtype: bfloat16
+
+stages:
+  - stage_id: 0
+    max_num_seqs: 4
+    gpu_memory_utilization: 0.35
+    kv_cache_memory_bytes: 2147483648  # 2 GiB
+    enforce_eager: true
+    trust_remote_code: true
+    enable_prefix_caching: false
+    async_scheduling: true
+    max_num_batched_tokens: 4096
+    max_model_len: 4096
+    devices: "0"
+    engine_extras:
+      hf_overrides:
+        voxcpm2_runtime_config:
+          audio_emit_every: 1
+          vae_decode_every: 3
+          enable_batched_cfm: true
+          enable_batched_vae_decode: true
+          coalesce_audio_d2h: true
+          enable_loc_dit_fused_qkv: true
+          enable_loc_dit_fused_mlp: true
+          enable_loc_dit_zero_dt_cache: true
+          enable_loc_dit_skip_qkv_contig: true
+          enable_loc_dit_reduce_overhead_no_cg: true
+          enable_unified_decode_graph: false   # true defers ALL new admissions while any request decodes
+                                               # (scheduler.py) -> 30 s+ stalls under concurrency
+          unified_decode_graph_max_batch_size: 4
+    default_sampling_params:
+      temperature: 0.0
+      top_p: 1.0
+      top_k: -1
+      max_tokens: 2048
+      seed: 42
+      repetition_penalty: 1.0

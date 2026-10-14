@@ -48,6 +48,8 @@
   .turn.asst{border-color:var(--speak);background:rgba(88,166,255,.07)}
   .turn .meta{color:var(--speak);font-size:11px;margin-bottom:2px}
   .turn .txt{font-size:14.5px}
+  .turn .src{font-size:12px;margin-top:4px;color:var(--mut);overflow-wrap:anywhere}
+  .turn .src a{color:var(--speak)}
   .empty{color:var(--mut);font-style:italic}
   [hidden]{display:none!important}
 </style>
@@ -55,7 +57,7 @@
 <body>
 <div class="wrap">
   <h1>tyger</h1>
-  <div class="sub">browser mic &rarr; real-time turn-taking (arm C endpoint head) &rarr; Qwen3-4B-2507 + tools &rarr; MOSS-TTS-Realtime voice</div>
+  <div class="sub">browser mic &rarr; real-time turn-taking (arm C endpoint head) &rarr; Gemma 4 E4B + tools &rarr; VoxCPM2 voice</div>
   <div class="row">
     <button id="start">Start listening</button>
     <button id="stop" class="stop" disabled>Stop</button>
@@ -76,11 +78,7 @@
     </div>
     <div class="tune" id="tune" hidden>
       <h2>thresholds &mdash; live tuning (?nodebug to hide) &middot; orange line = current</h2>
-      <div class="trow"><span>endpoint p_end &tau;</span><input type="range" id="s_ep_thr" min="0.30" max="0.99" step="0.005"><span class="tval" id="v_ep_thr">&mdash;</span></div>
-      <div class="trow"><span>endpoint deb</span><input type="range" id="s_ep_deb" min="1" max="5" step="1"><span class="tval" id="v_ep_deb">&mdash;</span></div>
-      <div class="trow"><span>barge (yield)</span><input type="range" id="s_barge_thr" min="0.20" max="1.00" step="0.01"><span class="tval" id="v_barge_thr">&mdash;</span></div>
-      <div class="trow"><span>backchannel</span><input type="range" id="s_bc_thr" min="0.20" max="1.00" step="0.01"><span class="tval" id="v_bc_thr">&mdash;</span></div>
-      <div class="trow"><span><label><input type="checkbox" id="c_fallback"> silence fallback</label></span><input type="range" id="s_fallback" min="0.4" max="2.5" step="0.1"><span class="tval" id="v_fallback">&mdash;</span></div>
+      <div id="trows"><div class="empty">Start a conversation to tune this turn-taking model's thresholds.</div></div>
     </div>
     <div class="barge-banner" id="barge">&perp; BARGE &mdash; user took the floor</div>
   </div>
@@ -89,113 +87,190 @@
 </div>
 
 <script>
-const TARGET_SR = 16000;
-// Tuning sliders + voice picker are shown by DEFAULT (V2 live tuning). Append ?nodebug for a clean end-user demo.
+const TARGET_SR = 16000, WIRE_SR = 24000, BLOCK = 320;   // mic blocks of 20 ms at 16 kHz; replies at 24 kHz
+// Tuning sliders are shown by DEFAULT (V2 live tuning). Append ?nodebug for a clean end-user demo. The voice picker
+// shows for everyone: each voice speaks as its own character.
 const DEBUG = !new URLSearchParams(location.search).has('nodebug');
-let ws, ctx, source, processor, gain, stream, running=false;
+let ws, ctx, source, micNode, gain, stream, running=false, inLatency=0;
 const $ = id => document.getElementById(id);
 function setStatus(t,on){ $('status').textContent=t; $('dot').classList.toggle('on',!!on); }
 function setState(s){ const p=$('pill'); p.className='state-pill state-'+s; $('stateTxt').textContent=s; }
 function bar(id,v){ $(id).style.width=(Math.max(0,Math.min(1,v))*100).toFixed(1)+'%'; }
 
-// live tuning (debug only)
-const THR = {ep_thr:['epthr','s_ep_thr','v_ep_thr',0.30,0.99],
-             barge_thr:['ythr','s_barge_thr','v_barge_thr',0.2,1.0],
-             bc_thr:['bcthr','s_bc_thr','v_bc_thr',0.2,1.0]};
-const DEC3 = a => (a==='ep_thr');
-function placeMarker(mk,val,lo,hi){ $(mk).style.left=(Math.max(0,Math.min(1,(val-lo)/(hi-lo)))*100).toFixed(1)+'%'; }
-function setThresholdUI(attr,val){ if(!THR[attr])return; const [mk,sl,vl,lo,hi]=THR[attr];
-  if($(sl)) $(sl).value=val; if($(vl)) $(vl).textContent=(+val).toFixed(DEC3(attr)?3:2); placeMarker(mk,val,lo,hi); }
-function wireSliders(){
-  for(const attr in THR){ const [mk,sl,vl,lo,hi]=THR[attr];
-    if(!$(sl))continue;
-    $(sl).oninput=()=>{ const v=+$(sl).value; $(vl).textContent=v.toFixed(DEC3(attr)?3:2); placeMarker(mk,v,lo,hi);
-      if(ws&&ws.readyState===1) ws.send('set:'+attr+':'+v); }; }
+// Live tuning. The EARS plugin declares its tunable thresholds: `ready` carries their sliders (label, range,
+// step, display scale / unit, the meter they mark, an optional "off" value behind a checkbox) and this
+// conversation's values. One row per slider; a change is sent as set:<name>:<value> and echoed back.
+const MARKS = {p_end:'epthr', yield:'ythr', bc:'bcthr'};       // the meters' threshold marks (0..1)
+let SLIDERS = {};
+const isOff = (s,v) => s.off!=null && v>=s.off;
+function showValue(s,v){ $('v_'+s.name).textContent = isOff(s,v) ? 'off' : (v*s.scale).toFixed(s.decimals)+s.unit;
+  if(s.meter && MARKS[s.meter]) $(MARKS[s.meter]).style.left=(Math.max(0,Math.min(1,v))*100).toFixed(1)+'%'; }
+function sliderValue(s){ if(s.off!=null && !$('c_'+s.name).checked) return s.off;
+  const v=+$('s_'+s.name).value/s.scale; return s.type==='int' ? Math.round(v) : v; }
+function sendThreshold(s){ const v=sliderValue(s); showValue(s,v);
+  if(ws&&ws.readyState===1) ws.send('set:'+s.name+':'+v); }
+function setThresholdUI(name,v){ const s=SLIDERS[name]; if(!s) return;
+  if(s.off!=null) $('c_'+name).checked=!isOff(s,v);
+  if(!isOff(s,v)) $('s_'+name).value=v*s.scale;
+  showValue(s,v); }
+function buildTuning(sliders, values){
+  const box=$('trows'); box.innerHTML=''; SLIDERS={};
+  for(const s of sliders||[]){ SLIDERS[s.name]=s;
+    const label = s.off!=null ? `<label><input type="checkbox" id="c_${s.name}"> ${escapeHtml(s.label)}</label>` : escapeHtml(s.label);
+    const row=document.createElement('div'); row.className='trow';
+    row.innerHTML=`<span>${label}</span><input type="range" id="s_${s.name}" min="${s.lo}" max="${s.hi}" step="${s.step}">`+
+                  `<span class="tval" id="v_${s.name}">&mdash;</span>`;
+    box.appendChild(row);
+    $('s_'+s.name).oninput=()=>{ if(s.off!=null && !$('c_'+s.name).checked) showValue(s,s.off); else sendThreshold(s); };
+    if(s.off!=null) $('c_'+s.name).onchange=()=>sendThreshold(s);
+    if(values && s.name in values) setThresholdUI(s.name, values[s.name]);
+  }
 }
-const FPS=12.5, OFF_FRAMES=100000;
-function fbDisplay(){ $('v_fallback').textContent = $('c_fallback').checked ? (+$('s_fallback').value).toFixed(1)+'s':'off'; }
-function sendFallback(){ const on=$('c_fallback').checked, s=+$('s_fallback').value; fbDisplay();
-  if(ws&&ws.readyState===1) ws.send('set:fallback_frames:'+(on?Math.round(s*FPS):OFF_FRAMES)); }
-function setFallbackUI(fr){ const on=fr<1000; $('c_fallback').checked=on; $('s_fallback').value=on?(fr/FPS).toFixed(1):1.2; fbDisplay(); }
-if(DEBUG){ $('tune').hidden=false; wireSliders();
-  $('c_fallback').onchange=sendFallback; $('s_fallback').oninput=()=>{ fbDisplay(); if($('c_fallback').checked) sendFallback(); };
-  $('s_ep_deb').oninput=()=>{ const v=+$('s_ep_deb').value; $('v_ep_deb').textContent=v; if(ws&&ws.readyState===1) ws.send('set:ep_deb:'+v); };
-}
+if(DEBUG){ $('tune').hidden=false; }
 function applyVoice(){ const v=$('voice').value; try{localStorage.setItem('tyger_voice',v);}catch(e){}
   if(ws&&ws.readyState===1) ws.send('voice:'+v); }
 $('voice').onchange=applyVoice;
-function populateVoices(list, cur){ const sel=$('voice'); if(!list||!list.length) return;
+function populateVoices(list, cur, labels){ const sel=$('voice'); if(!list||!list.length) return;
   let saved=null; try{saved=localStorage.getItem('tyger_voice');}catch(e){}
   const want=(saved && list.includes(saved)) ? saved : (cur||list[0]);
-  sel.innerHTML=''; list.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent='voice: '+v;
-    if(v===want)o.selected=true; sel.appendChild(o); });
-  if(DEBUG) sel.hidden=false; }
+  sel.innerHTML=''; list.forEach(v=>{ const o=document.createElement('option'); o.value=v;
+    o.textContent=(labels&&labels[v])||v; if(v===want)o.selected=true; sel.appendChild(o); });   // "Mira (mira)"
+  sel.hidden=false; }
 // populate the picker on page load (before Start) so a pick is shown + remembered even without the WS
-if(DEBUG){ fetch('/voices').then(r=>r.json()).then(d=>populateVoices(d.voices,d.voice)).catch(()=>{}); }
+fetch('/voices').then(r=>r.json()).then(d=>populateVoices(d.voices,d.voice,d.labels)).catch(()=>{});
 
-function downsample(buf,inSR,outSR){ if(outSR===inSR)return buf;
-  const r=inSR/outSR,n=Math.floor(buf.length/r),out=new Float32Array(n);
-  for(let i=0;i<n;i++){ const idx=i*r,i0=Math.floor(idx),f=idx-i0; out[i]=buf[i0]*(1-f)+(buf[i0+1]||buf[i0])*f; } return out; }
+// The mic and the agent's voice share one AudioContext clock (I-17), so every mic block can say which reply sample
+// the user was hearing when it was captured. The worklet resamples the mic to 16 kHz, continuously across render
+// quanta (linear interpolation), and posts 20 ms blocks with the context time of each block's first sample.
+const MIC_WORKLET = `
+class Mic16k extends AudioWorkletProcessor {
+  constructor(){ super(); this.step = sampleRate / ${TARGET_SR}; this.pos = -1; this.prev = 0;
+    this.out = new Float32Array(${BLOCK}); this.n = 0; this.t0 = 0; }
+  process(inputs){
+    const x = inputs[0] && inputs[0][0];
+    if (!x || !x.length) return true;
+    const f0 = currentFrame;                          // the context frame of x[0]
+    if (this.pos < f0 - 1) this.pos = f0;             // the first quantum, or a gap: start over here
+    for (;;) {
+      const p = Math.floor(this.pos), i = p - f0;     // the input sample at or before the next output sample
+      if (i + 1 >= x.length) break;                   // its successor comes with the next quantum
+      const a = i < 0 ? this.prev : x[i], f = this.pos - p;
+      if (this.n === 0) this.t0 = this.pos / sampleRate;
+      this.out[this.n++] = a + (x[i + 1] - a) * f;
+      if (this.n === ${BLOCK}) { this.port.postMessage({t: this.t0, x: this.out.slice()}); this.n = 0; }
+      this.pos += this.step;
+    }
+    this.prev = x[x.length - 1];
+    return true;
+  }
+}
+registerProcessor('mic16k', Mic16k);`;
+
+// Reply chunks as scheduled on the context clock: {id, t0, t1, first: its first sample in the reply}. Backchannel
+// audio (id 0) plays but is never here, so it stays out of the 2nd ear.
+let sched=[], queued={}, lastId=0, micBlocks=0;
+function latency(){ return (ctx.baseLatency||0)+(ctx.outputLatency||0)+inLatency; }   // graph -> ear -> graph
+function tagAt(t){                                    // [reply id, its sample the user heard at context time t]
+  for(const c of sched) if(c.t0<=t && t<c.t1) return [c.id, c.first+Math.floor((t-c.t0)*WIRE_SR)];
+  return [lastId, -1];
+}
+function micFrame(t, x){                              // [int32 id][int32 agent sample, -1: none][int16 x...]
+  const [id, at]=tagAt(t-latency());
+  const buf=new ArrayBuffer(8+2*x.length), dv=new DataView(buf), pcm=new Int16Array(buf, 8);
+  dv.setInt32(0, id, true); dv.setInt32(4, at, true);
+  for(let i=0;i<x.length;i++) pcm[i]=Math.max(-32768, Math.min(32767, Math.round(x[i]*32767)));
+  return buf;
+}
+function onMic(t, x){
+  if(!ws||ws.readyState!==1) return;
+  ws.send(micFrame(t, x));
+  if(++micBlocks%5===0){ let peak=0; for(let i=0;i<x.length;i++){ const a=Math.abs(x[i]); if(a>peak)peak=a; }
+    bar('vfill',peak*3); $('vval').textContent=peak>0.001?(20*Math.log10(peak)).toFixed(0)+'dB':'—'; }
+}
 
 async function start(){
   try{ // full browser DSP ON (echo/noise/gain) so the assistant's own voice doesn't leak into the mic
     stream = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
   }catch(e){ setStatus('mic denied: '+e.message,false); return; }
+  ctx = new AudioContext();
+  try{ await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([MIC_WORKLET],{type:'application/javascript'}))); }
+  catch(e){ setStatus('no AudioWorklet in this browser: '+e.message,false); return; }
+  try{ inLatency=stream.getAudioTracks()[0].getSettings().latency||0; }catch(e){ inLatency=0; }
+  resetPlayback();                                     // Stop, then Start without a reload: nothing of the old queue
   ws = new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);
   ws.binaryType='arraybuffer';
   ws.onopen=()=>setStatus('connected · listening',true);
-  ws.onclose=()=>{ setStatus('disconnected',false); stopAudio(); };
+  ws.onclose=()=>{ setStatus(closeReason||'disconnected',false); closeReason=''; stopAudio(); };
   ws.onerror=()=>setStatus('ws error',false);
   ws.onmessage=(ev)=>{ if(ev.data instanceof ArrayBuffer) playChunk(ev.data); else onEvent(ev); };
-  ctx = new AudioContext();
   source = ctx.createMediaStreamSource(stream);
-  processor = ctx.createScriptProcessor(4096,1,1);
-  gain = ctx.createGain(); gain.gain.value=0;
-  processor.onaudioprocess = e=>{
-    if(!ws||ws.readyState!==1) return;
-    const inp=e.inputBuffer.getChannelData(0);
-    let peak=0; for(let i=0;i<inp.length;i++){ const a=Math.abs(inp[i]); if(a>peak)peak=a; }
-    bar('vfill',peak*3); $('vval').textContent=peak>0.001?(20*Math.log10(peak)).toFixed(0)+'dB':'—';
-    ws.send(downsample(inp,ctx.sampleRate,TARGET_SR).buffer);
-  };
-  source.connect(processor); processor.connect(gain); gain.connect(ctx.destination);
+  micNode = new AudioWorkletNode(ctx, 'mic16k');
+  micNode.port.onmessage = e=>onMic(e.data.t, e.data.x);
+  gain = ctx.createGain(); gain.gain.value=0;          // keeps the worklet pulled by the graph, silently
+  source.connect(micNode); micNode.connect(gain); gain.connect(ctx.destination);
   running=true; $('start').disabled=true; $('stop').disabled=false;
 }
 
-let nextPlay=0, replyDiv=null, active=[];
-function playChunk(ab){ if(!ctx)return; const f32=new Float32Array(ab);
-  const b=ctx.createBuffer(1,f32.length,24000); b.getChannelData(0).set(f32);
+let nextPlay=0, replyDiv=null, replyTxt='', replyLinks=[], active=[], taskTag='', closeReason='';
+function playChunk(ab){ if(!ctx)return;               // [int32 id][int16 samples at 24 kHz]
+  const id=new DataView(ab).getInt32(0, true), pcm=new Int16Array(ab, 4);
+  const b=ctx.createBuffer(1,pcm.length,WIRE_SR), ch=b.getChannelData(0);
+  for(let i=0;i<pcm.length;i++) ch[i]=pcm[i]/32768;
   const s=ctx.createBufferSource(); s.buffer=b; s.connect(ctx.destination);
-  const t=ctx.currentTime; if(nextPlay<t) nextPlay=t+0.04; s.start(nextPlay); nextPlay+=b.duration;
-  active.push(s); s.onended=()=>{ const i=active.indexOf(s); if(i>=0) active.splice(i,1); }; }
-function stopPlayback(){ active.forEach(s=>{try{s.stop();}catch(e){}}); active=[]; nextPlay=0; }
+  const t=ctx.currentTime; if(nextPlay<t) nextPlay=t+0.04; s.start(nextPlay);
+  if(id!==0){ const first=queued[id]||0; queued[id]=first+pcm.length; lastId=id;
+    sched.push({id, t0:nextPlay, t1:nextPlay+b.duration, first});
+    sched=sched.filter(c=>c.t1>t-2); }
+  nextPlay+=b.duration; const end=nextPlay;
+  active.push(s); s.onended=()=>{ const i=active.indexOf(s); if(i>=0) active.splice(i,1);
+    // the last chunk queued has played: tell EARS how much of this reply the user heard (it ends the turn)
+    if(id!==0 && !s.stopped && nextPlay<=end+1e-6) setTimeout(()=>{
+      if(ws&&ws.readyState===1) ws.send(`played:${id}:${queued[id]}`); }, 1000*(ctx.outputLatency||0)); }; }
+function stopPlayback(){ active.forEach(s=>{ s.stopped=true; try{s.stop();}catch(e){} }); active=[]; nextPlay=0; sched=[]; }
+function resetPlayback(){ stopPlayback(); queued={}; lastId=0; }   // EARS counts reply ids from 1 on each connection
 function showReply(txt){ const box=$('turns'); const e=box.querySelector('.empty'); if(e)e.remove();
-  if(!replyDiv){ replyDiv=document.createElement('div'); replyDiv.className='turn asst'; box.prepend(replyDiv); }
-  replyDiv.innerHTML=`<div class="meta">tyger</div><div class="txt">${escapeHtml(txt)}</div>`; }
+  if(!replyDiv){ replyDiv=document.createElement('div'); replyDiv.className='turn asst'; box.prepend(replyDiv);
+    replyLinks=[]; }
+  replyTxt=txt;
+  const src=replyLinks.map(l=>
+    `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(l.label||l.url)}</a>`);
+  replyDiv.innerHTML=`<div class="meta">tyger${taskTag}</div><div class="txt">${escapeHtml(txt)}</div>`+
+    (src.length?`<div class="src">${src.join(' · ')}</div>`:''); }
+// the sources a reply cited (the expert's web search): shown under it, never spoken; http(s) links only
+function addLinks(links){ if(!replyDiv) return;
+  for(const l of links||[]) if(/^https?:\/\//i.test(l.url||'') && !replyLinks.some(x=>x.url===l.url)) replyLinks.push(l);
+  showReply(replyTxt); }
 function onEvent(ev){
   const m=JSON.parse(ev.data);
   if(m.type==='busy'){ setStatus('busy — someone else is talking; try again shortly',false); return; }
-  if(m.type==='ready'){ $('rt').textContent=`hop ${m.hop_ms}ms · ${m.sr/1000}kHz${m.mouth?' · mouth ✓':' · ears-only'}`;
-    if(m.voices && m.voices.length && DEBUG){ populateVoices(m.voices, m.voice);
-      if($('voice').value && $('voice').value!==m.voice) applyVoice(); }  // apply a pre-Start / remembered pick
-    if(m.thresholds){ for(const a in THR){ if(a in m.thresholds && m.thresholds[a]!=null) setThresholdUI(a,m.thresholds[a]); }
-      if(DEBUG){ if(m.thresholds.ep_deb!=null){ $('s_ep_deb').value=m.thresholds.ep_deb; $('v_ep_deb').textContent=m.thresholds.ep_deb; }
-                 if('fallback_frames' in m.thresholds) setFallbackUI(m.thresholds.fallback_frames); } } }
+  if(m.type==='error'){ closeReason=m.error==='audio_too_fast' ? 'closed: the mic audio came faster than real time'
+      : 'the agent went away — press Start to reconnect'; return; }                                // e.g. MOUTH restarted
+  if(m.type==='session_end'){ closeReason=m.reason==='time_limit' ? "Time's up — start again" : 'the conversation ended';
+      return; }                                                          // the session limit: EARS closes next
+  if(m.type==='ready'){ $('rt').textContent=`hop ${m.hop_ms}ms · ${m.sr/1000}kHz${m.mouth?' · mouth ✓':' · ears-only'}`+
+      (ctx?` · audio latency ${Math.round(1000*latency())}ms`:'')+(m.max_session_s?` · ends after ${m.max_session_s}s`:'');
+    // always send the picked voice at session start: the MOUTH keeps its voice across sessions, so comparing
+    // against EARS's config default (m.voice) could leave it on a stale voice while the picker shows another
+    if(m.voices && m.voices.length){ populateVoices(m.voices, m.voice, m.labels);
+      if($('voice').value) applyVoice(); }
+    buildTuning(m.sliders, m.thresholds); }   // built even when hidden (?nodebug): the meters' marks still show
   else if(m.type==='state'){ setState(m.state);
     bar('pefill',m.p_end||0); $('peval').textContent=(m.p_end||0).toFixed(2);
     bar('yfill',m.yield||0); $('yval').textContent=(m.yield||0).toFixed(2);
     bar('bcfill',m.bc||0); $('bcval').textContent=(m.bc||0).toFixed(2); }
-  else if(m.type==='threshold'){ setThresholdUI(m.attr,m.value); if(m.attr==='ep_deb'&&$('v_ep_deb')) $('v_ep_deb').textContent=m.value; }
-  else if(m.type==='endpoint'){ nextPlay=0; replyDiv=null; }
+  else if(m.type==='threshold'){ setThresholdUI(m.attr,m.value); }
+  else if(m.type==='endpoint'){ stopPlayback(); replyDiv=null; }  // never let a new reply overlap an old one
   else if(m.type==='reply'){ setState('SPEAK'); showReply(m.text); }
-  else if(m.type==='turn_done'){ setState('idle'); replyDiv=null; }
+  else if(m.type==='links'){ addLinks(m.links); }
+  else if(m.type==='turn_done'){ setState('idle'); replyDiv=null; taskTag=''; }
+  else if(m.type==='task_done'){ replyDiv=null; taskTag=` · task #${m.task} done`; }  // a background task speaks up
   else if(m.type==='barge'){ stopPlayback(); flashBarge(); setState('LISTENING'); }
   else if(m.type==='voice'){ /* confirmed */ }
 }
 function flashBarge(){ const b=$('barge'); b.classList.add('show'); setTimeout(()=>b.classList.remove('show'),900); }
 function escapeHtml(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function stopAudio(){ running=false; $('start').disabled=false; $('stop').disabled=true;
-  try{ processor&&processor.disconnect(); source&&source.disconnect(); gain&&gain.disconnect(); }catch(e){}
+  try{ micNode&&micNode.disconnect(); source&&source.disconnect(); gain&&gain.disconnect(); }catch(e){}
   try{ stream&&stream.getTracks().forEach(t=>t.stop()); }catch(e){}
   try{ ctx&&ctx.close(); }catch(e){} }
 function stop(){ try{ ws&&ws.close(); }catch(e){} stopAudio(); setStatus('idle',false); }

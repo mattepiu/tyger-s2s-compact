@@ -1,0 +1,93 @@
+# tyger v1 config. Plugins, model options, thresholds, voices, flags. Secrets are NOT here — they live in
+# .env (HF_TOKEN, OPENAI_API_KEY). Thresholds are frozen into this file at milestone V2 (live tuning).
+# Relative paths are relative to the repo root. The LLM, TTS and EARS models are plugins (app/plugins;
+# DEVELOPING.md -> "Plugins"): each block names its plugin, and the rest of the block is that plugin's options.
+
+server:
+  host: 0.0.0.0
+  port: 7860              # the web app (EARS aiohttp) serves the page + WS on this port
+  mouth_host: 127.0.0.1
+  mouth_port: 8770        # internal EARS<->MOUTH TCP (one connection per conversation)
+  max_sessions: 4         # concurrent conversations; more visitors get the "busy" page
+  # API mode and its limits (README -> "API mode"). Each has an env var, which wins over this file (Docker sets them).
+  # The token's secret, TYGER_API_SECRET, is env only: never put it here. Without it, anyone can connect.
+  pages: true             # TYGER_PAGES: serve the pages at / and /classic; false: /ws and /voices only
+  max_session_s: 180      # TYGER_MAX_SESSION_S: a conversation ends after this long; 0: no limit
+
+ears:                      # turn-taking: nemotron ASR + a GRU turn-taker that reads its layer 15, in one bundle
+  plugin: tyger
+  model: nineninesix/tyger  # the bundle (public): nemotron-3.5-asr + the GRU, one model.safetensors
+  revision: cd826db00a73d8d78603be23bb86f1cb02158bf7
+  ep_thr: 0.915            # p_end threshold (the bundle's default 0.91; user, 2026-10-13: 0.915)
+  ep_deb: 2                # debounce frames (80 ms each)
+  barge_thr: 0.4           # yield threshold (the bundle's default 0.5; user, 2026-10-13, live: 0.4 works better)
+  barge_deb: 2
+  bc_thr: 0.4              # the bundle's default
+  bc_deb: 2
+  gather_ms: 15            # wait up to this long to batch other conversations' hops into one GPU step
+  expect_ms: 60            # ...or this long when a conversation that is behind is about to resubmit
+  stats_s: 60              # log tick timing + encoder/head/ASR busy % this often
+  cpu_threads: 4           # torch CPU threads (the default 48 mostly spin-wait: 14x the CPU, slower)
+
+llm:                       # MOUTH's LLM roles; each block is one plugin instance
+  reply:                   # ordinary turns and the tool phase-B answer
+    plugin: gemma-4-e4b    # in-process vLLM, text only, thinking off (DEVELOPING.md -> "Benchmarks")
+    quantization: fp8      # at load: bf16 weights wouldn't fit next to VoxCPM2 and EARS
+    gpu_memory_utilization: 0.5    # vLLM start-up free-memory check only; actual KV is pinned below
+    kv_cache_gib: 3.0              # fixed KV budget (4 sessions x turn + backchannel)
+    max_model_len: 8192
+    max_num_seqs: 8                # 4 sessions x (turn + backchannel) batched together
+    temperature: 0.7
+  filler: reply            # backchannels, tool lead-ins, still-looking lines: the same instance
+  smart:                   # optional: answers turns the reply model escalates (ask_expert), live facts included,
+    plugin: openai-responses   # and runs background tasks. HOSTED: escalated turns and their
+    model: gpt-5.4-mini    # mouth.escalation.context_turns of transcript go to OpenAI; it searches the web there
+    max_tokens: 1024       # max_output_tokens
+    web_search: true       # OpenAI's web search: weather, news, prices (no local web search or weather tool)
+    reasoning_effort: low  # live 2026-10-11: `none` works with search, faster, but maths worse
+    api_key_env: OPENAI_API_KEY
+  # smart: {plugin: anthropic, model: claude-opus-5-5, effort: low, max_tokens: 2048}   # once there's a key
+
+tts:                       # VoxCPM2, in-process vLLM-Omni AsyncOmni inside the MOUTH
+  plugin: voxcpm2
+  model: openbmb/VoxCPM2
+  engine_config: config/engines/voxcpm2.yaml   # vLLM-Omni's engine config, sized for up to 4 sessions
+  out_sr: 24000            # VoxCPM2 emits 48 kHz -> resampled to the 24 kHz wire / client / EARS 2nd ear
+  ref_max_s: 10.0          # trim the voice clip (reference-only mode) to bound per-request prefill;
+                           # with a transcript (voices/<name>.txt) the full clip is used
+  allow_zero_shot: false   # testing only: start without a voice clip, using VoxCPM2's unconditioned voice
+
+voices:
+  dir: voices              # repo-relative dir of *.wav reference clips (+ optional <name>.txt transcript);
+                           # gitignored -- voice clips are personal data, never committed
+  default: mira            # active voice name (stem of the chosen wav); falls back to the first clip
+  character: mira          # who every voice speaks as: a character in config/prompts.yaml -> persona.characters
+  characters:              # the exceptions, voice name -> character; picking that voice in the page switches to it
+    aria: aria             #   mira and aria: women's voices; kai and rex: men's
+    kai: kai
+    rex: rex
+
+mouth:
+  prompts: config/prompts.yaml       # every prompt MOUTH sends to an LLM (loader: app/prompts/)
+  max_gen: 192
+  history_turns: 8                   # ~last 8 turns kept in the responder
+  bc_max_new: 12                     # token budget for a backchannel (kept short for low latency)
+  first_chunk: sentence              # the reply's first TTS chunk is a whole sentence (pipecat's rule; the user
+                                     # heard it as much better). `clause` ends it at a comma / after 12 words:
+                                     # audio ~30-95 ms sooner, but the intonation restarts mid-sentence
+  cpu_threads: 4                     # torch CPU threads in the MOUTH process
+  bc_min_words: 4                    # ASR partial shorter than this is flagged to the LLM as "only a few
+                                     # words so far" -> it answers with a neutral hum instead of a reaction
+  tasks:                             # background tasks on llm.smart (start_task / cancel_task)
+    enabled: true                    # needs llm.smart; tasks run there, so their goals + context go to it too
+    max_concurrent: 1                # running at once, per conversation
+    max_per_session: 5
+    max_global: 4                    # running at once across all conversations (hosted calls fan out)
+    max_wall_s: 300
+    max_steps: 8                     # the smart model's tool rounds per task
+    result_chars: 4000
+    announce_after_silence_ms: 1200  # EARS gives a finished task the floor after this much quiet (both sides)
+  escalation:                        # used only with llm.smart
+    context_turns: 4                 # recent turns sent along with an escalated question
+    max_steps: 3                     # the smart model's own tool rounds per escalated turn
+                                     # (its answer length: max_tokens in the llm.smart block)

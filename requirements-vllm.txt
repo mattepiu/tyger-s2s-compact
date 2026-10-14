@@ -1,6 +1,0 @@
-# RESPONDER venv (vLLM serving Qwen3-4B-Instruct-2507). Separate venv: vLLM 0.30 pins its own torch
-# (2.13.0+cu130), which must not collide with the EARS (tf 5.17) or MOUTH (tf 4.57) venvs.
-#   python -m venv /workspace/venv_vllm && /workspace/venv_vllm/bin/pip install -r requirements-vllm.txt
-# vLLM 0.30 is the Blackwell-ready (sm_120) line; it pulls torch 2.13.0+cu130 + flashinfer automatically.
-# Needs a CUDA-13-capable driver (>=590). No HF token needed (Qwen3-4B-Instruct-2507 is public, Apache-2.0).
-vllm==0.30.0

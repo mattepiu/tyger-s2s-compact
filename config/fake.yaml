@@ -1,0 +1,46 @@
+# The whole stack with the `fake` plugins: no GPU, no model downloads, no network. Checks the app/ears / app/mouth
+# wiring and the web page on a laptop or in CI:
+#   CONFIG=config/fake.yaml ./run.sh   then open http://localhost:7860, or run scripts/stack/load_ears.py --config ...
+# Speak (or play anything above ~-45 dB); 0.5 s of silence ends the turn with the fixed transcript below, the fake
+# LLM's scripted reply comes back as a quiet tone whose length follows the text, and talking over it barges in.
+
+server:
+  host: 127.0.0.1
+  port: 7860
+  mouth_host: 127.0.0.1
+  mouth_port: 8770
+  max_sessions: 4
+
+ears:
+  plugin: fake               # energy endpointer (app/plugins/ears/fake.py)
+  transcript: Could you please count from one to ten for me?
+  vad_db: -45.0
+  min_speech_ms: 350
+  endpoint_silence_frames: 6 # 80 ms frames of silence that end a turn
+  barge_frames: 4            # voiced frames while the agent speaks that barge in
+
+llm:
+  reply:
+    plugin: fake             # scripted replies, routed by prompt (app/plugins/llm/fake.py)
+    reply: One, two, three, four, five, six, seven, eight, nine, ten.
+    step_s: 0.01
+  filler: reply
+
+tts:
+  plugin: fake               # a quiet 440 Hz tone, 60 ms per character, in 80 ms chunks (app/plugins/tts/fake.py)
+  tone_hz: 440
+  per_char_s: 0.06
+  chunk_s: 0.08
+  step_s: 0.02
+
+voices:
+  dir: voices
+  default: fake
+
+mouth:
+  prompts: config/prompts.yaml
+  max_gen: 192
+  history_turns: 8
+  bc_max_new: 12
+  cpu_threads: 4
+  bc_min_words: 4
