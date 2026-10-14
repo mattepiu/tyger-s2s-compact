@@ -16,7 +16,7 @@ server:
 
 ears:                      # turn-taking: nemotron ASR + a GRU turn-taker that reads its layer 15, in one bundle
   plugin: tyger
-  model: nineninesix/tyger  # the bundle (private): nemotron-3.5-asr + the GRU, one model.safetensors
+  model: nineninesix/tyger  # the bundle (public): nemotron-3.5-asr + the GRU, one model.safetensors
   revision: cd826db00a73d8d78603be23bb86f1cb02158bf7
   ep_thr: 0.915            # p_end threshold (the bundle's default 0.91; user, 2026-10-13: 0.915)
   ep_deb: 2                # debounce frames (80 ms each)

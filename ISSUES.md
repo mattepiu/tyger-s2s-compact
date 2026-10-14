@@ -16,6 +16,7 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
 |---|---|---|---|---|
 | I-20 | smart | medium | open | The expert calls `get_current_time` before most answers; once an empty answer, once a "Dummy" reminder |
 | I-18 | EARS | medium | accepted for now | With a clean mic, an "mm-hm" in the agent's pause barges |
+| I-28 | EARS | medium | open | The loader requires `HF_TOKEN`, though the model is public |
 | I-26 | EARS | low | open (not seen live) | With echo in the mic (−30 dB), tyger barges on the agent's own voice |
 | I-27 | EARS | low | open | One slow tick (0.27–0.39 s) soon after start |
 | I-24 | tests | low | open | `test_barged_round.py` is timing-based and failed once under CPU load |
@@ -64,6 +65,14 @@ answers, no action calls.
 ---
 
 ## EARS
+
+### I-28 — The loader requires `HF_TOKEN`, though the model is public (medium, confirmed in code)
+`app/plugins/ears/tyger/bundle.py` stops with "HF_TOKEN required for the private bundle" when no token is set. The
+bundle goes public with this repo's public release (the user, 2026-10-15), and the other three models aren't gated,
+so this alone would stop someone without a Hugging Face token. Fix it before the release.
+
+**Fix:** download without a token when none is set (`token=None`), and with it when there is one. On a 401 or 404,
+say the model couldn't be downloaded, and why. Then README → "Keys" and `.env.example` make `HF_TOKEN` optional.
 
 ### I-18 — With a clean mic, an "mm-hm" in the agent's pause barges (medium, confirmed; accepted for now)
 **Where:** the yield head and the barge rule (`app/plugins/ears/tyger/rules.py`, `barge_thr`).
@@ -249,8 +258,8 @@ ordinary dependencies. There are no extras and no engine packages: tyger targets
   - free GPU memory against the budget in DEVELOPING.md → "GPU memory";
   - a C compiler is present, for Triton and FlashInfer's kernel builds (the Dockerfile installs `build-essential`
     for this reason);
-  - Hugging Face access to the turn-taking model (the tyger bundle, `nineninesix/tyger`). On a 401 or 404, say
-    it is private and `HF_TOKEN` needs access to it;
+  - the turn-taking model downloads (the public tyger bundle, `nineninesix/tyger`). On a 401 or 404, say the
+    download failed, and why;
   - every key the config needs, e.g. `OPENAI_API_KEY` for `smart`.
 
   Each failure prints one line that names the fix. The fake config skips the GPU checks.
@@ -280,8 +289,6 @@ ordinary dependencies. There are no extras and no engine packages: tyger targets
 
 **Not part of this task:**
 - **Publishing.** Don't upload anywhere, not even TestPyPI: the user publishes.
-- **Making the heads public.** That is the user's decision. While the release stays private, the package works only
-  for HF accounts that have access, and `tyger check` must say so plainly.
 - **API mode** (the token, the limits: README → "API mode"). `serve` keeps them as they are, env
   vars included.
 
@@ -307,8 +314,8 @@ ordinary dependencies. There are no extras and no engine packages: tyger targets
 5. **The usual checks pass** in an editable install: the GPU-free tests, the page check, the local contract test and
    `uvx pyflakes tyger/ scripts/ tests/`.
 6. **The docs are updated.**
-   - **README:** the install line and the driver requirement; the first start downloads ~25 GB; the private-heads
-     note; `tyger init` / `serve` / `stop` / `check`; the config lookup order.
+   - **README:** the install line and the driver requirement; the first start downloads ~25 GB;
+     `tyger init` / `serve` / `stop` / `check`; the config lookup order.
    - **DEVELOPING.md and the other docs:** `app/` → `tyger/`, plus the new config paths.
    - **CHANGELOG.md:** a short line under Unreleased → Added.
 

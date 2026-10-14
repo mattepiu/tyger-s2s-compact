@@ -47,11 +47,12 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **Measurement scripts:** smoke and load tests on the running stack (with the API secret set, they sign their own
   token), GPU parity checks, stack comparisons.
 - **An echo meter in the EARS log:** each reply's line says how much of the agent's voice is left in the mic.
+- **The Apache-2.0 licence** for the code (`LICENSE`).
 
 ### Changed
 - **Turn-taking from one model, `tyger`:** nemotron ASR and a small GRU turn-taker in one file
   (`nineninesix/tyger`), in place of the tyger 1.0 heads. EARS needs about half the GPU memory, and a step for 4
-  conversations takes 27 ms instead of 42.
+  conversations takes 27 ms instead of 42. The model is public on Hugging Face.
 - **The new page is the default at `/`; the classic page moved to `/classic`.** Both are on the one port, :7860.
 - **Four characters, one per voice: Mira (the default), Aria, Kai and Rex.** The expert answers in the same voice.
 - **Each voice can have its own character:** picking a voice on the page switches who you're talking to, and the

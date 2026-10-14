@@ -142,7 +142,7 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Using tyg
 - **Two channels:** the user's mic, and the 2nd ear, what the agent was saying at that moment (next section).
 - **The heads** are the `tyger` plugin's turn-taker. Per frame they give the end of the user's turn (`p_end`), the
   yield (the user taking the turn) and the backchannel probability.
-  - **The model** is the private `nineninesix/tyger` bundle: nemotron and a 3-layer GRU (768 wide, 14M parameters)
+  - **The model** is the public `nineninesix/tyger` bundle: nemotron and a 3-layer GRU (768 wide, 14M parameters)
     in one `model.safetensors`. Its nemotron is the same as nvidia's at `ea30d66` (every tensor).
   - Everything runs in fp32 with TF32 off, as the bundle was validated.
   - The bundle's silence fallback (an endpoint after 1.2 s below the VAD level) isn't used.
@@ -577,7 +577,8 @@ own web search.
   in `.env` (or the container's env) only. Never print them, and don't
   leave copies of `.env` around, e.g. in a scratch git worktree.
 - **Hosted runs.** A live run against a hosted model (`smart`, or any remote role) needs the user's OK each time.
-- **The turn-taking model is private** (the tyger bundle). This is a serving project only: no training code.
+- **The turn-taking model** (the tyger bundle) is trained elsewhere. It goes public on Hugging Face with this repo's
+  public release (the user, 2026-10-15). This is a serving project only: no training code.
 - **Prompts and tool parsing.** The agent speaks English only: prompts, few-shot turns and test cases are in English.
   Every prompt must keep `enable_thinking: false` working. Tool parsing keeps Gemma 4's format, and Hermes JSON for
   the `fake` LLM.
