@@ -1,7 +1,9 @@
 # tyger
 
-[![Model on Hugging Face](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-md.svg)](https://huggingface.co/nineninesix/tyger)
-[![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
+[![Discord](https://img.shields.io/badge/Discord-Join_the_community-5865F2)](https://discord.gg/NzP3rjB4SB)
+[![Website](https://img.shields.io/badge/Website-NineNineSix-111827)](https://www.nineninesix.ai/)
+[![Model: nineninesix/tyger](https://img.shields.io/badge/Model-nineninesix%2Ftyger-FFD21E)](https://huggingface.co/nineninesix/tyger)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
 
 tyger is a voice agent you talk to in the browser, as on a phone call. It listens while it talks: it knows when
 you've finished, stops when you cut in, and says "mm-hm" while you speak. It answers in a cloned voice, can use tools,
@@ -418,7 +420,7 @@ on ordinary turns. Web searches are billed on top of the tokens.
 
 | Part | Model | Licence |
 |---|---|---|
-| Speech recognition + turn-taking | [`nineninesix/tyger`](https://huggingface.co/nineninesix/tyger) (public): `nvidia/nemotron-3.5-asr-streaming-0.6b`, unchanged, + a GRU turn-taker | Apache-2.0 (the GRU), OpenMDW-1.1 (nemotron) |
+| Speech recognition + turn-taking | [`nineninesix/tyger`](https://huggingface.co/nineninesix/tyger) (public): `nvidia/nemotron-3.5-asr-streaming-0.6b`, unchanged, + a GRU turn-taker | OpenMDW-1.1 |
 | Responder | `google/gemma-4-E4B-it`, FP8 | Apache-2.0 |
 | Voice | `openbmb/VoxCPM2` | Apache-2.0 |
 | Expert, tasks, web search | OpenAI `gpt-5.4-mini`, with web search | commercial API (your key) |

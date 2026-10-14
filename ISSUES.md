@@ -8,7 +8,9 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
   kernel compilers): this file at `0f09aff`. I-21 was dropped by the user on 2026-10-13: the voice reads digits and
   "°C" well. Its write-up: this file at `bc804bf`. I-11 (no auth, no limits on :7860) left on 2026-10-13 with API
   mode: a token, the session limit and the size caps. Its write-up: this file at `0e0f34a`. O-02 (the Docker image)
-  left on 2026-10-14, once it ran on RunPod. Its write-up: this file at `4ce9e97`.
+  left on 2026-10-14, once it ran on RunPod. Its write-up: this file at `4ce9e97`. O-03 (`main` behind `plugins`)
+  left on 2026-10-15, when the user merged `plugins` into `main` (pull request #1). Its write-up: this file at
+  `a51e698`.
 - Each issue says how sure it is: **confirmed** (in code or on the box), **likely**, or **hypothesis** (measure
   before fixing).
 
@@ -26,7 +28,6 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
 | L-01 | perf | lever | partly done | The encoder re-encodes the full 8 s window, twice, every hop |
 | L-02 | latency | lever | open | Decisions land on 320 ms hops |
 | O-01 | ops | — | needs the user | The endpoint thresholds were never tuned live |
-| O-03 | ops | — | needs the user | `main` is 156 commits behind `plugins` |
 | O-05 | ops | — | partly done | No CI |
 | P | packaging | — | planned (parked) | The pip package `tyger-s2s` |
 
@@ -202,11 +203,6 @@ biggest risk to how the product feels.
 - Target: end of speech → endpoint from ~530 ms p50 (tyger, `load_ears.py`, 1 and 4 conversations) to
   ≤ 450 ms (p90 ≤ 550), with no more endpoints inside utterances.
 - Afterwards, freeze the values into `config/default.yaml` and re-run `scripts/stack/load_ears.py`.
-
-### O-03 — `main` is 156 commits behind `plugins` (needs the user)
-All work since 2026-10-02 is on `plugins`. `main` is an ancestor of it (a fast-forward). The two old branches,
-`voxcpm2` and `setup/new-box`, were deleted on 2026-10-15 with the history rewrite (both were merged into
-`plugins`). The user merges `plugins` into `main`.
 
 ### O-05 — No CI (partly done)
 The GPU-free tests and the page check cover MOUTH's session, tasks, the EARS state machine, the 2nd ear and the
