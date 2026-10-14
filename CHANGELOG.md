@@ -72,7 +72,7 @@ Everything since the imported v1 baseline. It becomes the first release.
 - **The voice clip is encoded once** and kept in memory.
 - **Code layout:** `app/` is split into `ears/`, `mouth/`, `plugins/`, `prompts/`, `runtime/` and `tools/`, and the
   configs are in `config/`.
-- **Docs:** README, DEVELOPING, CHANGELOG, ISSUES and HANDOFF replace the old notes and design docs.
+- **Docs:** README, DEVELOPING, CHANGELOG and ISSUES replace the old notes and design docs.
 
 ### Fixed
 - **Backchannels no longer say the same thing twice** while you stay on one topic.

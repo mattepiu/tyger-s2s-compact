@@ -12,8 +12,7 @@ chain it sits on) is trained elsewhere; v1 only *runs* it.
 - `README.md` (this file): what it is, and how to install, configure and run it;
 - `DEVELOPING.md`: how it works inside, the rules for changing it, and how to check a change;
 - `CHANGELOG.md`: what changed, in short;
-- `ISSUES.md`: what is left to do, by ID;
-- `HANDOFF.md`: the GPU-box agent's current round.
+- `ISSUES.md`: what is left to do, by ID.
 
 ```
 browser mic ──ws──▶ EARS    nemotron L15 → endpoint head: endpoint / barge / backchannel decisions

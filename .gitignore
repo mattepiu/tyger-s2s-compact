@@ -28,3 +28,6 @@ agent-memory/
 
 # The user's own memos (e.g. the 2nd ear): kept on the Mac, never committed
 memos/
+
+# The current round's handoff (for the GPU agent or a teammate): the user passes it by hand, never committed
+/HANDOFF.md
