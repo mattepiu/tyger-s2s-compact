@@ -148,7 +148,7 @@ audio is float32 at 24 kHz. The page's own WebSocket is in README → "Using tyg
   - The bundle's silence fallback (an endpoint after 1.2 s below the VAD level) isn't used.
   - **Before it** (until 2026-10-13): the `nemotron-tyger-1.0` plugin, the tyger 1.0 heads (`TYGER-S2S-endpointer`,
     a Qwen3-0.6B decoder with its LoRA merged) on nvidia's nemotron. tyger is smaller and faster and the same on the
-    stack's checks, but more sensitive to echo in the mic (ISSUES I-26). The old plugin is in git history (`d32efa7`).
+    stack's checks, but more sensitive to echo in the mic (ISSUES I-26). The old plugin is in git history (`1433777`).
 - **The rules** (`rules.py`):
   - **Listening.** ENDPOINT when `p_end` ≥ `ep_thr` for `ep_deb` frames, once the user has 350 ms of voiced speech.
     Only the head ends a turn; there is no silence rule. BACKCHANNEL when the bc head fires for `bc_deb` frames,
@@ -566,9 +566,13 @@ own web search.
 - **Privacy.** No audio or transcripts on disk or in logs: timings, counts and event types only.
   - This covers new tests too: use synthetic, TTS or public LibriSpeech speech, held in memory and scored without
     printing words.
-- **Voice clips, and anything derived from them, are personal data.** They stay in gitignored `voices/`, and are
-  never committed, uploaded or sent to a hosted service. The one exception, the user's call (2026-10-13) until voices
-  come from a database: the Docker image carries them, so it's pushed to a private registry only.
+- **Voice clips of real people, and anything derived from them, are personal data.** They stay in gitignored
+  `voices/`, and are never committed, uploaded or sent to a hosted service; an image that carries one goes to a
+  private registry only.
+  - The four clips now (`mira`, `aria`, `kai`, `rex`) are synthetic (the user, 2026-10-15). So the Docker image that
+    carries them (the user's call, 2026-10-13, until voices come from a database) is public on Docker Hub:
+    `ylankgz/tyger-s2s-vllm`.
+  - `voices/` stays gitignored all the same.
 - **Secrets** (`HF_TOKEN`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TYGER_API_SECRET`, `CLOUDFLARE_TUNNEL_TOKEN`) live
   in `.env` (or the container's env) only. Never print them, and don't
   leave copies of `.env` around, e.g. in a scratch git worktree.
@@ -588,7 +592,9 @@ own web search.
   - Never push, never open PRs: the user reviews and pushes.
   - No `Co-Authored-By:` trailer.
   - One commit per issue, with the ID in the subject.
-  - `agent-memory/` is gitignored: never commit it.
+  - `agent-memory/` and `HANDOFF.md` are gitignored: never commit them. The user hands both over.
+  - The history was rewritten on 2026-10-15 to drop them from every commit, so every commit ID changed. IDs in
+    notes from before then (your memory included) are the old ones. The docs cite the new ones.
 
 ## Checking a change
 
@@ -693,22 +699,22 @@ the last row is an RTX PRO 4500 Blackwell, in Docker. Compare numbers only withi
 | When | Code / config | Smoke: plain-turn first audio | 4 conversations: turn first audio p50 | End of speech → first audio p50, 1 / 4 conversations | GPU peak |
 |---|---|---|---|---|---|
 | 2026-10-02 | Qwen3-4B + VoxCPM2, 4 sessions (throttled box) | 503 ms | 833 ms | not measured yet | 27.0 GB |
-| 2026-10-03 | `b64c772`, first healthy box | 354 ms | 539 ms | 1013 / 1022 ms | 28.4 GB (29.3 with tool turns) |
+| 2026-10-03 | `fb3846a`, first healthy box | 354 ms | 539 ms | 1013 / 1022 ms | 28.4 GB (29.3 with tool turns) |
 | 2026-10-03 | after the review fixes and the speaker cache, Qwen3-4B | 263–272 ms | 400–425 ms | — | 27.0 GB |
-| 2026-10-04 | Qwen3.5-4B (`a7f4cf8`, the plugin-refactor baseline) | 243 ms | 482 ms | 970 / 1260 ms | 27.7 GB |
+| 2026-10-04 | Qwen3.5-4B (`4d9abf7`, the plugin-refactor baseline) | 243 ms | 482 ms | 970 / 1260 ms | 27.7 GB |
 | 2026-10-04 | Gemma 4 E4B FP8 responder | 225 ms | 438 ms | 940 / ~1190 ms | 30.0 GB |
 | 2026-10-06 | Gemma, production config (smart + tasks), new box | 279 ms | — | 904 / 1109 ms | 30.4 GB |
 | 2026-10-06 | after the readability refactor, no `smart`, whole-sentence first chunk | 170–282 ms | 474 / 515 ms (2 runs) | ~880 / ~1090 ms | — |
 | 2026-10-10 | after I-16 and I-17, no `smart`, new box | 174 ms | 397–453 ms (3 runs) | 793 / 992 ms | 30.2 GB |
 | 2026-10-11 | no silence fallback, no `smart`, RTX PRO 5000 | 212 ms | 527–571 ms (3 runs) | 832 / 1093 ms | 29.9 GB |
-| 2026-10-11 | `1b8e6ff`, no `smart`, a new RTX 5090 (the cleanup round's baseline) | 233 ms | 449–518 ms (3 runs) | 964 / 1105 ms | 30.2 GB |
+| 2026-10-11 | `f1bb82b`, no `smart`, a new RTX 5090 (the cleanup round's baseline) | 233 ms | 449–518 ms (3 runs) | 964 / 1105 ms | 30.2 GB |
 | 2026-10-11 | after the cleanup (English only), no `smart`, same box | 204 ms | 473–517 ms (3 runs) | 935–959 / 1057–1096 ms (2 / 3 runs) | 30.1 GB |
-| 2026-10-12 | `9caeca9`, no `smart`, voice `ori`, a fresh container on an RTX 5090 (this round's baseline) | 202 ms | 458–520 ms (3 runs) | 835–846 / 870–975 ms | 30.3 GB |
-| 2026-10-12 | `e7b7eea`, Ori's character, same box | 215 ms | 459–514 ms (3 runs) | 836–892 / 920–974 ms (the reply varies: 2–10 texts a run) | 30.2 GB |
-| 2026-10-13 | `477c061`, no `smart`, voice `mira` with Ori's character, a new container on an RTX 5090 (this round's baseline) | 204 ms | 404–433 ms (3 runs) | 717–771 / 797–849 ms | 30.2 GB |
+| 2026-10-12 | `0f09aff`, no `smart`, voice `ori`, a fresh container on an RTX 5090 (this round's baseline) | 202 ms | 458–520 ms (3 runs) | 835–846 / 870–975 ms | 30.3 GB |
+| 2026-10-12 | `a751497`, Ori's character, same box | 215 ms | 459–514 ms (3 runs) | 836–892 / 920–974 ms (the reply varies: 2–10 texts a run) | 30.2 GB |
+| 2026-10-13 | `ae4c57c`, no `smart`, voice `mira` with Ori's character, a new container on an RTX 5090 (this round's baseline) | 204 ms | 404–433 ms (3 runs) | 717–771 / 797–849 ms | 30.2 GB |
 | 2026-10-13 | the four characters (Mira's), same box | 276 ms (one sample) | 426–454 ms (3 runs) | 730 / 777–780 ms (one reply text again) | 30.2 GB |
-| 2026-10-13 | `94dc9e7`, EARS on `tyger-s2s` (now `tyger`; ep_thr 0.915, barge 0.5, bc 0.4), same box | — | 431–475 ms (3 runs) | 711 / 746 ms | 27.9 GB |
-| 2026-10-13 | `c4d73e3` (Mira shorter, tyger @ `cd826db`), no `smart`, in the Docker image on a new host: an RTX PRO 4500 Blackwell (32 GB, ECC on), 8 vCPUs; the box and Docker together | 436 ms (one sample) | 687–727 ms (3 runs) | 819 / 1150 ms | 27.2 GB |
+| 2026-10-13 | `2fc97c7`, EARS on `tyger-s2s` (now `tyger`; ep_thr 0.915, barge 0.5, bc 0.4), same box | — | 431–475 ms (3 runs) | 711 / 746 ms | 27.9 GB |
+| 2026-10-13 | `6ed9c49` (Mira shorter, tyger @ `cd826db`), no `smart`, in the Docker image on a new host: an RTX PRO 4500 Blackwell (32 GB, ECC on), 8 vCPUs; the box and Docker together | 436 ms (one sample) | 687–727 ms (3 runs) | 819 / 1150 ms | 27.2 GB |
 
 The voice changes the end-of-speech numbers: `load_ears.py` speaks its utterance in the default voice, and with the
 `ori` clip the endpoint comes ~100 ms sooner than on the last box. Since the characters, `load_ears.py`'s "count to
@@ -766,7 +772,7 @@ physics"); a "tool → local" of 1.4% is one sample of a message request in 72.
 | Gemma 4 E2B FP8 | 7.1 GiB | 42.9% | failed; leaks its thought channel |
 | MiniCPM5-2B (English only) | 4.7 GiB | 17.0% | failed |
 
-The full measurements behind these tables are in git history: CHANGELOG.md and NOTES.md at `4d4c2e3`.
+The full measurements behind these tables are in git history: CHANGELOG.md and NOTES.md at `aca0d1e`.
 
 ## On the GPU box
 

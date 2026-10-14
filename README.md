@@ -91,9 +91,10 @@ Never commit `.env`.
 Put one or more reference `.wav` clips in `voices/` (`voices.dir` in `config/default.yaml`; gitignored). The stem is the
 voice name; `voices.default` picks the active one (falls back to the first clip). Optionally add
 `voices/<name>.txt` with the clip's exact transcript: VoxCPM2 then clones from audio + transcript (better
-quality, uses the whole clip); without it the clip is trimmed to `tts.ref_max_s` (10 s). **Reference clips and
-transcripts are personal data: keep them on the box, and never commit, upload, or redistribute them.** The one
-exception is the Docker image, which carries them: it goes to a private registry only ("Docker").
+quality, uses the whole clip); without it the clip is trimmed to `tts.ref_max_s` (10 s). **The four clips are
+synthetic voices,** so they can be public: the public Docker image carries them ("Docker"). **A clip of a real
+person's voice, and its transcript, are personal data:** keep them on the box, never commit, upload or redistribute
+them, and an image that carries one goes to a private registry only.
 
 **Each voice has its own character.** A character is a few lines on who the agent is: its name, personality and
 humour (`persona.characters` in `config/prompts.yaml`). There are four, one per voice: **Mira** (the default) and
@@ -342,9 +343,9 @@ docker logs -f tyger           # ready at "EARS ready"
 - **`--ipc=host`** is optional: without it, on Docker's default 64 MB `/dev/shm`, the stack starts and passes the
   smoke test, and uses ~12 KB of it (2026-10-13).
 - **`voices/`:** your clips (`mira.wav`, `aria.wav`, `kai.wav`, `rex.wav`, with any `.txt` transcripts) go into the
-  image, from the build machine's `voices/`. Until voices come from a database, a new clip means a new build. **The
-  clips are personal data, so the image is too: push it to a private registry only.** `.dockerignore` keeps `.env`
-  and the local `.venv` out of the build.
+  image, from the build machine's `voices/`. Until voices come from a database, a new clip means a new build.
+  The four clips are synthetic, so the image can be public. **A real person's voice is personal data: an image with
+  one goes to a private registry only.** `.dockerignore` keeps `.env` and the local `.venv` out of the build.
 - **The volumes:** `/hf` holds the models, downloaded on the first start. `/root/.cache` and `/root/.triton` hold
   the compiled kernels: vLLM's, FlashInfer's, Triton's, torch inductor's and the CUDA driver's (`run.sh` puts the last
   two there). Without them, every new container downloads and compiles again.
@@ -372,10 +373,12 @@ token with the container's `TYGER_API_SECRET`, as your app's backend would, so i
 `scripts/stack/load_ears.py`. On 2026-10-13 it passed on the default config (one turn went to OpenAI), without
 OpenAI, and in API mode.
 
-**Push it** to a private Docker Hub repository, `<DOCKER_USER>/tyger-s2s-vllm`, for RunPod. The image holds the
-clips, so the repository must be private. Create it as Private first (hub.docker.com → Repositories → Create
-repository): a push to a repository that doesn't exist yet creates it with the account's default visibility, public
-unless changed.
+**The public image** is on Docker Hub: `ylankgz/tyger-s2s-vllm:36da1bd`, built on 2026-10-13 from the code at
+`4ce9e97`. Its tag is that commit's ID from before a history rewrite. Pulling it needs no login.
+
+**Push your own build** to Docker Hub, e.g. for RunPod. A push to a repository that doesn't exist yet creates it with
+the account's default visibility, public unless changed: if the image carries a real person's voice, create the
+repository as Private first (hub.docker.com → Repositories → Create repository).
 
 ```bash
 DOCKER_USER=<your Docker Hub user>
@@ -410,21 +413,22 @@ command it shows; later, on the tunnel's page under "Install and run a connector
 your hostname. If it leaks, refresh it on the tunnel's page. The public hostname adds a CNAME to your zone: if
 Terraform manages the zone's DNS, keep that name out of its records.
 
-**2. The image.** Build it as in "Docker", with your clips in `voices/`, and push it to the **private**
-`<DOCKER_USER>/tyger-s2s-vllm` ("Docker" → "Push it"). On an Apple Silicon Mac, build for the pod's CPU:
-`docker build --platform linux/amd64 -t tyger-v1 .`, then tag and push the same way.
+**2. The image.** Use the public `ylankgz/tyger-s2s-vllm:36da1bd`, or build your own as in "Docker" and push it
+("Docker" → "Push it"). On an Apple Silicon Mac, build for the pod's CPU:
+`docker build --platform linux/amd64 -t tyger-v1 .`, then tag and push the same way. RunPod needs credentials only
+for a private image (Settings → Container Registry Auth): your Docker Hub user and an access token of its own,
+read-only.
 
-Give RunPod the credentials to pull it (Settings → Container Registry Auth): your Docker Hub user and an access token
-of its own, read-only. Without OpenAI, put a config without `llm.smart` and `mouth.tasks` in `config/` before the
-build (e.g. `config/local.yaml`), and set `CONFIG` to it below.
+Without OpenAI, build your own image with a config without `llm.smart` and `mouth.tasks` in `config/` (e.g.
+`config/local.yaml`), and set `CONFIG` to it below.
 
 **3. The pod** (Pods → Deploy):
 - an RTX 5090 on Secure Cloud, on a host with CUDA 13 (the CUDA filter; a driver ≥ 590), in a region near your
   users: every turn crosses that distance. An RTX PRO 4500 runs it too, with a longer wait for each reply ("Known
   limits");
-- your image, `<DOCKER_USER>/tyger-s2s-vllm:<tag>`; a container disk of ~30 GB (the image is ~17 GB unpacked, 8.4 GB
-  to pull) and a volume disk of ~60 GB at `/workspace`, the pod's own (no network volume): the models, ~25 GB, and
-  the compiled kernels;
+- the image, `ylankgz/tyger-s2s-vllm:36da1bd` or your own; a container disk of ~30 GB (the image is ~17 GB unpacked,
+  8.4 GB to pull) and a volume disk of ~60 GB at `/workspace`, the pod's own (no network volume): the models, ~25 GB,
+  and the compiled kernels;
 - **no exposed ports**: remove the template's defaults, the tunnel needs none;
 - these env vars, the secrets as RunPod secrets (Secrets; in the env as `{{ RUNPOD_SECRET_<name> }}`):
 
@@ -594,8 +598,9 @@ tokens. Without `llm.smart` the agent answers what it knows and says plainly tha
 No audio or transcript is written to disk or logs. Logs carry only timings and event types (endpoint source,
 onset ms, barge, backchannel, tool name). EARS's request log has paths, never query strings, so a conversation's
 token isn't logged either. Voice reference clips and their transcripts stay on the box, or in the Docker image built
-there, which goes to a private registry only. The page gets
-the user's own words back (as they speak, on `partial`, and each turn's transcript, on `endpoint`) to show them.
+there. The four shipped clips are synthetic, so that image is public; an image with a real person's voice goes to a
+private registry only. The page gets the user's own words back (as they speak, on `partial`, and each turn's
+transcript, on `endpoint`) to show them.
 
 **Hosted plugins send text off the box**, and only because the config names one: a hosted `reply` gets every
 turn's transcript, the conversation history and tool results; a hosted `filler` gets the user's question (tool

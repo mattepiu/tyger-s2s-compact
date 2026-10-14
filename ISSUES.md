@@ -3,12 +3,12 @@
 What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-20").
 - When an issue is fixed, it leaves this file. Its fix gets a short line in `CHANGELOG.md`, and its commit message
   has the detail and the numbers.
-- The write-ups of fixed issues (I-01 to I-17, L-03, L-04, O-04) are in git history: this file at `4d4c2e3`. I-19,
-  I-22 and I-23 left when the agent became English only: this file at `1b8e6ff`. O-06 (run.sh now limits the
-  kernel compilers): this file at `9caeca9`. I-21 was dropped by the user on 2026-10-13: the voice reads digits and
-  "°C" well. Its write-up: this file at `ce52f66`. I-11 (no auth, no limits on :7860) left on 2026-10-13 with API
-  mode: a token, the session limit and the size caps. Its write-up: this file at `17e88cd`. O-02 (the Docker image)
-  left on 2026-10-14, once it ran on RunPod. Its write-up: this file at `a3208d7`.
+- The write-ups of fixed issues (I-01 to I-17, L-03, L-04, O-04) are in git history: this file at `aca0d1e`. I-19,
+  I-22 and I-23 left when the agent became English only: this file at `f1bb82b`. O-06 (run.sh now limits the
+  kernel compilers): this file at `0f09aff`. I-21 was dropped by the user on 2026-10-13: the voice reads digits and
+  "°C" well. Its write-up: this file at `bc804bf`. I-11 (no auth, no limits on :7860) left on 2026-10-13 with API
+  mode: a token, the session limit and the size caps. Its write-up: this file at `0e0f34a`. O-02 (the Docker image)
+  left on 2026-10-14, once it ran on RunPod. Its write-up: this file at `4ce9e97`.
 - Each issue says how sure it is: **confirmed** (in code or on the box), **likely**, or **hypothesis** (measure
   before fixing).
 
@@ -25,7 +25,7 @@ What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-2
 | L-01 | perf | lever | partly done | The encoder re-encodes the full 8 s window, twice, every hop |
 | L-02 | latency | lever | open | Decisions land on 320 ms hops |
 | O-01 | ops | — | needs the user | The endpoint thresholds were never tuned live |
-| O-03 | ops | — | needs the user | `main` is over 130 commits behind `plugins` |
+| O-03 | ops | — | needs the user | `main` is 156 commits behind `plugins` |
 | O-05 | ops | — | partly done | No CI |
 | P | packaging | — | planned (parked) | The pip package `tyger-s2s` |
 
@@ -90,7 +90,7 @@ tyger (2026-10-13, I-26's run): with no echo every ack barges (48 / 48 at `barge
 
 ### I-09 — A lost MOUTH: check it on the real stack (low)
 On a lost MOUTH, EARS sends the page `{"type": "error", "error": "mouth_lost"}` and closes the WebSocket; the page
-says "the agent went away — press Start to reconnect". It seems to have been fixed by R-01 (`d901503`), and
+says "the agent went away — press Start to reconnect". It seems to have been fixed by R-01 (`63043fd`), and
 `tests/ears/test_floor.py::test_lost_mouth_ends_the_conversation` passes on the fakes.
 
 **Verify:** restart MOUTH mid-conversation on the real stack. The page should say the agent went away.
@@ -194,10 +194,10 @@ biggest risk to how the product feels.
   ≤ 450 ms (p90 ≤ 550), with no more endpoints inside utterances.
 - Afterwards, freeze the values into `config/default.yaml` and re-run `scripts/stack/load_ears.py`.
 
-### O-03 — `main` is over 130 commits behind `plugins` (needs the user)
-All work since 2026-10-02 is on `plugins`. `main` is an ancestor of it (a fast-forward), and `voxcpm2` and
-`origin/setup/new-box` are already merged into it. Fast-forward `main` and delete the two old branches when the
-user says so. The user pushes.
+### O-03 — `main` is 156 commits behind `plugins` (needs the user)
+All work since 2026-10-02 is on `plugins`. `main` is an ancestor of it (a fast-forward). The two old branches,
+`voxcpm2` and `setup/new-box`, were deleted on 2026-10-15 with the history rewrite (both were merged into
+`plugins`). The user merges `plugins` into `main`.
 
 ### O-05 — No CI (partly done)
 The GPU-free tests and the page check cover MOUTH's session, tasks, the EARS state machine, the 2nd ear and the

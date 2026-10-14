@@ -37,7 +37,7 @@ Everything since the imported v1 baseline. It becomes the first release.
   (`TYGER_API_SECRET`).
 - **Docker instructions** (README → "Docker"): the run command with its volumes and shared memory, API mode, a
   config without OpenAI, the smoke test inside the container; and a `.dockerignore` that keeps `.env` out of the
-  build. The voice clips go into the image, so it goes to a private registry only.
+  build. The image is public on Docker Hub, `ylankgz/tyger-s2s-vllm`, with the four (synthetic) voices in it.
 - **A Cloudflare Tunnel from the container** (README → "RunPod + Cloudflare"): with `CLOUDFLARE_TUNNEL_TOKEN` set,
   `run.sh` starts `cloudflared` (in the image) once EARS is up, and Cloudflare serves your hostname over HTTPS and
   `wss`, with no open port. The README walks through RunPod, a Next.js app on Cloudflare Workers, and a Cloudflare
@@ -96,7 +96,7 @@ Everything since the imported v1 baseline. It becomes the first release.
 
 ## v1 baseline — 2026-10-02
 
-Imported from the research code (`07d651e`):
+Imported from the research code (`dbb8088`):
 - three processes in three venvs;
 - MOSS-TTS-Realtime (first audio ~480 ms), and Qwen3-4B on a vLLM HTTP server;
 - one conversation per GPU, using ~30.5 GB.
