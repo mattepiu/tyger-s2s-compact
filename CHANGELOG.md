@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to tyger are listed here. The format follows
+All notable changes to Tyger-S2S are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
@@ -31,7 +31,7 @@ Everything since the imported v1 baseline. It becomes the first release.
   talk. `run.sh` builds it.
 - **API mode: run the server without its pages** (`TYGER_PAGES=false`), for another app to call.
 - **A client for your own app** (`web/lib/tyger/`): one TypeScript file with no dependencies that captures the mic,
-  plays the agent and talks to the server, as tyger's own page does.
+  plays the agent and talks to the server, as Tyger-S2S's own page does.
 - **Conversations end after 3 minutes by default (configurable):** `TYGER_MAX_SESSION_S`, 0 for no limit.
 - **Your app's backend can hand the browser a short-lived token, so only your app can open a conversation**
   (`TYGER_API_SECRET`).

@@ -1,6 +1,6 @@
-# Developing tyger
+# Developing Tyger-S2S
 
-How tyger works inside, the rules for changing it, and how to check a change. `README.md` covers installing and
+How Tyger-S2S works inside, the rules for changing it, and how to check a change. `README.md` covers installing and
 running it, `CHANGELOG.md` what changed (in short), and `ISSUES.md` what is left to do.
 
 ## Layout
@@ -117,7 +117,7 @@ text side, by the chunker.
 ### The wire between EARS and MOUTH
 
 A frame is 1 kind byte, a 4-byte big-endian length, then the payload (`app/wire.py`). Control payloads are JSON;
-audio is float32 at 24 kHz. The page's own WebSocket is in README → "Using tyger from your own app" (the protocol).
+audio is float32 at 24 kHz. The page's own WebSocket is in README → "API mode" → "The protocol".
 
 | kind | from → to | carries |
 |---|---|---|
@@ -634,7 +634,7 @@ own web search.
   worklet, the tags, the int16 frames, the played report, Stop → Start, the voice picker, a reply's links and the
   session's end.
 - **The new page's own check** (node ≥ 22.18, nothing to install): `node tests/page/web_check.mjs`. It runs the same
-  cases on tyger's client (`web/lib/tyger/client.ts`), then what other apps use (no imports, the URL and token
+  cases on Tyger-S2S's client (`web/lib/tyger/client.ts`), then what other apps use (no imports, the URL and token
   options, the typed events, the voice, `session_end`), the phases the page shows (`web/lib/talk.ts`), a reply's
   links and the live tuning (`web/lib/tuning.ts`). After a change in `web/`, also run
   `cd web && npx tsc --noEmit && npm run build`.
