@@ -1,4 +1,4 @@
-# tyger — open issues and planned work
+# Tyger-S2S — open issues and planned work
 
 What is left to do, by ID. IDs are stable: put them in commit subjects ("Fix I-20").
 - When an issue is fixed, it leaves this file. Its fix gets a short line in `CHANGELOG.md`, and its commit message
@@ -195,7 +195,7 @@ isn't affected.
 As a stopgap, end the test's `__main__` with `os._exit(code)` after flushing.
 
 ### O-01 — The endpoint thresholds were never tuned live (needs the user)
-tyger ships `ep_thr` 0.915 (the user's pick, by the bundle's 0.91), `ep_deb` 2 and `bc_thr` 0.4, untuned
+Tyger-S2S ships `ep_thr` 0.915 (the user's pick, by the bundle's 0.91), `ep_deb` 2 and `bc_thr` 0.4, untuned
 live; `barge_thr` 0.4 is the user's live call (2026-10-13; also 0.4 for the tyger 1.0 heads, 2026-10-10). It's the
 biggest risk to how the product feels.
 - The user drives the mic with the page's sliders (shown unless `?nodebug`); a slider change is logged
@@ -222,7 +222,7 @@ doesn't conflict with the rename.
 so the second command stays.
 
 **One package (user, 2026-10-10).** `tyger-s2s` is this repo: the core and every plugin, with vLLM and vLLM-Omni as
-ordinary dependencies. There are no extras and no engine packages: tyger targets vLLM on NVIDIA GPUs. The name
+ordinary dependencies. There are no extras and no engine packages: Tyger-S2S targets vLLM on NVIDIA GPUs. The name
 `tyger` is taken on PyPI; `tyger-s2s` was free on 2026-10-10.
 - **Rename.** The import package is `tyger`.
   - Rename `app/` to `tyger/` with `git mv`, so history follows.
