@@ -1,3 +1,4 @@
+
 # Tyger-S2S
 
 [![Discord](https://img.shields.io/badge/Discord-Join_the_community-5865F2)](https://discord.gg/NzP3rjB4SB)
@@ -5,7 +6,7 @@
 [![Model: nineninesix/tyger](https://img.shields.io/badge/Model-nineninesix%2Ftyger-FFD21E)](https://huggingface.co/nineninesix/tyger)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
 
-https://github.com/user-attachments/assets/24bba1bb-94f2-4f3b-b592-595e552c5fc0
+https://github.com/user-attachments/assets/4aca4d27-a51a-4102-b613-69a5d4ecc0d0
 
 Tyger-S2S is a voice agent: an AI you talk to out loud in your browser, like on a phone call. It keeps listening while it talks, so the conversation feels natural:
 
