@@ -5,11 +5,13 @@ import importlib
 
 REGISTRY = {
     "llm": {"gemma-4-e4b": "app.plugins.llm.local.gemma4.plugin:Gemma4E4B",       # the responder (FP8 at load)
+            "qwen3.5-2b-mtp": "app.plugins.llm.local.qwen_mtp:Qwen35MTPLocal",     # Qwen3.5-2B MTP speculative decoding
             # hosted: transcripts leave the box
             "openai-responses": "app.plugins.llm.hosted.openai_responses:OpenAIResponsesLLM",   # OpenAI web search
             "anthropic": "app.plugins.llm.hosted.anthropic:AnthropicLLM",
             "fake": "app.plugins.llm.fake:FakeLLM"},
     "tts": {"voxcpm2": "app.plugins.tts.voxcpm2:VoxCPM2",
+            "scyllasband": "app.plugins.tts.scyllasband:ScyllasBandTTS",           # Scylla's Band 24 kHz TTS
             "fake": "app.plugins.tts.fake:FakeTTS"},
     # nemotron ASR + a GRU turn-taker (endpoint / barge / backchannel), one bundle: nineninesix/tyger
     "ears": {"tyger": "app.plugins.ears.tyger:Tyger",

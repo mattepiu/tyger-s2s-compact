@@ -87,9 +87,19 @@ echo "=== starting MOUTH (LLM + VoxCPM2, in-process) ==="
 PIDS+=($!)
 wait_tcp "$MOUTH_PORT" "MOUTH" "${PIDS[-1]}"
 
+WAKEWORD_ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --wakeword*) WAKEWORD_ARGS+=("$arg") ;;
+  esac
+done
+if [ ${#WAKEWORD_ARGS[@]} -eq 0 ] && [ -n "${WAKEWORD:-}" ]; then
+  WAKEWORD_ARGS=(--wakeword "$WAKEWORD")
+fi
+
 echo "=== starting EARS + web app ==="
 # expandable segments: EARS encodes windows of many lengths; without it the allocator cache fragments and grows
-PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}" "$PY" -m app.ears "${CFG_ARGS[@]}" &
+PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}" "$PY" -m app.ears "${CFG_ARGS[@]}" "${WAKEWORD_ARGS[@]}" &
 PIDS+=($!)
 EARS_PID=$!
 

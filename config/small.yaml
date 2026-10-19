@@ -1,0 +1,66 @@
+# config/small.yaml - Lightweight single-session stack for consumer GPUs (<= 6-8 GB VRAM)
+server:
+  host: 0.0.0.0
+  port: 7860
+  mouth_host: 127.0.0.1
+  mouth_port: 8770
+  max_sessions: 1         # Single-session concurrency
+  pages: true
+  max_session_s: 180
+
+ears:
+  plugin: tyger
+  model: nineninesix/tyger
+  revision: cd826db00a73d8d78603be23bb86f1cb02158bf7
+  ep_thr: 0.915
+  ep_deb: 2
+  barge_thr: 0.4
+  barge_deb: 2
+  bc_thr: 0.4
+  bc_deb: 2
+  gather_ms: 0            # 0ms: dispatch immediately, no other sessions to batch
+  expect_ms: 20
+  stats_s: 60
+  cpu_threads: 4
+
+llm:
+  reply:
+    plugin: qwen3.5-2b-mtp
+    model: unsloth/Qwen3.5-2B-MTP-GGUF
+    base_url: http://127.0.0.1:8080/v1  # local llama-server with MTP speculative decoding
+    api_key_env: HF_TOKEN
+    remote: false
+    max_tokens: 192
+    temperature: 0.7
+  filler: reply
+
+tts:
+  plugin: scyllasband
+  bundle: scyllasband/models/litert
+  backend: litert                       # runs on CPU (>35x real time, 0 MB GPU VRAM)
+  language: en_us
+  energy: 2.0
+  tension: 2.0
+  valence: 2.0
+  assertiveness: 2.0
+  speed: 1.0
+  out_sr: 24000
+
+voices:
+  default: mira
+  character: mira
+  characters:
+    aria: aria
+    kai: kai
+    rex: rex
+
+mouth:
+  prompts: config/prompts.yaml
+  max_gen: 192
+  history_turns: 8
+  bc_max_new: 12
+  bc_min_words: 4
+  first_chunk: sentence
+  cpu_threads: 4
+  tasks:
+    enabled: false

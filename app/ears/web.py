@@ -42,9 +42,10 @@ def list_voices(cfg):
 
 
 class EarsApp:
-    def __init__(self, cfg, ears, build=BUILD, secret=None):
+    def __init__(self, cfg, ears, build=BUILD, secret=None, wakeword_config=None):
         """`secret`: the token's secret; None reads TYGER_API_SECRET (unset or empty: no token check)."""
         self.cfg = cfg; self.ears = ears              # ears: the EARS plugin (app/plugins/base.py EarsPlugin)
+        self.wakeword_cfg = wakeword_config           # optional WakeWordConfig
         self.characters = Characters(cfg, load_prompts(cfg))      # the picker's labels: "Mira (mira)"
         self.voices, self.default_voice = list_voices(cfg)
         srv = cfg["server"]
@@ -143,9 +144,10 @@ class EarsApp:
             await ws.send_json({"type": "busy"})
             await ws.close()
             return ws
+        ww_session = self.wakeword_cfg.create_session() if (self.wakeword_cfg and self.wakeword_cfg.enabled) else None
         try:
             await Conversation(ws, self.ears, session, self.cfg, self.voices, self.default_voice,
-                               self.labels()).run()
+                               self.labels(), wakeword=ww_session).run()
         finally:
             self.ears.close(session)
         return ws

@@ -20,9 +20,29 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
+    ap.add_argument("--wakeword", nargs="?", const="hey_jarvis", default=None,
+                    help="Enable optional wake word detection (model name or path, default: hey_jarvis)")
+    ap.add_argument("--wakeword-timeout", type=float, default=40.0,
+                    help="Inactivity timeout in seconds before returning to standby (default: 40.0)")
+    ap.add_argument("--wakeword-threshold", type=float, default=0.6,
+                    help="Wake word detection threshold (default: 0.6)")
     args = ap.parse_args()
     cfg = load_config(args.config)
-    app = EarsApp(cfg, build_ears(cfg))
+
+    ww_model = args.wakeword or cfg.get("server", {}).get("wakeword") or os.environ.get("TYGER_WAKEWORD")
+    ww_cfg = None
+    if ww_model:
+        from app.ears.wakeword import WakeWordConfig
+        ww_cfg = WakeWordConfig(
+            enabled=True,
+            model=ww_model if isinstance(ww_model, str) else "hey_jarvis",
+            timeout_s=args.wakeword_timeout,
+            threshold=args.wakeword_threshold,
+        )
+        log.info("=== Wake word enabled: model='%s', threshold=%.2f, timeout=%.1fs ===",
+                 ww_cfg.model, ww_cfg.threshold, ww_cfg.timeout_s)
+
+    app = EarsApp(cfg, build_ears(cfg), wakeword_config=ww_cfg)
     log.info("=== EARS ready (up to %d conversations) ===", int(cfg["server"].get("max_sessions", 4)))
     host, port = cfg["server"]["host"], int(cfg["server"]["port"])
     log.info("=== http://%s:%d  (mic needs https OR http://localhost via tunnel) ===", host, port)

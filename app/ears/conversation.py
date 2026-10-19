@@ -45,10 +45,13 @@ MAX_MIC_BUFFER_S = 5.0                          # mic audio not yet cut into hop
 
 
 class Conversation:
-    def __init__(self, ws, ears, session, cfg, voices=(), default_voice=None, labels=None):
+    def __init__(self, ws, ears, session, cfg, voices=(), default_voice=None, labels=None, wakeword=None):
         self.ws = ws; self.ears = ears; self.session = session; self.cfg = cfg
         self.voices = list(voices); self.default_voice = default_voice
         self.labels = labels or {}                       # voice -> its picker entry, e.g. "Mira (mira)"
+        self.wakeword = wakeword                         # optional WakeWordSession (STANDBY <-> ACTIVE)
+        self.state = "STANDBY" if self.wakeword is not None else "ACTIVE"
+        self.watchdog_task = None
         self.hop_n = ears.hop_samples
         tasks = (cfg.get("mouth") or {}).get("tasks", {})
         self.floor_frames = math.ceil(float(tasks.get("announce_after_silence_ms", 1200)) / FRAME_MS)
@@ -82,11 +85,14 @@ class Conversation:
         pump = asyncio.create_task(self._pump_mouth()) if self.have_mouth else None
         hops = asyncio.create_task(self._hop_loop())
         limit = asyncio.create_task(self._session_limit()) if self.max_session_s > 0 else None
+        watchdog = asyncio.create_task(self._watchdog_loop()) if self.wakeword else None
         try:
             async for msg in self.ws:
                 await self._on_browser(msg)
         finally:
             hops.cancel()
+            if watchdog:
+                watchdog.cancel()
             if pump:
                 pump.cancel()
             if limit:
@@ -112,11 +118,15 @@ class Conversation:
         """The page's start-up info: audio format, MOUTH there or not, voices (with their characters' labels), and
         the plugin's tunable thresholds (their sliders and this conversation's values: the page builds its tuning
         panel from them)."""
-        return {"type": "ready", "hop_ms": int(self.hop_n / self.ears.sr * 1e3), "sr": self.ears.sr,
+        ready = {"type": "ready", "hop_ms": int(self.hop_n / self.ears.sr * 1e3), "sr": self.ears.sr,
                 "mouth": self.have_mouth, "voices": self.voices, "voice": self.default_voice, "labels": self.labels,
                 "max_session_s": self.max_session_s,                                  # 0: no limit
                 "thresholds": self.ears.thresholds(self.session),
                 "sliders": [t.slider_spec() for t in self.ears.THRESHOLDS if t.slider is not None]}
+        if self.wakeword:
+            ready["wakeword"] = {"enabled": True, "state": self.state, "model": self.wakeword.cfg.model,
+                                 "timeout_s": self.wakeword.cfg.timeout_s}
+        return ready
 
     # ---- the browser ----
     async def _on_browser(self, msg):
@@ -127,6 +137,23 @@ class Conversation:
             if block is None:
                 return
             rid, at24, pcm = block
+
+            # In STANDBY, pass audio only to the wake-word detector
+            if self.wakeword and self.state == "STANDBY":
+                detected, name, score = self.wakeword.feed(pcm)
+                if detected:
+                    self.state = "ACTIVE"
+                    log.info("wake word detected: '%s' (score=%.2f) -> ACTIVE", name, score)
+                    await self.ws.send_json({"type": "wakeword", "state": "active", "model": name,
+                                             "score": round(score, 3)})
+                    # Buffer trigger block so words following the wake word aren't lost
+                    self.mic = np.concatenate([self.mic, pcm])
+                    self.ear = np.concatenate([self.ear, self.playback.agent_block(rid, at24, len(pcm), self.mic_pos)])
+                    self.mic_pos += len(pcm)
+                    if len(self.mic) >= self.hop_n:
+                        self.hop_ready.set()
+                return
+
             if len(self.mic) + len(pcm) > self.max_mic:          # faster than real time: the hops can't keep up
                 log.warning("mic audio %.1f s ahead of the hops: closing the conversation", len(self.mic) / self.ears.sr)
                 self.mic = np.zeros(0, np.float32); self.ear = np.zeros(0, np.float32)
@@ -145,6 +172,19 @@ class Conversation:
         if data == "reset":
             self.session.reset(); self.hop_pos += len(self.mic)
             self.mic = np.zeros(0, np.float32); self.ear = np.zeros(0, np.float32)
+        elif data == "wake":
+            if self.wakeword and self.state == "STANDBY":
+                self.state = "ACTIVE"
+                self.wakeword.notify_speech()
+                await self.ws.send_json({"type": "wakeword", "state": "active", "model": "manual", "score": 1.0})
+        elif data == "sleep":
+            if self.wakeword and self.state == "ACTIVE":
+                self.state = "STANDBY"
+                self.session.reset()
+                self.mic = np.zeros(0, np.float32); self.ear = np.zeros(0, np.float32)
+                if self.wakeword:
+                    self.wakeword.reset()
+                await self.ws.send_json({"type": "wakeword", "state": "standby", "reason": "command"})
         elif data.startswith("played:"):              # the page played a reply to its end: played:<id>:<samples>
             try:
                 _, rid, samples = data.split(":")
@@ -219,11 +259,15 @@ class Conversation:
     def _on_frame(self, e, peak):
         quiet = e.get("state") == "idle" and not self.speaking and not self.halting   # both silent
         self.idle_frames = self.idle_frames + 1 if quiet else 0
+        if not quiet and self.wakeword:
+            self.wakeword.notify_speech()
         peak["yield"] = max(peak["yield"], e.get("yield_prob", 0.0) or 0.0)
         peak["bc"] = max(peak["bc"], e.get("bc_prob", 0.0) or 0.0)
         peak["p_end"] = max(peak["p_end"], e.get("p_end", 0.0) or 0.0)
 
     async def _on_endpoint(self, e):
+        if self.wakeword:
+            self.wakeword.notify_speech()
         log.info("endpoint by=%s turn_s=%.2f segments=%d", e.get("by"), e.get("turn_s", 0.0), e.get("segments", 0))
         await self.ws.send_json({"type": "endpoint", "turn_s": round(e["turn_s"], 1), "by": e.get("by"),
                                  "transcript": e["transcript"]})                # the user's words, for the page
@@ -234,6 +278,8 @@ class Conversation:
                 await self._send_turn(e["transcript"])
 
     async def _on_backchannel(self, e):
+        if self.wakeword:
+            self.wakeword.notify_speech()
         log.info("backchannel bc_prob=%.2f partial_chars=%d", e.get("bc_prob", 0.0),
                  len(e.get("partial") or ""))           # length only: never log the words
         await self.ws.send_json({"type": "bc_cue", "bc": e.get("bc_prob")})
@@ -242,6 +288,8 @@ class Conversation:
             await self.to_mouth(b"C", {"partial": e.get("partial", "") or ""})
 
     async def _on_barge(self, e, hop_end):
+        if self.wakeword:
+            self.wakeword.notify_speech()
         self.speaking = False; self.halting = True; self.reset_due = True
         onset = float(e.get("onset_s") or 0.0)
         heard = self.playback.heard_s(hop_end - int(onset * self.ears.sr))   # by the tags, when the user started
@@ -262,12 +310,31 @@ class Conversation:
 
     # ---- the agent's turn ----
     def _start_speaking(self):
+        if self.wakeword:
+            self.wakeword.notify_speech()
         self.speaking = True; self.turn_t0 = time.perf_counter(); self.await_onset = True
         self.mouth_done = False; self.playback.start(); self.echo.start()
 
     async def _send_turn(self, transcript):
         self._start_speaking()
         await self.to_mouth(b"T", {"transcript": transcript})
+
+    async def _watchdog_loop(self):
+        """Silently monitor inactivity during ACTIVE state; return to STANDBY on timeout."""
+        try:
+            while True:
+                await asyncio.sleep(0.1)
+                if self.state == "ACTIVE" and not self.speaking and not self.halting:
+                    if self.wakeword and self.wakeword.check_timeout():
+                        self.state = "STANDBY"
+                        log.info("wakeword watchdog (%.1fs silence): returning to STANDBY", self.wakeword.cfg.timeout_s)
+                        self.session.reset()
+                        self.reset_due = False
+                        self.mic = np.zeros(0, np.float32)
+                        self.ear = np.zeros(0, np.float32)
+                        await self.ws.send_json({"type": "wakeword", "state": "standby", "reason": "timeout"})
+        except asyncio.CancelledError:
+            pass
 
     async def _maybe_grant_floor(self):
         """A finished task's announcement gets the floor only when nobody else has it (module docstring)."""
